@@ -192,9 +192,28 @@ class PyTorchLibrary(ComputationLibrary):
 
 class EnvironmentBatched:
     """Has no __init__ method."""
+    class cost_functions_wrapper:
+        def __init__(self, env) -> None:
+            self.env: EnvironmentBatched = env
+
+        def get_terminal_cost(self, s_hor):
+            return 0.0
+
+        def get_stage_cost(self, s, u, u_prev):
+            return -self.env.get_reward(s, u)
+
+        def get_trajectory_cost(self, s_hor, u, u_prev=None):
+            total_cost = 0
+            for horizon_step in range(self.env.lib.shape(u)[1]):
+                total_cost += self.get_stage_cost(
+                    s_hor[:, horizon_step, :], u[:, horizon_step, :], None
+                )
+            total_cost = total_cost + self.get_terminal_cost(s_hor)
+            return total_cost
+    
     action_space: Box
     observation_space: Box
-    cost_functions: cost_functions
+    cost_functions: cost_functions_wrapper
 
     def step(
         self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
@@ -301,23 +320,3 @@ class EnvironmentBatched:
             return rs, ss
         else:
             return total_r
-
-
-class cost_functions:
-    def __init__(self, env: EnvironmentBatched) -> None:
-        self.env = env
-
-    def get_terminal_cost(self, s_hor):
-        return 0.0
-
-    def get_stage_cost(self, s, u, u_prev):
-        return -self.env.get_reward(s, u)
-
-    def get_trajectory_cost(self, s_hor, u, u_prev=None):
-        total_cost = 0
-        for horizon_step in range(self.env.lib.shape(u)[1]):
-            total_cost += self.get_stage_cost(
-                s_hor[:, horizon_step, :], u[:, horizon_step, :], None
-            )
-        total_cost = total_cost + self.get_terminal_cost(s_hor)
-        return total_cost
