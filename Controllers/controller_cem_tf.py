@@ -2,7 +2,7 @@ from importlib import import_module
 
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.others import EnvironmentBatched
+from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, Compile
 
 from Control_Toolkit.Controllers import template_controller

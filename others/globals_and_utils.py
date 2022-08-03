@@ -1,6 +1,8 @@
 import logging
 import os
 from datetime import datetime
+from importlib import import_module
+from importlib.util import find_spec
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
@@ -62,3 +64,26 @@ def create_rng(id: str, seed: str, use_tf: bool = False):
         return tf.random.Generator.from_seed(seed=seed)
     else:
         return Generator(SFC64(seed=seed))
+
+
+def import_controller_by_name(controller_full_name: str) -> type:
+    """Search for the specified controller name in the following order:
+    1) Control_Toolkit_ASF/Controllers/
+    2) Control_Toolkit/Controllers/
+
+    :param controller_full_name: The controller to import by full name
+    :type controller_full_name: str
+    :return: The controller class
+    :rtype: type[template_controller]
+    """
+    asf_name = f"Control_Toolkit_ASF.Controllers.{controller_full_name}"
+    toolkit_name = f"Control_Toolkit.Controllers.{controller_full_name}"
+    if find_spec(asf_name) is not None:
+        log.info(f"Importing controller {controller_full_name} from Control_Toolkit_ASF")
+        return getattr(import_module(asf_name), controller_full_name)
+    elif find_spec(toolkit_name) is not None:
+        log.info(f"Importing controller {controller_full_name} from Control_Toolkit")
+        return getattr(import_module(toolkit_name), controller_full_name)
+    else:
+        raise ValueError(f"Cannot find controller with full name {controller_full_name} in Control Toolkit or ASF files.")
+    

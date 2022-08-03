@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from Control_Toolkit.others import EnvironmentBatched
+from Control_Toolkit.others.environment import EnvironmentBatched
 
 import numpy as np
 
