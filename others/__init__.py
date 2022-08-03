@@ -279,7 +279,7 @@ class EnvironmentBatched:
             return tuple((self.state, {}))
         return self.state
 
-    def set_computation_library(self, computation_lib: type[ComputationLibrary]):
+    def set_computation_library(self, computation_lib: "type[ComputationLibrary]"):
         try:
             self.lib = computation_lib
         except KeyError as error:
