@@ -99,7 +99,7 @@ class controller_mppi_tf(template_controller):
 
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
-        stage_cost = self.env_mock.cost_functions.get_trajectory_cost(s_hor[:,:-1,:],u, u_prev)
+        stage_cost = self.env_mock.cost_functions.get_trajectory_cost(s_hor,u, u_prev)
         stage_cost += self.mppi_correction_cost(u, delta_u)
         total_cost = stage_cost + self.env_mock.cost_functions.get_terminal_cost(s_hor)
         return total_cost
