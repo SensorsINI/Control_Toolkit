@@ -16,6 +16,7 @@ See the provided examples of controllers to gain more insight.
 
 
 class template_controller(ABC):
+    controller_name = "Template Controller"
     def __init__(self, environment: EnvironmentBatched, **kwargs):
         self.env_mock: EnvironmentBatched = environment
     

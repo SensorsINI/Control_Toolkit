@@ -10,6 +10,8 @@ from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
+    controller_name = "MPPI TF"
+
     def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: float, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
         super().__init__(environment)
         

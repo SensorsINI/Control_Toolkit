@@ -102,3 +102,43 @@ def get_available_controller_names() -> "list[str]":
     ))
 
     return controller_names
+
+
+def get_controller(controller_names=None, controller_name=None, controller_idx=None) -> type:
+    """
+    The method sets a new controller as the current controller of the CartPole instance.
+    The controller may be indicated either by its name
+    or by the index on the controller list (see get_available_controller_names method).
+    """
+
+    # Check if the proper information was provided: either controller_name or controller_idx
+    if (controller_name is None) and (controller_idx is None):
+        raise ValueError('You have to specify either controller_name or controller_idx to set a new controller.'
+                            'You have specified none of the two.')
+    elif (controller_name is not None) and (controller_idx is not None):
+        raise ValueError('You have to specify either controller_name or controller_idx to set a new controller.'
+                            'You have specified both.')
+    else:
+        pass
+        
+    if controller_names is None:
+        controller_names = get_available_controller_names()
+
+    # If controller name provided get controller index and vice versa
+    if (controller_name is not None):
+        try:
+            controller_idx = controller_names.index(controller_name)
+        except ValueError:
+            print('{} is not in list. \n In list are: {}'.format(controller_name, controller_names))
+            return None
+    else:
+        controller_name = controller_names[controller_idx]
+
+    # Load controller
+    if controller_name == 'manual-stabilization':
+        Controller = None
+    else:
+        controller_full_name = 'controller_' + controller_name.replace('-', '_')
+        Controller = import_controller_by_name(controller_full_name)
+
+    return Controller

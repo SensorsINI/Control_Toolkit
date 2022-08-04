@@ -10,6 +10,8 @@ from Control_Toolkit.Controllers import template_controller
 
 # cem class
 class controller_gradient_tf(template_controller):
+    controller_name = "Gradient MPC"
+
     def __init__(
         self,
         environment,
