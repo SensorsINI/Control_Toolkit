@@ -1,8 +1,11 @@
+import glob
 import logging
 import os
 from datetime import datetime
 from importlib import import_module
 from importlib.util import find_spec
+
+import numpy as np
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
@@ -87,3 +90,15 @@ def import_controller_by_name(controller_full_name: str) -> type:
     else:
         raise ValueError(f"Cannot find controller with full name {controller_full_name} in Control Toolkit or ASF files.")
     
+
+def get_available_controller_names() -> "list[str]":
+    """
+    Method returns the list of controllers available in the Control Toolkit or Application Specific Files
+    """
+    controller_files = glob.glob("./Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob("./Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
+    controller_names = ['manual-stabilization']
+    controller_names.extend(np.sort(
+        [os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files]
+    ))
+
+    return controller_names
