@@ -16,7 +16,8 @@ See the provided examples of controllers to gain more insight.
 
 
 class template_controller(ABC):
-    controller_name = "Template Controller"
+    _controller_name: str = ""
+
     def __init__(self, environment: EnvironmentBatched, **kwargs):
         self.env_mock: EnvironmentBatched = environment
     
@@ -38,3 +39,11 @@ class template_controller(ABC):
     # but only if the controller is supposed to be reused without reloading (e.g. in GUI)
     def controller_reset(self):
         raise NotImplementedError
+    
+    @property
+    def controller_name(self):
+        name = self.__class__.__name__
+        if name != "template_controller":
+            return name.replace("controller_", "").replace("_", "-").lower()
+        else:
+            raise AttributeError()

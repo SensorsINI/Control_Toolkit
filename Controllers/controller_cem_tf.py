@@ -10,8 +10,6 @@ from Control_Toolkit.Controllers import template_controller
 
 #cem class
 class controller_cem_tf(template_controller):
-    controller_name = "CEM TF"
-    
     def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, cem_outer_it: int, cem_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed)
