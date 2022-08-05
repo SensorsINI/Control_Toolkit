@@ -91,11 +91,11 @@ def import_controller_by_name(controller_full_name: str) -> type:
         raise ValueError(f"Cannot find controller with full name {controller_full_name} in Control Toolkit or ASF files.")
     
 
-def get_available_controller_names() -> "list[str]":
+def get_available_controller_names(control_toolkit_path=".") -> "list[str]":
     """
     Method returns the list of controllers available in the Control Toolkit or Application Specific Files
     """
-    controller_files = glob.glob("./Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob("./Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
+    controller_files = glob.glob(f"{control_toolkit_path}/Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob(f"{control_toolkit_path}/Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
     controller_names = ['manual-stabilization']
     controller_names.extend(np.sort(
         [os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files]
@@ -122,7 +122,7 @@ def get_controller(controller_names=None, controller_name=None, controller_idx=N
         pass
         
     if controller_names is None:
-        controller_names = get_available_controller_names()
+        controller_names = get_available_controller_names("./Driver")
 
     # If controller name provided get controller index and vice versa
     if (controller_name is not None):
