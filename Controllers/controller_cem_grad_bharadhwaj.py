@@ -49,11 +49,13 @@ class controller_cem_grad_bharadhwaj(template_controller):
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
         )
+        
+        super().__init__(environment)
+        self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
+        self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
 
         # Initialization
-        self.dist_mue = tf.zeros([1,self.cem_samples,self.num_control_inputs], dtype=tf.float32)
-        self.dist_var = self.cem_initial_action_stdev*tf.ones([1,self.cem_samples,self.num_control_inputs], dtype=tf.float32)
-        self.stdev = tf.sqrt(self.dist_var)
+        self.controller_reset()
         self.u = 0.0
         self.Q_tf = tf.Variable(
             initial_value=tf.zeros([self.num_rollouts, self.cem_samples, self.num_control_inputs]),
@@ -61,9 +63,6 @@ class controller_cem_grad_bharadhwaj(template_controller):
             dtype=tf.float32,
         )
 
-        super().__init__(environment)
-        self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
-        self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
 
     @Compile
     def predict_and_cost(self, s, Q_tf: tf.Variable, opt):
@@ -122,7 +121,7 @@ class controller_cem_grad_bharadhwaj(template_controller):
         self.stdev = tf.clip_by_value(self.stdev, self.cem_stdev_min, 10.0)
         self.stdev = tf.concat([self.stdev[:, 1:, :], tf.sqrt(self.cem_initial_action_stdev)*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
         self.u = tf.squeeze(self.dist_mue[0,0,:])
-        self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant(0.0, shape=(1,1,self.num_control_inputs))], axis=1)
+        self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))], axis=1)
         
         self.Q_logged, self.J_logged = Q.numpy(), J.numpy()
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
@@ -132,7 +131,7 @@ class controller_cem_grad_bharadhwaj(template_controller):
 
     def controller_reset(self):
         #reset controller initial distribution
-        self.dist_mue = tf.zeros([1, self.cem_samples, self.num_control_inputs])
+        self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.dist_var = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.stdev = tf.sqrt(self.dist_var)
 

@@ -37,6 +37,7 @@ class ComputationLibrary:
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
     zeros: Callable[["tuple[int]"], TensorType] = None
     ones: Callable[["tuple[int]"], TensorType] = None
+    sign: Callable[[TensorType], TensorType] = None
     create_rng: Callable[[int], RandomGeneratorType] = None
     standard_normal: Callable[[RandomGeneratorType, "tuple[int]"], TensorType] = None
     uniform: Callable[
@@ -80,6 +81,7 @@ class NumpyLibrary(ComputationLibrary):
     gather = lambda x, i, a: np.take(x, i, axis=a)
     zeros = np.zeros
     ones = np.ones
+    sign = np.sign
     create_rng = lambda seed: Generator(SFC64(seed))
     standard_normal = lambda generator, shape: generator.standard_normal(size=shape)
     uniform = lambda generator, shape, low, high, dtype: generator.uniform(
@@ -123,6 +125,7 @@ class TensorFlowLibrary(ComputationLibrary):
     tile = tf.tile
     zeros = tf.zeros
     ones = tf.ones
+    sign = tf.sign
     create_rng = lambda seed: tf.random.Generator.from_seed(seed)
     standard_normal = lambda generator, shape: generator.normal(shape)
     uniform = lambda generator, shape, low, high, dtype: generator.uniform(
@@ -166,6 +169,7 @@ class PyTorchLibrary(ComputationLibrary):
     tile = torch.tile
     zeros = torch.zeros
     ones = torch.ones
+    sign = torch.sign
     create_rng = lambda seed: torch.Generator().manual_seed(seed)
     standard_normal = lambda generator, shape: torch.normal(
         torch.zeros(shape), 1.0, generator=generator

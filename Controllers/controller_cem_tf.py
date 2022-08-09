@@ -39,15 +39,12 @@ class controller_cem_tf(template_controller):
             net_name=self.NET_NAME,
         )
 
-        # Initialization
-        self.dist_mue = np.zeros([1,self.cem_samples,num_control_inputs])
-        self.dist_var = 0.5*np.ones([1,self.cem_samples,num_control_inputs])
-        self.stdev = np.sqrt(self.dist_var)
-        self.u = 0
-
         super().__init__(environment)
         self.action_low = self.env_mock.action_space.low
         self.action_high = self.env_mock.action_space.high
+
+        self.controller_reset()
+        self.u = 0.0
 
     @Compile
     def predict_and_cost(self, s, Q):
@@ -83,7 +80,7 @@ class controller_cem_tf(template_controller):
         self.stdev = np.clip(self.stdev, self.cem_stdev_min, None)
         self.stdev = np.append(self.stdev[:,1:,:], np.sqrt(0.5)*np.ones((1,1,self.num_control_inputs)), axis=1).astype(np.float32)
         self.u = np.squeeze(self.dist_mue[0,0,:])
-        self.dist_mue = np.append(self.dist_mue[:,1:,:], np.zeros((1,1,self.num_control_inputs)), axis=1).astype(np.float32)
+        self.dist_mue = np.append(self.dist_mue[:,1:,:], (self.action_low + self.action_high) * 0.5 * np.ones((1,1,self.num_control_inputs)), axis=1).astype(np.float32)
         
         self.Q_logged, self.J_logged = Q, traj_cost
         self.rollout_trajectories_logged = rollout_trajectory
@@ -92,6 +89,6 @@ class controller_cem_tf(template_controller):
         return self.u
 
     def controller_reset(self):
-        self.dist_mue = np.zeros([1, self.cem_samples, self.num_control_inputs])
+        self.dist_mue = (self.action_low + self.action_high) * 0.5 * np.ones([1, self.cem_samples, self.num_control_inputs])
         self.dist_var = 0.5 * np.ones([1, self.cem_samples, self.num_control_inputs])
         self.stdev = np.sqrt(self.dist_var)

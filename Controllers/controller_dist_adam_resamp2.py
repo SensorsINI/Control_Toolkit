@@ -82,17 +82,9 @@ class controller_dist_adam_resamp2(template_controller):
             self.num_valid_vals = self.cem_samples
 
         #setup sampling distribution
-        self.dist_mue = tf.zeros([1,self.cem_samples,self.num_control_inputs], dtype=tf.float32)
-        self.dist_var = self.sample_stdev*tf.ones([1,self.cem_samples,self.num_control_inputs], dtype=tf.float32)
-        self.stdev = tf.sqrt(self.dist_var)
+        self.controller_reset()
         self.u = 0.0
 
-        #intial input sequence guesses
-        self.Q_tf = self.sample_actions(self.rng_cem, self.num_rollouts)
-
-        #setup interpolation
-        self.Q_tf = tf.Variable(self.Q_tf)
-        self.count = 0
         self.opt = tf.keras.optimizers.Adam(learning_rate=cem_LR, beta_1 = adam_beta_1, beta_2 = adam_beta_2, epsilon = adam_epsilon)
         self.bestQ = None
 
@@ -142,7 +134,7 @@ class controller_dist_adam_resamp2(template_controller):
 
         #retrieve optimal input and warmstart for next iteration
         u = tf.squeeze(elite_Q[0, 0, :])
-        dist_mue = tf.concat([dist_mue[:, 1:, :], tf.zeros([1, 1, self.num_control_inputs])], axis=1)
+        dist_mue = tf.concat([dist_mue[:, 1:, :], (self.action_low + self.action_high) * 0.5 * tf.ones([1, 1, self.num_control_inputs])], axis=1)
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return u, dist_mue, dist_std, Qn, best_idx, traj_cost, rollout_trajectory
 
@@ -159,7 +151,7 @@ class controller_dist_adam_resamp2(template_controller):
             iters = self.outer_its
         
         #optimize control sequences with gradient based optimization
-        prev_cost = 0
+        prev_cost = 0.0
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
@@ -208,14 +200,13 @@ class controller_dist_adam_resamp2(template_controller):
         return self.u.numpy()
 
     def controller_reset(self):
-        self.dist_mue = tf.zeros([1, self.cem_samples, self.num_control_inputs])
+        self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.dist_var = self.sample_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.stdev = tf.sqrt(self.dist_var)
         #sample new initial guesses for trajectories
         Qn = self.sample_actions(self.rng_cem, self.num_rollouts)
-        self.Q_tf.assign(Qn)
+        self.Q_tf = tf.Variable(Qn)
         self.count = 0
         #reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        # opt.variables().__init__()
