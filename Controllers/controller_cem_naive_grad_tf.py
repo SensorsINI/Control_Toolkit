@@ -13,7 +13,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, cem_outer_it: int, cem_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_ccrc_weight: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_ccrc_weight: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -22,7 +22,7 @@ class controller_cem_naive_grad_tf(template_controller):
 
         #cem params
         self.cem_horizon = mpc_horizon
-        self.num_rollouts = cem_rollouts
+        self.num_rollouts = num_rollouts
         self.cem_outer_it = cem_outer_it
 
         self.cem_initial_action_stdev = cem_initial_action_stdev
