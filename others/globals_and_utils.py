@@ -57,7 +57,7 @@ log = get_logger(__name__)
 
 
 def create_rng(id: str, seed: str, use_tf: bool = False):
-    if seed == "None":
+    if seed == None:
         log.info(f"{id}: No random seed specified. Seeding with datetime.")
         seed = int(
             (datetime.now() - datetime(1970, 1, 1)).total_seconds() * 1000.0
@@ -95,7 +95,7 @@ def get_available_controller_names() -> "list[str]":
     """
     Method returns the list of controllers available in the Control Toolkit or Application Specific Files
     """
-    controller_files = glob.glob("./Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob("./Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
+    controller_files = glob.glob(f"./Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob(f"./Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
     controller_names = ['manual-stabilization']
     controller_names.extend(np.sort(
         [os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files]

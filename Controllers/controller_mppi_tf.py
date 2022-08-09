@@ -170,6 +170,9 @@ class controller_mppi_tf(template_controller):
             self.optimal_trajectory = self.predict_optimal_trajectory(s, self.u_nom).numpy()
 
         return tf.squeeze(self.u).numpy()
+    
+    def controller_report(self):
+        pass
 
     def controller_reset(self):
         self.u_nom = tf.zeros([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
