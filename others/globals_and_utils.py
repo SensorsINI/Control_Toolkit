@@ -141,4 +141,4 @@ def get_controller(controller_names=None, controller_name=None, controller_idx=N
         controller_full_name = 'controller_' + controller_name.replace('-', '_')
         Controller = import_controller_by_name(controller_full_name)
 
-    return Controller
+    return Controller, controller_name, controller_idx
