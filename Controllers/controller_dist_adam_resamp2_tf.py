@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 
 #cem class
-class controller_dist_adam_resamp2(template_controller):
+class controller_dist_adam_resamp2_tf(template_controller):
     def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, num_rollouts: int, outer_its: int, sample_stdev: float, resamp_per: int, predictor_name: str, predictor_intermediate_steps: int, NET_NAME: str, SAMPLING_TYPE: str, interpolation_step: int, warmup: bool, cem_LR: float, opt_keep_k: int, gradmax_clip: float, rtol: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
@@ -81,11 +81,12 @@ class controller_dist_adam_resamp2(template_controller):
             self.interp_mat = None
             self.num_valid_vals = self.cem_samples
 
+        self.opt = tf.keras.optimizers.Adam(learning_rate=cem_LR, beta_1 = adam_beta_1, beta_2 = adam_beta_2, epsilon = adam_epsilon)
+        
         #setup sampling distribution
         self.controller_reset()
         self.u = 0.0
 
-        self.opt = tf.keras.optimizers.Adam(learning_rate=cem_LR, beta_1 = adam_beta_1, beta_2 = adam_beta_2, epsilon = adam_epsilon)
         self.bestQ = None
 
     @Compile
