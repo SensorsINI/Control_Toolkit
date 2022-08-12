@@ -13,7 +13,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_cem_grad_bharadhwaj_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -27,7 +27,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         self.cem_initial_action_stdev = cem_initial_action_stdev
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
-        self.cem_samples = int(mpc_horizon / dt)  # Number of steps in MPC horizon
+        self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
         self.intermediate_steps = predictor_intermediate_steps
 
         self.NET_NAME = CEM_NET_NAME
@@ -62,7 +62,6 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
             trainable=True,
             dtype=tf.float32,
         )
-
 
     @Compile
     def predict_and_cost(self, s, Q_tf: tf.Variable, opt):

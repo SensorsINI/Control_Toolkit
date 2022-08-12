@@ -11,14 +11,13 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_mppi_var_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: float, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
         # Parametrization
         self.num_control_inputs = num_control_inputs
 
-        self.mppi_horizon = mpc_horizon
         self.num_rollouts = num_rollouts
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
@@ -27,7 +26,7 @@ class controller_mppi_var_tf(template_controller):
         NET_NAME = NET_NAME
         predictor_name = predictor_name
 
-        self.mppi_samples = int(self.mppi_horizon / dt)  # Number of steps in MPC horizon
+        self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
         intermediate_steps = predictor_intermediate_steps
 
         self.R = R

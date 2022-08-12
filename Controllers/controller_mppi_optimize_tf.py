@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_mppi_optimize_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: float, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, gradmax_clip: float, optim_steps: int, predictor_name: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, gradmax_clip: float, optim_steps: int, predictor_name: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -24,9 +24,8 @@ class controller_mppi_optimize_tf(template_controller):
         self.LBD = LBD
 
         #mppi params
-        self.mppi_horizon = mpc_horizon
         self.num_rollouts = num_rollouts
-        self.mppi_samples = int(self.mppi_horizon / dt)  # Number of steps in MPC horizon
+        self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
 
         self.NU = NU
         self.SQRTRHODTINV = SQRTRHOINV * (1 / np.math.sqrt(dt))

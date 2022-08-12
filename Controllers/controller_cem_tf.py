@@ -10,7 +10,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #cem class
 class controller_cem_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: float, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -19,11 +19,10 @@ class controller_cem_tf(template_controller):
 
         #cem params
         self.num_rollouts = num_rollouts
-        self.mpc_horizon = mpc_horizon
         self.cem_outer_it = cem_outer_it
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
-        self.cem_samples = int(mpc_horizon / dt)  # Number of steps in MPC horizon
+        self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
         self.intermediate_steps = predictor_intermediate_steps
 
         self.NET_NAME = CEM_NET_NAME
