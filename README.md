@@ -36,13 +36,13 @@ List of available controllers with description:
         Same as cem, but between selecting the elite set and fitting the distribution, all input sequences in the elite
         set are refined with vanilla gradient descent. Re-Implementation of Bharadhwaj, Xie, Shkurti 2020.
 
-    -dist-adam-resamp2
+    -dist-adam-resamp2-tf
         Initially samples a set of control sequences, then optimizes them with the adam optimizer projecting control inputs,
         clipping inputs which violate the constraints. For the next time step, the optimizations are warm started with
         the solution from the last one. In regular intervals the only a subset of cheap control sequences are 
         warm started, while the other ones are resampled.
 
-    -mppi-optimze
+    -mppi-optimze-tf
         First find an initial guess of control sequence with the standard mppi approach. Then optimze it using the adam
         optimizer.
     

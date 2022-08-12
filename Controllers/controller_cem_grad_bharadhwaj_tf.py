@@ -63,9 +63,13 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
             dtype=tf.float32,
         )
 
-
     @Compile
-    def predict_and_cost(self, s, Q_tf: tf.Variable, opt):
+    def predict_and_cost(self, s, elite_Q, Q_tf: tf.Variable, opt, rng: tf.random.Generator):
+        Q_sampled = self._sample_actions(rng, self.num_rollouts - self.cem_best_k)
+        Q = tf.concat([elite_Q, Q_sampled], axis=0)
+        Q = tf.clip_by_value(Q, self.action_low, self.action_high)
+        Q_tf.assign(Q)
+
         # rollout the trajectories and record gradient
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q_tf)
@@ -91,6 +95,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         stdev = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
         return dist_mue, stdev, Qn, elite_Q, traj_cost, rollout_trajectory
     
+    @Compile
     def _sample_actions(self, rng: tf.random.Generator, num_samples: int):
         return (
             tf.tile(self.dist_mue, [num_samples, 1, 1])
@@ -98,6 +103,21 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
                 [num_samples, self.cem_samples, self.num_control_inputs], dtype=tf.float32
             )
         )
+    
+    @Compile
+    def apply_time_delta(self, dist_mue, stdev):
+        dist_mue_shifted = tf.concat([
+            dist_mue[:, 1:, :],
+            tf.reshape((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))
+        ], axis=1)
+        stdev = tf.clip_by_value(stdev, self.cem_stdev_min, 10.0)
+        stdev_shifted = tf.concat([
+            stdev[:, 1:, :],
+            tf.reshape(tf.sqrt(tf.convert_to_tensor(self.cem_initial_action_stdev, dtype=tf.float32)), (1,1,self.num_control_inputs))
+        ], axis=1)
+
+        return dist_mue_shifted, stdev_shifted
+
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
@@ -110,18 +130,12 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
 
         #cem steps updating distribution
         for _ in range(0, self.cem_outer_it):
-            Q_sampled = self._sample_actions(self.rng_cem, self.num_rollouts - self.cem_best_k)
-            Q = tf.concat([elite_Q, Q_sampled], axis=0)
-            Q = tf.clip_by_value(Q, self.action_low, self.action_high)
-            self.Q_tf.assign(Q)
-            self.dist_mue, self.stdev, Q, elite_Q, J, rollout_trajectory = self.predict_and_cost(s, self.Q_tf, self.optim)
+            self.dist_mue, self.stdev, Q, elite_Q, J, rollout_trajectory = self.predict_and_cost(s, elite_Q, self.Q_tf, self.optim, self.rng_cem)
         
         #after all inner loops, clip std min, so enough is explored
         #and shove all the values down by one for next control input
-        self.stdev = tf.clip_by_value(self.stdev, self.cem_stdev_min, 10.0)
-        self.stdev = tf.concat([self.stdev[:, 1:, :], tf.sqrt(self.cem_initial_action_stdev)*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
         self.u = tf.squeeze(self.dist_mue[0,0,:])
-        self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))], axis=1)
+        self.dist_mue, self.stdev = self.apply_time_delta(self.dist_mue, self.stdev)
         
         self.Q_logged, self.J_logged = Q.numpy(), J.numpy()
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
