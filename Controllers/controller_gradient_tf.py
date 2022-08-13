@@ -3,7 +3,7 @@ from importlib import import_module
 import numpy as np
 import tensorflow as tf
 from others.globals_and_utils import create_rng
-from SI_Toolkit.TF.TF_Functions.Compile import Compile
+from SI_Toolkit.Functions.TF.Compile import Compile
 
 from Control_Toolkit.Controllers import template_controller
 
