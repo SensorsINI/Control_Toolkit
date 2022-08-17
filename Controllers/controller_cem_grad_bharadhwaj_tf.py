@@ -113,7 +113,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         stdev = tf.clip_by_value(stdev, self.cem_stdev_min, 10.0)
         stdev_shifted = tf.concat([
             stdev[:, 1:, :],
-            tf.reshape(tf.sqrt(tf.convert_to_tensor(self.cem_initial_action_stdev, dtype=tf.float32)), (1,1,self.num_control_inputs))
+            tf.sqrt(tf.convert_to_tensor(self.cem_initial_action_stdev, dtype=tf.float32)) * tf.ones([1,1,self.num_control_inputs], dtype=tf.float32),
         ], axis=1)
 
         return dist_mue_shifted, stdev_shifted
