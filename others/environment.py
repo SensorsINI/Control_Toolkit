@@ -248,14 +248,15 @@ class EnvironmentBatched:
     def get_reward(self, state, action):
         return NotImplementedError()
 
-    def _generate_actuator_noise(self):
-        return (
+    def _apply_actuator_noise(self, action: TensorType):
+        disturbance = (
             self._actuator_noise
             * (self.action_space.high - self.action_space.low)
             * self.lib.standard_normal(
                 self.rng, (self._batch_size, len(self._actuator_noise))
             )
         )
+        return self.lib.clip(action + disturbance, self.action_space.low, self.action_space.high)
 
     def _expand_arrays(
         self,
