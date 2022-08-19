@@ -134,7 +134,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         
         #after all inner loops, clip std min, so enough is explored
         #and shove all the values down by one for next control input
-        self.u = tf.squeeze(self.dist_mue[0,0,:])
+        self.u = tf.squeeze(elite_Q[0,0,:])
         self.dist_mue, self.stdev = self.apply_time_delta(self.dist_mue, self.stdev)
         
         self.Q_logged, self.J_logged = Q.numpy(), J.numpy()

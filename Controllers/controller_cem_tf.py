@@ -71,7 +71,7 @@ class controller_cem_tf(template_controller):
         dist_mue = tf.reduce_mean(elite_Q, axis=0, keepdims=True)
         stdev = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
         
-        return dist_mue, stdev, Q, traj_cost, rollout_trajectory
+        return dist_mue, stdev, Q, elite_Q, traj_cost, rollout_trajectory
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
@@ -82,14 +82,14 @@ class controller_cem_tf(template_controller):
         traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
 
         for _ in range(0, self.cem_outer_it):
-            self.dist_mue, self.dist_var, Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.dist_mue, self.stdev, self.rng_cem)
+            self.dist_mue, self.dist_var, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.dist_mue, self.stdev, self.rng_cem)
         
         Q, traj_cost, rollout_trajectory = Q.numpy(), traj_cost.numpy(), rollout_trajectory.numpy()
 
         #after all inner loops, clip std min, so enough is explored and shove all the values down by one for next control input
         self.stdev = tf.clip_by_value(self.stdev, self.cem_stdev_min, 1.0e8)
         self.stdev = tf.concat([self.stdev[:,1:,:], tf.math.sqrt(0.5)*tf.ones((1,1,self.num_control_inputs))], axis=1)
-        self.u = tf.squeeze(self.dist_mue[0,0,:]).numpy()
+        self.u = tf.squeeze(elite_Q[0,0,:]).numpy()
         self.dist_mue = tf.concat([self.dist_mue[:,1:,:], (self.action_low + self.action_high) * 0.5 * tf.ones((1,1,self.num_control_inputs))], axis=1)
         
         self.Q_logged, self.J_logged = Q, traj_cost

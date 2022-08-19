@@ -91,7 +91,7 @@ class controller_cem_gmm_tf(template_controller):
         )
         # sampling_dist_updated = sampling_dist.experimental_fit(elite_Q, validate_args=True)
         
-        return sampling_dist, Q, traj_cost, rollout_trajectory
+        return sampling_dist, Q, elite_Q, traj_cost, rollout_trajectory
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
@@ -102,10 +102,10 @@ class controller_cem_gmm_tf(template_controller):
         traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
 
         for _ in range(0, self.cem_outer_it):
-            self.sampling_dist, Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.sampling_dist, self.rng_cem)
+            self.sampling_dist, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.sampling_dist, self.rng_cem)
         
         Q, traj_cost, rollout_trajectory = Q.numpy(), traj_cost.numpy(), rollout_trajectory.numpy()
-        self.u = self.sampling_dist.components_distribution.mean()[0, :, 0]
+        self.u = tf.squeeze(elite_Q[0, 0, :]).numpy()
         
         # Shift distribution parameters
         prev_mue = self.sampling_dist.components_distribution.mean()
