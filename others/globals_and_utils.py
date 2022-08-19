@@ -79,23 +79,25 @@ def import_controller_by_name(controller_full_name: str) -> type:
     :return: The controller class
     :rtype: type[template_controller]
     """
-    asf_name = f"Control_Toolkit_ASF.Controllers.{controller_full_name}"
-    toolkit_name = f"Control_Toolkit.Controllers.{controller_full_name}"
-    if find_spec(asf_name) is not None:
-        log.info(f"Importing controller {controller_full_name} from Control_Toolkit_ASF")
-        return getattr(import_module(asf_name), controller_full_name)
-    elif find_spec(toolkit_name) is not None:
-        log.info(f"Importing controller {controller_full_name} from Control_Toolkit")
-        return getattr(import_module(toolkit_name), controller_full_name)
-    else:
-        raise ValueError(f"Cannot find controller with full name {controller_full_name} in Control Toolkit or ASF files.")
-    
+    controller_relative_paths = (
+        glob.glob(f"Control_Toolkit_ASF/Controllers/{controller_full_name}.py")
+        + glob.glob(f"**/Control_Toolkit/Controllers/{controller_full_name}.py", recursive=True)
+    )
+    assert len(controller_relative_paths) == 1, f"Controller {controller_full_name} must be in a unique location. {len(controller_relative_paths)} found."
+    controller_relative_path = controller_relative_paths[0]
 
+    log.info(f"Importing controller from {controller_relative_path}")
+    
+    return getattr(import_module(controller_relative_path.replace(".py", "").replace("/", ".")), controller_full_name)
+    
 def get_available_controller_names() -> "list[str]":
     """
     Method returns the list of controllers available in the Control Toolkit or Application Specific Files
     """
-    controller_files = glob.glob(f"./Control_Toolkit/Controllers/" + 'controller_' + '*.py') + glob.glob(f"./Control_Toolkit_ASF/Controllers/" + 'controller_' + '*.py')
+    controller_files = (
+        glob.glob(f"Control_Toolkit_ASF/Controllers/controller_*.py")
+        + glob.glob(f"**/Control_Toolkit/Controllers/controller_*.py", recursive=True)
+    )
     controller_names = ['manual-stabilization']
     controller_names.extend(np.sort(
         [os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files]
@@ -106,7 +108,7 @@ def get_available_controller_names() -> "list[str]":
 
 def get_controller(controller_names=None, controller_name=None, controller_idx=None) -> type:
     """
-    The method sets a new controller as the current controller of the CartPole instance.
+    The method sets a new controller as the current controller.
     The controller may be indicated either by its name
     or by the index on the controller list (see get_available_controller_names method).
     """
