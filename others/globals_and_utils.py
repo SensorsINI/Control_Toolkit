@@ -80,15 +80,15 @@ def import_controller_by_name(controller_full_name: str) -> type:
     :rtype: type[template_controller]
     """
     controller_relative_paths = (
-        glob.glob(f"Control_Toolkit_ASF/Controllers/{controller_full_name}.py")
-        + glob.glob(f"**/Control_Toolkit/Controllers/{controller_full_name}.py", recursive=True)
+        glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
+        + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
     )
     assert len(controller_relative_paths) == 1, f"Controller {controller_full_name} must be in a unique location. {len(controller_relative_paths)} found."
     controller_relative_path = controller_relative_paths[0]
 
     log.info(f"Importing controller from {controller_relative_path}")
     
-    return getattr(import_module(controller_relative_path.replace(".py", "").replace("/", ".")), controller_full_name)
+    return getattr(import_module(controller_relative_path.replace(".py", "").replace("/", ".").replace("\\\\", ".").replace("\\", ".")), controller_full_name)
     
 def get_available_controller_names() -> "list[str]":
     """
