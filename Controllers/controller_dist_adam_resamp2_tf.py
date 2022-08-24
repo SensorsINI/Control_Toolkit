@@ -265,56 +265,58 @@ class controller_dist_adam_resamp2_tf(template_controller):
             Qn = tf.concat([Qres, Q_keep], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
-            wk1 = tf.concat(
-                [
-                    tf.gather(adam_weights[1], self.bestQ)[:, 1:, :],
-                    tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            wk2 = tf.concat(
-                [
-                    tf.gather(adam_weights[2], self.bestQ)[:, 1:, :],
-                    tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            # For the new trajectories they are reset to 0
-            w1 = tf.zeros(
-                [
-                    self.num_rollouts - self.opt_keep_k,
-                    self.cem_samples,
-                    self.num_control_inputs,
-                ]
-            )
-            w2 = tf.zeros(
-                [
-                    self.num_rollouts - self.opt_keep_k,
-                    self.cem_samples,
-                    self.num_control_inputs,
-                ]
-            )
-            w1 = tf.concat([w1, wk1], axis=0)
-            w2 = tf.concat([w2, wk2], axis=0)
-            # Set weights
-            self.opt.set_weights([adam_weights[0], w1, w2])
+            if len(adam_weights) > 0:
+                wk1 = tf.concat(
+                    [
+                        tf.gather(adam_weights[1], self.bestQ)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                wk2 = tf.concat(
+                    [
+                        tf.gather(adam_weights[2], self.bestQ)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                # For the new trajectories they are reset to 0
+                w1 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.cem_samples,
+                        self.num_control_inputs,
+                    ]
+                )
+                w2 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.cem_samples,
+                        self.num_control_inputs,
+                    ]
+                )
+                w1 = tf.concat([w1, wk1], axis=0)
+                w2 = tf.concat([w2, wk2], axis=0)
+                # Set weights
+                self.opt.set_weights([adam_weights[0], w1, w2])
         else:
-            # if it is not time to reset, all optimizer weights are shifted for a warmstart
-            w1 = tf.concat(
-                [
-                    adam_weights[1][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            w2 = tf.concat(
-                [
-                    adam_weights[2][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            self.opt.set_weights([adam_weights[0], w1, w2])
+            if len(adam_weights) > 0:
+                # if it is not time to reset, all optimizer weights are shifted for a warmstart
+                w1 = tf.concat(
+                    [
+                        adam_weights[1][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                w2 = tf.concat(
+                    [
+                        adam_weights[2][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                self.opt.set_weights([adam_weights[0], w1, w2])
         self.Q_tf.assign(Qn)
         self.count += 1
         return self.u.numpy()
