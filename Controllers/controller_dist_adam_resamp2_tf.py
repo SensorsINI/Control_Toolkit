@@ -199,7 +199,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # dist_std = tf.concat(
         #     [
         #         dist_std[:, 1:, :],
-        #         tf.sqrt(self.sample_stdev)
+        #         self.sample_stdev
         #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
         #     ],
         #     axis=1,
