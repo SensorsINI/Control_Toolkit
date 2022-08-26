@@ -102,7 +102,7 @@ class controller_cem_naive_grad_tf(template_controller):
         #after all inner loops, clip std min, so enough is explored
         #and shove all the values down by one for next control input
         self.stdev = tf.clip_by_value(self.stdev, self.cem_stdev_min, 10.0)
-        self.stdev = tf.concat([self.stdev[:, 1:, :], tf.sqrt(self.cem_initial_action_stdev)*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
+        self.stdev = tf.concat([self.stdev[:, 1:, :], self.cem_initial_action_stdev*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
         self.u = tf.squeeze(self.dist_mue[0,0,:])
         self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))], axis=1)
         
@@ -115,5 +115,4 @@ class controller_cem_naive_grad_tf(template_controller):
     def controller_reset(self):
         #reset controller initial distribution
         self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.dist_var = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.stdev = tf.sqrt(self.dist_var)
+        self.stdev = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])

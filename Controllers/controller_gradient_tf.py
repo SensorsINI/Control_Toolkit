@@ -143,8 +143,7 @@ class controller_gradient_tf(template_controller):
 
     def controller_reset(self):
         self.dist_mue = (self.action_high + self.action_low) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.dist_var = self.initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.stdev = tf.sqrt(self.dist_var)
+        self.stdev = self.initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.Q_tf = tf.Variable(
             tf.zeros([self.num_rollouts, self.cem_samples, self.num_control_inputs]),
             trainable=True,

@@ -328,10 +328,9 @@ class controller_dist_adam_resamp2_tf(template_controller):
         #     * 0.5
         #     * tf.ones([1, self.cem_samples, self.num_control_inputs])
         # )
-        # self.dist_var = self.sample_stdev * tf.ones(
+        # self.stdev = self.sample_stdev * tf.ones(
         #     [1, self.cem_samples, self.num_control_inputs]
         # )
-        # self.stdev = tf.sqrt(self.dist_var)
         # # end of unnecessary part
 
         # sample new initial guesses for trajectories

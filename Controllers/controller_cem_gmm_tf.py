@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class controller_cem_gmm_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -21,6 +21,7 @@ class controller_cem_gmm_tf(template_controller):
         #cem params
         self.num_rollouts = num_rollouts
         self.cem_outer_it = cem_outer_it
+        self.cem_initial_action_stdev = cem_initial_action_stdev
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
         self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
@@ -126,8 +127,7 @@ class controller_cem_gmm_tf(template_controller):
 
     def controller_reset(self):
         dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([self.cem_samples, self.num_control_inputs])
-        dist_var = 0.5 * tf.ones([self.cem_samples, self.num_control_inputs])
-        dist_stdev = tf.math.sqrt(dist_var)
+        dist_stdev = self.cem_initial_action_stdev * tf.ones([self.cem_samples, self.num_control_inputs])
         self.sampling_dist = tfpd.MixtureSameFamily(
             mixture_distribution=tfpd.Categorical(probs=[0.5, 0.5]),
             components_distribution=tfpd.Normal(loc=tf.stack(2*[dist_mue], axis=-1), scale=tf.stack(2*[dist_stdev], axis=-1)),
