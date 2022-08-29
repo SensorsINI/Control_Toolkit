@@ -13,7 +13,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_cem_grad_bharadhwaj_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_best_k: int, cem_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, gradmax_clip: float, warmup: bool, warmup_iterations: int, **kwargs):
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -37,7 +37,14 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         cem_LR = tf.constant(cem_LR, dtype=tf.float32)
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)
 
-        self.optim = tf.keras.optimizers.RMSprop(learning_rate=cem_LR, rho=0.99, momentum=0.0, epsilon=1.0e-08, centered=False)
+        self.optim = tf.keras.optimizers.Adam(
+            learning_rate=cem_LR,
+            beta_1=adam_beta_1,
+            beta_2=adam_beta_2,
+            epsilon=adam_epsilon,
+        )
+        self.warmup = warmup
+        self.warmup_iterations = warmup_iterations
 
         #instantiate predictor
         self.predictor_module = import_module(f"SI_Toolkit.Predictors.{self.predictor_name}")
@@ -129,7 +136,8 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         elite_Q = self._sample_actions(self.rng_cem, self.cem_best_k)
 
         #cem steps updating distribution
-        for _ in range(0, self.cem_outer_it):
+        iterations = self.warmup_iterations if self.warmup and self.count == 0 else self.cem_outer_it
+        for _ in range(0, iterations):
             self.dist_mue, self.stdev, Q, elite_Q, J, rollout_trajectory = self.predict_and_cost(s, elite_Q, self.Q_tf, self.optim, self.rng_cem)
         
         #after all inner loops, clip std min, so enough is explored
@@ -141,9 +149,11 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
         self.u_logged = self.u
         
+        self.count += 1
         return self.u.numpy()
 
     def controller_reset(self):
         #reset controller initial distribution
         self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.stdev = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
+        self.count = 0

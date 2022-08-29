@@ -10,7 +10,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #cem class
 class controller_cem_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, warmup: bool, warmup_iterations: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -27,6 +27,8 @@ class controller_cem_tf(template_controller):
         self.intermediate_steps = predictor_intermediate_steps
 
         self.NET_NAME = CEM_NET_NAME
+        self.warmup = warmup
+        self.warmup_iterations = warmup_iterations
 
         #instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
@@ -82,7 +84,8 @@ class controller_cem_tf(template_controller):
         rollout_trajectory = tf.zeros((self.num_rollouts, self.cem_samples+1, self.env_mock.num_states), dtype=tf.float32)
         traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
 
-        for _ in range(0, self.cem_outer_it):
+        iterations = self.warmup_iterations if self.warmup and self.count == 0 else self.cem_outer_it
+        for _ in range(0, iterations):
             self.dist_mue, self.stdev, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.dist_mue, self.stdev, self.rng_cem)
         
         Q, traj_cost, rollout_trajectory = Q.numpy(), traj_cost.numpy(), rollout_trajectory.numpy()
@@ -97,8 +100,10 @@ class controller_cem_tf(template_controller):
         self.rollout_trajectories_logged = rollout_trajectory
         self.u_logged = self.u
 
+        self.count += 1
         return self.u
 
     def controller_reset(self):
         self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
         self.stdev = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
+        self.count = 0
