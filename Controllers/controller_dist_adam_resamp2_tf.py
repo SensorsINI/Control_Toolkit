@@ -138,8 +138,11 @@ class controller_dist_adam_resamp2_tf(template_controller):
 
     @Compile
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
-        Qn = self.sample_stdev * rng_gen.normal(
-            [batch_size, self.num_valid_vals, self.num_control_inputs], dtype=tf.float32
+        Qn = rng_gen.uniform(
+            [batch_size, self.num_valid_vals, self.num_control_inputs],
+            minval=self.action_low,
+            maxval=self.action_high,
+            dtype=tf.float32,
         )
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
         if self.SAMPLING_TYPE == "interpolated":
@@ -228,7 +231,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
             iters = self.outer_its
 
         # optimize control sequences with gradient based optimization
-        prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
+        # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
@@ -242,7 +245,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
             # ):
             #     # assume that we have converged sufficiently
             #     break
-            prev_cost = tf.identity(traj_cost)
+            # prev_cost = tf.identity(traj_cost)
 
         # retrieve optimal input and prepare warmstart
         (
