@@ -6,6 +6,9 @@ from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, Compile
 
 from Control_Toolkit.Controllers import template_controller
+from Utilities.utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class controller_dist_adam_resamp2_tf(template_controller):
@@ -26,6 +29,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         SAMPLING_TYPE: str,
         interpolation_step: int,
         warmup: bool,
+        warmup_iterations: int,
         cem_LR: float,
         opt_keep_k: int,
         gradmax_clip: float,
@@ -64,6 +68,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.SAMPLING_TYPE = SAMPLING_TYPE
         self.interpolation_step = interpolation_step
         self.do_warmup = warmup
+        self.warmup_iterations = warmup_iterations
 
         # optimization params
         self.opt_keep_k = opt_keep_k
@@ -86,7 +91,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # warmup setup
         self.first_iter_count = self.outer_its
         if self.do_warmup:
-            self.first_iter_count = self.cem_samples * self.outer_its
+            self.first_iter_count = self.warmup_iterations
 
         # if sampling type is "interpolated" setup linear interpolation as a matrix multiplication
         if SAMPLING_TYPE == "interpolated":
@@ -177,10 +182,10 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
-        elite_Q = tf.gather(Q, best_idx, axis=0)
 
         # # Unnecessary Part
         # # get distribution of kept trajectories. This is actually unnecessary for this controller, might be incorparated into another one tho
+        # elite_Q = tf.gather(Q, best_idx, axis=0)
         # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
         # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
 
@@ -207,7 +212,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # # End of unnecessary part
 
         # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(elite_Q[0, 0, :])
+        u = tf.squeeze(Q[sorted_cost[0], 0, :])
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return u, Qn, best_idx, traj_cost, rollout_trajectory
 
@@ -223,20 +228,20 @@ class controller_dist_adam_resamp2_tf(template_controller):
             iters = self.outer_its
 
         # optimize control sequences with gradient based optimization
-        prev_cost = 0.0
+        prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
 
             # check for convergence of optimization
-            if bool(
-                tf.reduce_mean(
-                    tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
-                )
-                < self.rtol
-            ):
-                # assume that we have converged sufficiently
-                break
+            # if bool(
+            #     tf.reduce_mean(
+            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
+            #     )
+            #     < self.rtol
+            # ):
+            #     # assume that we have converged sufficiently
+            #     break
             prev_cost = tf.identity(traj_cost)
 
         # retrieve optimal input and prepare warmstart
