@@ -259,6 +259,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.u_logged = self.u
         self.Q_logged, self.J_logged = self.Q_tf.numpy(), J.numpy()
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
+        self.trajectory_ages_logged = self.trajectory_ages.numpy()
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -271,6 +272,10 @@ class controller_dist_adam_resamp2_tf(template_controller):
             )
             Q_keep = tf.gather(Qn, self.bestQ)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
+            self.trajectory_ages = tf.concat([
+                tf.gather(self.trajectory_ages, self.bestQ),
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
+            ], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
@@ -325,6 +330,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
                     axis=1,
                 )
                 self.opt.set_weights([adam_weights[0], w1, w2])
+        self.trajectory_ages += 1
         self.Q_tf.assign(Qn)
         self.count += 1
         return self.u.numpy()
@@ -349,3 +355,4 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
+        self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
