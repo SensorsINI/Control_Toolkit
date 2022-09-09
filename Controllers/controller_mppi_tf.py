@@ -10,8 +10,8 @@ from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
-        super().__init__(environment)
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
+        super().__init__(environment_model)
         
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
@@ -45,6 +45,7 @@ class controller_mppi_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
         if predictor_name == "predictor_autoregressive_tf":
             self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(

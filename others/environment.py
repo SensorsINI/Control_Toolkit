@@ -215,8 +215,19 @@ class EnvironmentBatched:
     action_space: Box
     observation_space: Box
     cost_functions: cost_functions_wrapper
+    dt: float
 
     def step(
+        self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
+    ) -> Tuple[
+        Union[np.ndarray, tf.Tensor, torch.Tensor],
+        Union[np.ndarray, float],
+        Union[np.ndarray, bool],
+        dict,
+    ]:
+        return NotImplementedError()
+    
+    def step_tf(
         self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
     ) -> Tuple[
         Union[np.ndarray, tf.Tensor, torch.Tensor],

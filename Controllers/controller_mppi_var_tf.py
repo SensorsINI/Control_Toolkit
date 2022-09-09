@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_mppi_var_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -49,6 +49,7 @@ class controller_mppi_var_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
 
         #setup interpolation matrix
@@ -76,7 +77,7 @@ class controller_mppi_var_tf(template_controller):
         self.nuvec = tf.Variable(self.nuvec)
         self.u = 0.0
         
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
         self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
     

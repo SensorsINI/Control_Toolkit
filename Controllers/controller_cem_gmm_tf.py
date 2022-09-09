@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class controller_cem_gmm_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -38,9 +38,10 @@ class controller_cem_gmm_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
+            planning_environment=environment_model,
         )
 
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low
         self.action_high = self.env_mock.action_space.high
 

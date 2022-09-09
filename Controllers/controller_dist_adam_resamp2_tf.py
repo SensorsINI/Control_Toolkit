@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 class controller_dist_adam_resamp2_tf(template_controller):
     def __init__(
         self,
-        environment: EnvironmentBatched,
+        environment_model: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
         dt: float,
@@ -43,7 +43,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
         # set Environment References
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low: tf.Tensor = tf.convert_to_tensor(
             self.env_mock.action_space.low, dtype=tf.float32
         )
@@ -86,6 +86,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
 
         # warmup setup

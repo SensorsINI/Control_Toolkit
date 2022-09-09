@@ -2,6 +2,7 @@ from importlib import import_module
 
 import numpy as np
 import tensorflow as tf
+from Control_Toolkit.others.environment import EnvironmentBatched
 from others.globals_and_utils import create_rng
 from SI_Toolkit.Functions.TF.Compile import Compile
 
@@ -11,7 +12,7 @@ from Control_Toolkit.Controllers import template_controller
 class controller_gradient_tf(template_controller):
     def __init__(
         self,
-        environment,
+        environment_model: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
         dt: float,
@@ -73,9 +74,10 @@ class controller_gradient_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
+            planning_environment=environment_model,
         )
 
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low
         self.action_high = self.env_mock.action_space.high
 
