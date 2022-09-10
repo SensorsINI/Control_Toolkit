@@ -147,7 +147,7 @@ class controller_gradient_tf(template_controller):
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
         self.u_logged = self.u.copy()
 
-        # Shift Q by one time step
+        # Shift Q, Adam weights by one time step
         self.count += 1
         Q_s = self.rng_cem.uniform(
             shape=[self.num_rollouts, 1, self.num_control_inputs],
@@ -157,6 +157,25 @@ class controller_gradient_tf(template_controller):
         )
         Q_shifted = tf.concat([self.Q_tf[:, 1:, :], Q_s], axis=1)
         self.Q_tf.assign(Q_shifted)
+
+        adam_weights = self.optim.get_weights()
+        if len(adam_weights) > 0:
+            # if it is not time to reset, all optimizer weights are shifted for a warmstart
+            w1 = tf.concat(
+                [
+                    adam_weights[1][:, 1:, :],
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                ],
+                axis=1,
+            )
+            w2 = tf.concat(
+                [
+                    adam_weights[2][:, 1:, :],
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                ],
+                axis=1,
+            )
+            self.optim.set_weights([adam_weights[0], w1, w2])
 
         return self.u
 
@@ -175,3 +194,6 @@ class controller_gradient_tf(template_controller):
         self.Q_tf = tf.Variable(Q, dtype=tf.float32)
 
         self.count = 0
+
+        adam_weights = self.optim.get_weights()
+        self.optim.set_weights([tf.zeros_like(el) for el in adam_weights])
