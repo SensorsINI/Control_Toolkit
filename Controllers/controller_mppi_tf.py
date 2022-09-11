@@ -29,10 +29,10 @@ class controller_mppi_tf(template_controller):
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
-        self.SQRTRHODTINV = tf.convert_to_tensor(SQRTRHOINV * (1 / np.math.sqrt(dt)))
+        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.math.sqrt(dt)), dtype=tf.float32)
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
-        
+
         self.clip_control_input_low = self.env_mock.action_space.low
         self.clip_control_input_high = self.env_mock.action_space.high
 
@@ -45,6 +45,7 @@ class controller_mppi_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment
         )
         if predictor_name == "predictor_autoregressive_tf":
             self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
@@ -98,9 +99,8 @@ class controller_mppi_tf(template_controller):
 
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
-        stage_cost = self.env_mock.cost_functions.get_trajectory_cost(s_hor,u, u_prev)
-        stage_cost += self.mppi_correction_cost(u, delta_u)
-        total_cost = stage_cost + self.env_mock.cost_functions.get_terminal_cost(s_hor)
+        total_cost = self.env_mock.cost_functions.get_trajectory_cost(s_hor,u, u_prev)
+        total_cost += self.mppi_correction_cost(u, delta_u)
         return total_cost
 
     def reward_weighted_average(self, S, delta_u):

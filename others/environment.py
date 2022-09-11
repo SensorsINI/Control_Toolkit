@@ -19,6 +19,7 @@ class ComputationLibrary:
     shape: Callable[[TensorType], "list[int]"] = None
     to_numpy: Callable[[TensorType], np.ndarray] = None
     to_tensor: Callable[[TensorType, type], TensorType] = None
+    constant: Callable[[TensorType], TensorType] = None
     unstack: Callable[[TensorType, int, int], "list[TensorType]"] = None
     ndim: Callable[[TensorType], int] = None
     clip: Callable[[TensorType, float, float], TensorType] = None
@@ -32,6 +33,7 @@ class ComputationLibrary:
     cast: Callable[[TensorType, type], TensorType] = None
     floormod: Callable[[TensorType], TensorType] = None
     float32 = None
+    int32 = None
     bool = None
     tile: Callable[[TensorType, "tuple[int]"], TensorType] = None
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
@@ -50,6 +52,9 @@ class ComputationLibrary:
     any: Callable[[TensorType], bool] = None
     reduce_any: Callable[[TensorType, int], bool] = None
     reduce_max: Callable[[TensorType, int], bool] = None
+    less: Callable[[TensorType, TensorType], TensorType] = None
+    greater: Callable[[TensorType, TensorType], TensorType] = None
+    logical_not: Callable[[TensorType], TensorType] = None
     min: Callable[[TensorType, TensorType], TensorType] = None
     max: Callable[[TensorType, TensorType], TensorType] = None
     atan2: Callable[[TensorType], TensorType] = None
@@ -63,6 +68,7 @@ class NumpyLibrary(ComputationLibrary):
     shape = np.shape
     to_numpy = lambda x: np.array(x)
     to_tensor = lambda x, t: np.array(x, dtype=t)
+    constant = lambda x: np.array(x)
     unstack = lambda x, num, axis: list(np.moveaxis(x, axis, 0))
     ndim = np.ndim
     clip = np.clip
@@ -76,6 +82,7 @@ class NumpyLibrary(ComputationLibrary):
     cast = lambda x, t: x.astype(t)
     floormod = np.mod
     float32 = np.float32
+    int32 = np.int32
     bool = np.bool_
     tile = np.tile
     gather = lambda x, i, a: np.take(x, i, axis=a)
@@ -94,6 +101,9 @@ class NumpyLibrary(ComputationLibrary):
     any = np.any
     reduce_any = lambda a, axis: np.any(a, axis=axis)
     reduce_max = lambda a, axis: np.max(a, axis=axis)
+    less = lambda x, y: np.less(x, y)
+    greater = lambda x, y: np.greater(x, y)
+    logical_not = lambda x: np.logical_not(x)
     min = np.minimum
     max = np.maximum
     atan2 = np.arctan2
@@ -107,6 +117,7 @@ class TensorFlowLibrary(ComputationLibrary):
     shape = lambda x: x.get_shape()  # .as_list()
     to_numpy = lambda x: x.numpy()
     to_tensor = lambda x, t: tf.convert_to_tensor(x, dtype=t)
+    constant = lambda x: tf.constant(x)
     unstack = lambda x, num, axis: tf.unstack(x, num=num, axis=axis)
     ndim = tf.rank
     clip = tf.clip_by_value
@@ -121,6 +132,7 @@ class TensorFlowLibrary(ComputationLibrary):
     cast = lambda x, t: tf.cast(x, dtype=t)
     floormod = tf.math.floormod
     float32 = tf.float32
+    int32 = tf.int32
     bool = tf.bool
     tile = tf.tile
     zeros = tf.zeros
@@ -138,6 +150,9 @@ class TensorFlowLibrary(ComputationLibrary):
     any = tf.reduce_any
     reduce_any = lambda a, axis: tf.reduce_any(a, axis=axis)
     reduce_max = lambda a, axis: tf.reduce_max(a, axis=axis)
+    less = lambda x, y: tf.math.less(x, y)
+    greater = lambda x, y: tf.math.greater(x, y)
+    logical_not = lambda x: tf.math.logical_not(x)
     min = tf.minimum
     max = tf.maximum
     atan2 = tf.atan2
@@ -151,6 +166,7 @@ class PyTorchLibrary(ComputationLibrary):
     shape = lambda x: list(x.size())
     to_numpy = lambda x: x.cpu().detach().numpy()
     to_tensor = lambda x, t: torch.as_tensor(x, dtype=t)
+    constant = lambda x: torch.as_tensor(x)
     unstack = lambda x, num, dim: torch.unbind(x, dim=dim)
     ndim = lambda x: x.ndim
     clip = torch.clamp
@@ -165,6 +181,7 @@ class PyTorchLibrary(ComputationLibrary):
     cast = lambda x, t: x.type(t)
     floormod = torch.remainder
     float32 = torch.float32
+    int32 = torch.int32
     bool = torch.bool
     tile = torch.tile
     zeros = torch.zeros
@@ -186,6 +203,9 @@ class PyTorchLibrary(ComputationLibrary):
     any = torch.any
     reduce_any = lambda a, axis: torch.any(a, dim=axis)
     reduce_max = lambda a, axis: torch.max(a, dim=axis)
+    less = lambda x, y: torch.less(x, y)
+    greater = lambda x, y: torch.greater(x, y)
+    logical_not = lambda x: torch.logical_not(x)
     min = torch.minimum
     max = torch.maximum
     atan2 = torch.atan2
