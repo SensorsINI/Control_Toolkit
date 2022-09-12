@@ -29,7 +29,7 @@ class controller_mppi_tf(template_controller):
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
-        self.SQRTRHODTINV = tf.convert_to_tensor(SQRTRHOINV * (1 / np.math.sqrt(dt)))
+        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.math.sqrt(dt)), dtype=tf.float32)
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
         
@@ -62,12 +62,9 @@ class controller_mppi_tf(template_controller):
         self.get_rollouts_from_mppi = True
         self.get_optimal_trajectory = False
 
-        self.u_nom = tf.zeros([1, self.mppi_samples, num_control_inputs], dtype=tf.float32)
-        self.u = tf.convert_to_tensor([0.0], dtype=tf.float32)
-
+        self.controller_reset()
         self.rollout_trajectory = None
         self.traj_cost = None
-
         self.optimal_trajectory = None
 
         # Defining function - the compiled part must not have if-else statements with changing output dimensions
@@ -100,8 +97,7 @@ class controller_mppi_tf(template_controller):
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
         stage_cost = self.env_mock.cost_functions.get_trajectory_cost(s_hor,u, u_prev)
-        stage_cost += self.mppi_correction_cost(u, delta_u)
-        total_cost = stage_cost + self.env_mock.cost_functions.get_terminal_cost(s_hor)
+        total_cost = stage_cost + self.mppi_correction_cost(u, delta_u)
         return total_cost
 
     def reward_weighted_average(self, S, delta_u):
@@ -161,6 +157,7 @@ class controller_mppi_tf(template_controller):
         
         self.u_logged = self.u
         self.Q_logged, self.J_logged = u_run.numpy(), traj_cost.numpy()
+        self.rollout_trajectories_logged = rollout_trajectory.numpy()
 
         if self.get_rollouts_from_mppi:
             self.rollout_trajectory = rollout_trajectory.numpy()
@@ -175,5 +172,8 @@ class controller_mppi_tf(template_controller):
         pass
 
     def controller_reset(self):
-        self.u_nom = tf.zeros([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
+        self.u_nom = (
+            0.5 * (self.env_mock.action_space.low + self.env_mock.action_space.high)
+            * tf.ones([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
+        )
         self.u = 0.0
