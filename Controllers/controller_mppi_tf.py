@@ -34,8 +34,8 @@ class controller_mppi_tf(template_controller):
         self.SAMPLING_TYPE = SAMPLING_TYPE
         self.INTERPOLATION_STEP = INTERPOLATION_STEP
 
-        self.clip_control_input_low = self.env_mock.action_space.low
-        self.clip_control_input_high = self.env_mock.action_space.high
+        self.clip_control_input_low = tf.constant(self.env_mock.action_space.low)
+        self.clip_control_input_high = tf.constant(self.env_mock.action_space.high)
 
         #instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
