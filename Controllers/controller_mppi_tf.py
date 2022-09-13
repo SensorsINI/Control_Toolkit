@@ -10,7 +10,7 @@ from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, INTERPOLATION_STEP: int, NET_NAME: str, predictor_name: str, **kwargs):
         super().__init__(environment)
         
         #First configure random sampler
@@ -32,6 +32,7 @@ class controller_mppi_tf(template_controller):
         self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.math.sqrt(dt)), dtype=tf.float32)
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
+        self.INTERPOLATION_STEP = INTERPOLATION_STEP
 
         self.clip_control_input_low = self.env_mock.action_space.low
         self.clip_control_input_high = self.env_mock.action_space.high
@@ -113,10 +114,10 @@ class controller_mppi_tf(template_controller):
     def inizialize_pertubation(self, random_gen):
         stdev = self.SQRTRHODTINV
         sampling_type = self.SAMPLING_TYPE
+        interpolation_step = self.INTERPOLATION_STEP
         if sampling_type == "interpolated":
-            step = 10
-            range_stop = int(tf.math.ceil(self.mppi_samples / step)*step) + 1
-            t = tf.range(range_stop, delta = step)
+            range_stop = int(tf.math.ceil(self.mppi_samples / interpolation_step)*interpolation_step) + 1
+            t = tf.range(range_stop, delta=interpolation_step)
             t_interp = tf.cast(tf.range(range_stop), tf.float32)
             delta_u = random_gen.normal([self.num_rollouts, t.shape[0], self.num_control_inputs], dtype=tf.float32) * stdev
             interp = tfp.math.interp_regular_1d_grid(t_interp, t_interp[0], t_interp[-1], delta_u, axis=1)
