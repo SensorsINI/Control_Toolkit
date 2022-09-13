@@ -19,7 +19,7 @@ class ComputationLibrary:
     shape: Callable[[TensorType], "list[int]"] = None
     to_numpy: Callable[[TensorType], np.ndarray] = None
     to_tensor: Callable[[TensorType, type], TensorType] = None
-    constant: Callable[[TensorType], TensorType] = None
+    constant: Callable[[TensorType, type], TensorType] = None
     unstack: Callable[[TensorType, int, int], "list[TensorType]"] = None
     ndim: Callable[[TensorType], int] = None
     clip: Callable[[TensorType, float, float], TensorType] = None
@@ -68,7 +68,7 @@ class NumpyLibrary(ComputationLibrary):
     shape = np.shape
     to_numpy = lambda x: np.array(x)
     to_tensor = lambda x, t: np.array(x, dtype=t)
-    constant = lambda x: np.array(x)
+    constant = lambda x, t: np.array(x, dtype=t)
     unstack = lambda x, num, axis: list(np.moveaxis(x, axis, 0))
     ndim = np.ndim
     clip = np.clip
@@ -117,7 +117,7 @@ class TensorFlowLibrary(ComputationLibrary):
     shape = lambda x: x.get_shape()  # .as_list()
     to_numpy = lambda x: x.numpy()
     to_tensor = lambda x, t: tf.convert_to_tensor(x, dtype=t)
-    constant = lambda x: tf.constant(x)
+    constant = lambda x, t: tf.constant(x, dtype=t)
     unstack = lambda x, num, axis: tf.unstack(x, num=num, axis=axis)
     ndim = tf.rank
     clip = tf.clip_by_value
@@ -166,7 +166,7 @@ class PyTorchLibrary(ComputationLibrary):
     shape = lambda x: list(x.size())
     to_numpy = lambda x: x.cpu().detach().numpy()
     to_tensor = lambda x, t: torch.as_tensor(x, dtype=t)
-    constant = lambda x: torch.as_tensor(x)
+    constant = lambda x, t: torch.as_tensor(x, dtype=t)
     unstack = lambda x, num, dim: torch.unbind(x, dim=dim)
     ndim = lambda x: x.ndim
     clip = torch.clamp
