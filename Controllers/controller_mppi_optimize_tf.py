@@ -11,7 +11,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_mppi_optimize_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, gradmax_clip: float, optim_steps: int, predictor_name: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, gradmax_clip: float, optim_steps: int, predictor_name: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -49,6 +49,7 @@ class controller_mppi_optimize_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
 
         #Setup prototype control sequence
@@ -59,7 +60,7 @@ class controller_mppi_optimize_tf(template_controller):
         self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2,
                                             epsilon=adam_epsilon)
 
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
         self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
 

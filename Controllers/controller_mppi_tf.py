@@ -10,9 +10,9 @@ from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, INTERPOLATION_STEP: int, NET_NAME: str, predictor_name: str, **kwargs):
-        super().__init__(environment)
-        
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, INTERPOLATION_STEP: int, NET_NAME: str, predictor_name: str, **kwargs):
+        super().__init__(environment_model)
+
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -46,7 +46,6 @@ class controller_mppi_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
-            planning_environment=environment
         )
         if predictor_name == "predictor_autoregressive_tf":
             self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
@@ -63,12 +62,9 @@ class controller_mppi_tf(template_controller):
         self.get_rollouts_from_mppi = True
         self.get_optimal_trajectory = False
 
-        self.u_nom = tf.zeros([1, self.mppi_samples, num_control_inputs], dtype=tf.float32)
-        self.u = tf.convert_to_tensor([0.0], dtype=tf.float32)
-
+        self.controller_reset()
         self.rollout_trajectory = None
         self.traj_cost = None
-
         self.optimal_trajectory = None
 
         # Defining function - the compiled part must not have if-else statements with changing output dimensions
@@ -161,6 +157,7 @@ class controller_mppi_tf(template_controller):
         
         self.u_logged = self.u
         self.Q_logged, self.J_logged = u_run.numpy(), traj_cost.numpy()
+        self.rollout_trajectories_logged = rollout_trajectory.numpy()
 
         if self.get_rollouts_from_mppi:
             self.rollout_trajectory = rollout_trajectory.numpy()
@@ -175,5 +172,8 @@ class controller_mppi_tf(template_controller):
         pass
 
     def controller_reset(self):
-        self.u_nom = tf.zeros([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
+        self.u_nom = (
+            0.5 * (self.env_mock.action_space.low + self.env_mock.action_space.high)
+            * tf.ones([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
+        )
         self.u = 0.0
