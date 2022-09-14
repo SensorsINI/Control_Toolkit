@@ -81,6 +81,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment,
         )
 
         # warmup setup
@@ -130,6 +131,10 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.u = 0.0
 
         self.bestQ = None
+
+        self.rollout_trajectory = None
+        self.traj_cost = None
+        self.optimal_trajectory = None
 
     @Compile
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -251,6 +256,11 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.u_logged = self.u
         self.Q_logged, self.J_logged = self.Q_tf.numpy(), J.numpy()
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
+
+        # FIXME: Unify the notation
+        self.rollout_trajectory = self.rollout_trajectories_logged
+        self.traj_cost = self.J_logged
+        self.optimal_trajectory = None # FIXME!
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
