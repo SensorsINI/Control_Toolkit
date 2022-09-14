@@ -46,6 +46,7 @@ class controller_mppi_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
         if predictor_name == "predictor_autoregressive_tf":
             self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
