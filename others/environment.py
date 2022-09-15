@@ -61,6 +61,10 @@ class ComputationLibrary:
     abs: Callable[[TensorType], TensorType] = None
     sqrt: Callable[[TensorType], TensorType] = None
     argpartition: Callable[[TensorType, int], TensorType] = None
+    norm: Callable[[TensorType, int], bool] = None
+    cross: Callable[[TensorType, TensorType], TensorType] = None
+    dot: Callable[[TensorType, TensorType], TensorType] = None
+    stop_gradient: Callable[[TensorType], TensorType] = None
 
 
 class NumpyLibrary(ComputationLibrary):
@@ -110,6 +114,10 @@ class NumpyLibrary(ComputationLibrary):
     abs = np.abs
     sqrt = np.sqrt
     argpartition = lambda x, k: np.argpartition(x, k)[..., :k]
+    norm = lambda x, axis: np.linalg.norm(x, axis=axis)
+    cross = np.cross
+    dot = np.dot
+    stop_gradient = lambda x: x
 
 
 class TensorFlowLibrary(ComputationLibrary):
@@ -159,6 +167,10 @@ class TensorFlowLibrary(ComputationLibrary):
     abs = tf.abs
     sqrt = tf.sqrt
     argpartition = lambda x, k: tf.math.top_k(-x, k, sorted=False)[1]
+    norm = lambda x, axis: tf.norm(x, axis=axis)
+    cross = tf.linalg.cross
+    dot = lambda a, b: tf.tensordot(a, b, 1)
+    stop_gradient = tf.stop_gradient
 
 
 class PyTorchLibrary(ComputationLibrary):
@@ -212,6 +224,10 @@ class PyTorchLibrary(ComputationLibrary):
     abs = torch.abs
     sqrt = torch.sqrt
     argpartition = torch.topk
+    norm = lambda x, axis: torch.linalg.norm(x, dim=axis)
+    cross = torch.linalg.cross
+    dot = torch.dot
+    stop_gradient = tf.stop_gradient # FIXME: How to imlement this in torch?
 
 
 class EnvironmentBatched:
