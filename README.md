@@ -43,7 +43,7 @@ To use the controllers, add this and the [SI_Toolkit](https://github.com/Sensors
         Same as cem, but between selecting the elite set and fitting the distribution, all input sequences in the elite
         set are refined with vanilla gradient descent. Re-Implementation of Bharadhwaj, Xie, Shkurti 2020.
 
-    -dist-adam-resamp2-tf
+    -dist-adam-resamp2-tf == RPGD
         Initially samples a set of control sequences, then optimizes them with the adam optimizer projecting control inputs,
         clipping inputs which violate the constraints. For the next time step, the optimizations are warm started with
         the solution from the last one. In regular intervals the only a subset of cheap control sequences are 
