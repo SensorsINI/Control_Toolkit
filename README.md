@@ -6,7 +6,14 @@ The `Control_Toolkit_ASF/models_for_nn_as_mpc` folder contains exemplary neural 
 
 To use the controllers, add this and the [SI_Toolkit](https://github.com/SensorsINI/SI_Toolkit) as Git Submodules at the top level of your repository.
 
-List of available controllers with description:
+## Repositories using the Toolkit
+
+- <a href="https://github.com/SensorsINI/CartPoleSimulation/tree/reproduction_of_results_sep22" target="_blank">CartPole Simulator</a>
+- <a href="https://github.com/frehe/ControlGym/tree/reproduction_of_results_sep22" target="_blank">ControlGym</a>
+- <a href="https://github.com/neuromorphs/physical-cartpole/tree/reproduction_of_results_sep2022_physical_cartpole" target="_blank">Physical CartPole</a>
+- <a href="https://github.com/F1Tenth-INI/f1tenth_development_gym" target="_blank">F1TENTH INI</a>
+
+## List of available controllers with description
     
     - do-mpc:
         based on do-mpc library, contnuous model, we provide do-mpc library with true equations, it internally integrates it with cvodes
