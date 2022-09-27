@@ -13,7 +13,7 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
-    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_ccrc_weight: float, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -48,9 +48,10 @@ class controller_cem_naive_grad_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
+            planning_environment=environment_model,
         )
 
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
         self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
 
@@ -102,7 +103,7 @@ class controller_cem_naive_grad_tf(template_controller):
         #after all inner loops, clip std min, so enough is explored
         #and shove all the values down by one for next control input
         self.stdev = tf.clip_by_value(self.stdev, self.cem_stdev_min, 10.0)
-        self.stdev = tf.concat([self.stdev[:, 1:, :], tf.sqrt(self.cem_initial_action_stdev)*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
+        self.stdev = tf.concat([self.stdev[:, 1:, :], self.cem_initial_action_stdev*tf.ones(shape=(1,1,self.num_control_inputs))], axis=1)
         self.u = tf.squeeze(self.dist_mue[0,0,:])
         self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))], axis=1)
         
@@ -115,5 +116,4 @@ class controller_cem_naive_grad_tf(template_controller):
     def controller_reset(self):
         #reset controller initial distribution
         self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.dist_var = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.stdev = tf.sqrt(self.dist_var)
+        self.stdev = self.cem_initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])

@@ -6,12 +6,15 @@ from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, Compile
 
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.others.globals_and_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class controller_dist_adam_resamp2_tf(template_controller):
     def __init__(
         self,
-        environment: EnvironmentBatched,
+        environment_model: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
         dt: float,
@@ -26,6 +29,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         SAMPLING_TYPE: str,
         interpolation_step: int,
         warmup: bool,
+        warmup_iterations: int,
         cem_LR: float,
         opt_keep_k: int,
         gradmax_clip: float,
@@ -39,7 +43,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
         # set Environment References
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low: tf.Tensor = tf.convert_to_tensor(
             self.env_mock.action_space.low, dtype=tf.float32
         )
@@ -64,6 +68,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.SAMPLING_TYPE = SAMPLING_TYPE
         self.interpolation_step = interpolation_step
         self.do_warmup = warmup
+        self.warmup_iterations = warmup_iterations
 
         # optimization params
         self.opt_keep_k = opt_keep_k
@@ -81,12 +86,13 @@ class controller_dist_adam_resamp2_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=NET_NAME,
+            planning_environment=environment_model,
         )
 
         # warmup setup
         self.first_iter_count = self.outer_its
         if self.do_warmup:
-            self.first_iter_count = self.cem_samples * self.outer_its
+            self.first_iter_count = self.warmup_iterations
 
         # if sampling type is "interpolated" setup linear interpolation as a matrix multiplication
         if SAMPLING_TYPE == "interpolated":
@@ -131,10 +137,17 @@ class controller_dist_adam_resamp2_tf(template_controller):
 
         self.bestQ = None
 
+        self.rollout_trajectory = None
+        self.traj_cost = None
+        self.optimal_trajectory = None
+
     @Compile
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
-        Qn = self.sample_stdev * rng_gen.normal(
-            [batch_size, self.num_valid_vals, self.num_control_inputs], dtype=tf.float32
+        Qn = rng_gen.uniform(
+            [batch_size, self.num_valid_vals, self.num_control_inputs],
+            minval=self.action_low,
+            maxval=self.action_high,
+            dtype=tf.float32,
         )
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
         if self.SAMPLING_TYPE == "interpolated":
@@ -177,10 +190,10 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
-        elite_Q = tf.gather(Q, best_idx, axis=0)
 
         # # Unnecessary Part
         # # get distribution of kept trajectories. This is actually unnecessary for this controller, might be incorparated into another one tho
+        # elite_Q = tf.gather(Q, best_idx, axis=0)
         # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
         # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
 
@@ -199,7 +212,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # dist_std = tf.concat(
         #     [
         #         dist_std[:, 1:, :],
-        #         tf.sqrt(self.sample_stdev)
+        #         self.sample_stdev
         #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
         #     ],
         #     axis=1,
@@ -207,7 +220,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # # End of unnecessary part
 
         # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(elite_Q[0, 0, :])
+        u = tf.squeeze(Q[sorted_cost[0], 0, :])
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return u, Qn, best_idx, traj_cost, rollout_trajectory
 
@@ -223,21 +236,21 @@ class controller_dist_adam_resamp2_tf(template_controller):
             iters = self.outer_its
 
         # optimize control sequences with gradient based optimization
-        prev_cost = 0.0
+        # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
 
             # check for convergence of optimization
-            if bool(
-                tf.reduce_mean(
-                    tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
-                )
-                < self.rtol
-            ):
-                # assume that we have converged sufficiently
-                break
-            prev_cost = tf.identity(traj_cost)
+            # if bool(
+            #     tf.reduce_mean(
+            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
+            #     )
+            #     < self.rtol
+            # ):
+            #     # assume that we have converged sufficiently
+            #     break
+            # prev_cost = tf.identity(traj_cost)
 
         # retrieve optimal input and prepare warmstart
         (
@@ -251,6 +264,12 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.u_logged = self.u
         self.Q_logged, self.J_logged = self.Q_tf.numpy(), J.numpy()
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
+        self.trajectory_ages_logged = self.trajectory_ages.numpy()
+
+        # TODO: Unify the notation
+        self.rollout_trajectory = self.rollout_trajectories_logged
+        self.traj_cost = self.J_logged
+        self.optimal_trajectory = self.rollout_trajectory[int(self.bestQ[0]):int(self.bestQ[0]) + 1, :, :]
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -263,58 +282,65 @@ class controller_dist_adam_resamp2_tf(template_controller):
             )
             Q_keep = tf.gather(Qn, self.bestQ)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
+            self.trajectory_ages = tf.concat([
+                tf.gather(self.trajectory_ages, self.bestQ),
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
+            ], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
-            wk1 = tf.concat(
-                [
-                    tf.gather(adam_weights[1], self.bestQ)[:, 1:, :],
-                    tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            wk2 = tf.concat(
-                [
-                    tf.gather(adam_weights[2], self.bestQ)[:, 1:, :],
-                    tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            # For the new trajectories they are reset to 0
-            w1 = tf.zeros(
-                [
-                    self.num_rollouts - self.opt_keep_k,
-                    self.cem_samples,
-                    self.num_control_inputs,
-                ]
-            )
-            w2 = tf.zeros(
-                [
-                    self.num_rollouts - self.opt_keep_k,
-                    self.cem_samples,
-                    self.num_control_inputs,
-                ]
-            )
-            w1 = tf.concat([w1, wk1], axis=0)
-            w2 = tf.concat([w2, wk2], axis=0)
-            # Set weights
-            self.opt.set_weights([adam_weights[0], w1, w2])
+            if len(adam_weights) > 0:
+                wk1 = tf.concat(
+                    [
+                        tf.gather(adam_weights[1], self.bestQ)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                wk2 = tf.concat(
+                    [
+                        tf.gather(adam_weights[2], self.bestQ)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                # For the new trajectories they are reset to 0
+                w1 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.cem_samples,
+                        self.num_control_inputs,
+                    ]
+                )
+                w2 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.cem_samples,
+                        self.num_control_inputs,
+                    ]
+                )
+                w1 = tf.concat([w1, wk1], axis=0)
+                w2 = tf.concat([w2, wk2], axis=0)
+                # Set weights
+                self.opt.set_weights([adam_weights[0], w1, w2])
         else:
-            # if it is not time to reset, all optimizer weights are shifted for a warmstart
-            w1 = tf.concat(
-                [
-                    adam_weights[1][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            w2 = tf.concat(
-                [
-                    adam_weights[2][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            self.opt.set_weights([adam_weights[0], w1, w2])
+            if len(adam_weights) > 0:
+                # if it is not time to reset, all optimizer weights are shifted for a warmstart
+                w1 = tf.concat(
+                    [
+                        adam_weights[1][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                w2 = tf.concat(
+                    [
+                        adam_weights[2][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                self.opt.set_weights([adam_weights[0], w1, w2])
+        self.trajectory_ages += 1
         self.Q_tf.assign(Qn)
         self.count += 1
         return self.u.numpy()
@@ -326,10 +352,9 @@ class controller_dist_adam_resamp2_tf(template_controller):
         #     * 0.5
         #     * tf.ones([1, self.cem_samples, self.num_control_inputs])
         # )
-        # self.dist_var = self.sample_stdev * tf.ones(
+        # self.stdev = self.sample_stdev * tf.ones(
         #     [1, self.cem_samples, self.num_control_inputs]
         # )
-        # self.stdev = tf.sqrt(self.dist_var)
         # # end of unnecessary part
 
         # sample new initial guesses for trajectories
@@ -340,3 +365,4 @@ class controller_dist_adam_resamp2_tf(template_controller):
         # reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
+        self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)

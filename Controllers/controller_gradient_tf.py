@@ -2,6 +2,7 @@ from importlib import import_module
 
 import numpy as np
 import tensorflow as tf
+from Control_Toolkit.others.environment import EnvironmentBatched
 from others.globals_and_utils import create_rng
 from SI_Toolkit.Functions.TF.Compile import Compile
 
@@ -11,7 +12,7 @@ from Control_Toolkit.Controllers import template_controller
 class controller_gradient_tf(template_controller):
     def __init__(
         self,
-        environment,
+        environment_model: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
         dt: float,
@@ -28,6 +29,8 @@ class controller_gradient_tf(template_controller):
         adam_epsilon: float,
         gradmax_clip: float,
         rtol: float,
+        warmup: bool,
+        warmup_iterations: int,
         **kwargs,
     ):
         # First configure random sampler
@@ -54,6 +57,14 @@ class controller_gradient_tf(template_controller):
         self.gradmax_clip = gradmax_clip
         self.rtol = rtol
 
+        self.warmup = warmup
+        self.warmup_iterations = warmup_iterations
+
+        # warmup setup
+        self.first_iter_count = self.gradient_steps
+        if self.warmup:
+            self.first_iter_count = self.warmup_iterations
+
         # instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
         self.predictor = getattr(predictor_module, predictor_name)(
@@ -63,9 +74,10 @@ class controller_gradient_tf(template_controller):
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
+            planning_environment=environment_model,
         )
 
-        super().__init__(environment)
+        super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low
         self.action_high = self.env_mock.action_space.high
 
@@ -78,7 +90,7 @@ class controller_gradient_tf(template_controller):
         # rollout the trajectories and get cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q_tf)
-            traj_cost, rollout_trajectory = self.predict_and_cost(s, Q_tf)
+            traj_cost, _ = self.predict_and_cost(s, Q_tf)
         #retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q_tf)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
@@ -88,7 +100,7 @@ class controller_gradient_tf(template_controller):
         Q = tf.clip_by_value(Q_tf, self.action_low, self.action_high) 
     
         # traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        return traj_cost, rollout_trajectory, Q
+        return Q
     
     @Compile
     def predict_and_cost(self, s, Q):
@@ -104,28 +116,24 @@ class controller_gradient_tf(template_controller):
         # Start all trajectories in current state
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
-
-        # generate random input sequence and clip to control limits
-        Q = tf.tile(self.dist_mue, (self.num_rollouts, 1, 1)) + tf.multiply(
-            self.rng_cem.normal(
-                shape=[self.num_rollouts, self.cem_samples, self.num_control_inputs],
-                dtype=tf.float32,
-            ),
-            self.stdev,
-        )
-        Q = tf.clip_by_value(Q, self.action_low, self.action_high)
+        
+        # warm start setup
+        if self.count == 0:
+            iters = self.first_iter_count
+        else:
+            iters = self.gradient_steps
 
         # Perform gradient descent steps
-        prev_cost = 0.0
-        for _ in range(self.gradient_steps):
+        # prev_cost = 0.0
+        for _ in range(iters):
+            Q = self.gradient_optimization(s, self.Q_tf, self.optim)
             self.Q_tf.assign(Q)
-            traj_cost, rollout_trajectory, Q = self.gradient_optimization(s, self.Q_tf, self.optim)
 
-            traj_cost = traj_cost.numpy()
-            if np.mean(np.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))) < self.rtol:
-                # Assume that we have converged sufficiently
-                break
-            prev_cost = traj_cost.copy()
+            # traj_cost = traj_cost.numpy()
+            # if np.mean(np.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))) < self.rtol:
+            #     # Assume that we have converged sufficiently
+            #     break
+            # prev_cost = traj_cost.copy()
         
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
 
@@ -139,14 +147,53 @@ class controller_gradient_tf(template_controller):
         self.rollout_trajectories_logged = rollout_trajectory.numpy()
         self.u_logged = self.u.copy()
 
+        # Shift Q, Adam weights by one time step
+        self.count += 1
+        Q_s = self.rng_cem.uniform(
+            shape=[self.num_rollouts, 1, self.num_control_inputs],
+            minval=self.action_low,
+            maxval=self.action_high,
+            dtype=tf.float32,
+        )
+        Q_shifted = tf.concat([self.Q_tf[:, 1:, :], Q_s], axis=1)
+        self.Q_tf.assign(Q_shifted)
+
+        adam_weights = self.optim.get_weights()
+        if len(adam_weights) > 0:
+            # if it is not time to reset, all optimizer weights are shifted for a warmstart
+            w1 = tf.concat(
+                [
+                    adam_weights[1][:, 1:, :],
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                ],
+                axis=1,
+            )
+            w2 = tf.concat(
+                [
+                    adam_weights[2][:, 1:, :],
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                ],
+                axis=1,
+            )
+            self.optim.set_weights([adam_weights[0], w1, w2])
+
         return self.u
 
     def controller_reset(self):
         self.dist_mue = (self.action_high + self.action_low) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.dist_var = self.initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.stdev = tf.sqrt(self.dist_var)
-        self.Q_tf = tf.Variable(
-            tf.zeros([self.num_rollouts, self.cem_samples, self.num_control_inputs]),
-            trainable=True,
-            dtype=tf.float32,
-        )
+        self.stdev = self.initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
+
+        # generate random input sequence and clip to control limits
+        Q = self.rng_cem.uniform(
+                shape=[self.num_rollouts, self.cem_samples, self.num_control_inputs],
+                minval=self.action_low,
+                maxval=self.action_high,
+                dtype=tf.float32,
+            )
+        Q = tf.clip_by_value(Q, self.action_low, self.action_high)
+        self.Q_tf = tf.Variable(Q, dtype=tf.float32)
+
+        self.count = 0
+
+        adam_weights = self.optim.get_weights()
+        self.optim.set_weights([tf.zeros_like(el) for el in adam_weights])
