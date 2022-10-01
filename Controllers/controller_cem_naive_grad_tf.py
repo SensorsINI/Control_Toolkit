@@ -13,7 +13,8 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+        super().__init__(environment)
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -41,17 +42,16 @@ class controller_cem_naive_grad_tf(template_controller):
 
         #instantiate predictor
         self.predictor_module = import_module(f"SI_Toolkit.Predictors.{self.predictor_name}")
-        self.predictor = getattr(self.predictor_module, self.predictor_name)(
+        self.env_mock.predictor = getattr(self.predictor_module, self.predictor_name)(
             horizon=self.cem_samples,
             dt=dt,
             intermediate_steps=self.intermediate_steps,
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
-            planning_environment=environment_model,
+            planning_environment=self.env_mock,
         )
 
-        super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
         self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
 
@@ -68,7 +68,7 @@ class controller_cem_naive_grad_tf(template_controller):
         # rollout the trajectories and record gradient
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
+            rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
             traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Q, self.u)
         # retrieve gradient
         dc_dQ = tape.gradient(traj_cost, Q)
@@ -78,7 +78,7 @@ class controller_cem_naive_grad_tf(template_controller):
         Qn = Q-self.cem_LR*Q_update
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
         #rollout all trajectories a last time
-        rollout_trajectory = self.predictor.predict_tf(s, Qn)
+        rollout_trajectory = self.env_mock.predictor.predict_tf(s, Qn)
         traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Qn, self.u)
 
         # sort the costs and find best k costs

@@ -11,7 +11,8 @@ from Control_Toolkit.Controllers import template_controller
 
 #controller class
 class controller_mppi_var_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
+        super().__init__(environment)
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -42,14 +43,14 @@ class controller_mppi_var_tf(template_controller):
 
         #instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
+        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
             horizon=self.mppi_samples,
             dt=dt,
             intermediate_steps=intermediate_steps,
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
-            planning_environment=environment_model,
+            planning_environment=self.env_mock,
         )
 
         #setup interpolation matrix
@@ -77,7 +78,6 @@ class controller_mppi_var_tf(template_controller):
         self.nuvec = tf.Variable(self.nuvec)
         self.u = 0.0
         
-        super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
         self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
     
@@ -114,7 +114,7 @@ class controller_mppi_var_tf(template_controller):
             u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1]) + delta_u
             u_run = tfp.math.clip_by_value_preserve_gradient(u_run, self.action_low, self.action_high)
             #rollout and cost
-            rollout_trajectory = self.predictor.predict_tf(s, u_run)
+            rollout_trajectory = self.env_mock.predictor.predict_tf(s, u_run)
             unc_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, u_run, u_old)
             mean_uncost = tf.math.reduce_mean(unc_cost)
             #retrieve gradient

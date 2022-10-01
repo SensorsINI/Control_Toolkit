@@ -18,8 +18,8 @@ See the provided examples of controllers to gain more insight.
 class template_controller(ABC):
     _controller_name: str = ""
 
-    def __init__(self, environment_model: EnvironmentBatched, **kwargs):
-        self.env_mock: EnvironmentBatched = environment_model
+    def __init__(self, environment: EnvironmentBatched, **kwargs):
+        self.env_mock: EnvironmentBatched = environment
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None):

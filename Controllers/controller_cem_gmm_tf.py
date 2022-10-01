@@ -11,7 +11,8 @@ from Control_Toolkit.Controllers import template_controller
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class controller_cem_gmm_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+        super().__init__(environment)
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -31,17 +32,16 @@ class controller_cem_gmm_tf(template_controller):
 
         #instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
+        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
             horizon=self.cem_samples,
             dt=dt,
             intermediate_steps=self.intermediate_steps,
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=self.NET_NAME,
-            planning_environment=environment_model,
+            planning_environment=self.env_mock,
         )
 
-        super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low
         self.action_high = self.env_mock.action_space.high
 
@@ -51,7 +51,7 @@ class controller_cem_gmm_tf(template_controller):
     @Compile
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
         traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Q, self.u)
         return traj_cost, rollout_trajectory
 

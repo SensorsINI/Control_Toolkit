@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 class controller_rpgd_tf(template_controller):
     def __init__(
         self,
-        environment_model: EnvironmentBatched,
+        environment: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
         dt: float,
@@ -39,11 +39,11 @@ class controller_rpgd_tf(template_controller):
         adam_epsilon: float,
         **kwargs,
     ):
+        super().__init__(environment)
         # configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
         # set Environment References
-        super().__init__(environment_model)
         self.action_low: tf.Tensor = tf.convert_to_tensor(
             self.env_mock.action_space.low, dtype=tf.float32
         )
@@ -79,14 +79,14 @@ class controller_rpgd_tf(template_controller):
 
         # instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
+        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
             horizon=self.cem_samples,
             dt=dt,
             intermediate_steps=self.intermediate_steps,
             disable_individual_compilation=True,
             batch_size=self.num_rollouts,
             net_name=NET_NAME,
-            planning_environment=environment_model,
+            planning_environment=self.env_mock,
         )
 
         # warmup setup
@@ -163,7 +163,7 @@ class controller_rpgd_tf(template_controller):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
+            rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
             traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
                 rollout_trajectory, Q, self.u
             )
@@ -179,7 +179,7 @@ class controller_rpgd_tf(template_controller):
     @Compile
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
         traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )

@@ -36,6 +36,7 @@ class ComputationLibrary:
     tile: Callable[[TensorType, "tuple[int]"], TensorType] = None
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
     zeros: Callable[["tuple[int]"], TensorType] = None
+    zeros_like: Callable[[TensorType], TensorType] = None
     ones: Callable[["tuple[int]"], TensorType] = None
     sign: Callable[[TensorType], TensorType] = None
     create_rng: Callable[[int], RandomGeneratorType] = None
@@ -80,6 +81,7 @@ class NumpyLibrary(ComputationLibrary):
     tile = np.tile
     gather = lambda x, i, a: np.take(x, i, axis=a)
     zeros = np.zeros
+    zeros_like = np.zeros_like
     ones = np.ones
     sign = np.sign
     create_rng = lambda seed: Generator(SFC64(seed))
@@ -124,6 +126,7 @@ class TensorFlowLibrary(ComputationLibrary):
     bool = tf.bool
     tile = tf.tile
     zeros = tf.zeros
+    zeros_like = tf.zeros_like
     ones = tf.ones
     sign = tf.sign
     create_rng = lambda seed: tf.random.Generator.from_seed(seed)
@@ -168,6 +171,7 @@ class PyTorchLibrary(ComputationLibrary):
     bool = torch.bool
     tile = torch.tile
     zeros = torch.zeros
+    zeros_like = torch.zeros_like
     ones = torch.ones
     sign = torch.sign
     create_rng = lambda seed: torch.Generator().manual_seed(seed)
@@ -216,6 +220,17 @@ class EnvironmentBatched:
     observation_space: Box
     cost_functions: cost_functions_wrapper
     dt: float
+    _predictor = None
+    
+    @property
+    def predictor(self):
+        if self._predictor is None:
+            raise ValueError("Predictor not set for this environment yet")
+        return self._predictor
+
+    @predictor.setter
+    def predictor(self, x):
+        self._predictor = x
 
     def step(
         self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
@@ -227,14 +242,12 @@ class EnvironmentBatched:
     ]:
         return NotImplementedError()
     
-    def step_tf(
-        self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
-    ) -> Tuple[
-        Union[np.ndarray, tf.Tensor, torch.Tensor],
-        Union[np.ndarray, float],
-        Union[np.ndarray, bool],
-        dict,
-    ]:
+    def step_dynamics(
+        self,
+        state: Union[np.ndarray, tf.Tensor, torch.Tensor],
+        action: Union[np.ndarray, tf.Tensor, torch.Tensor],
+        dt:float,
+    ) -> Union[np.ndarray, tf.Tensor, torch.Tensor]:
         return NotImplementedError()
 
     def reset(

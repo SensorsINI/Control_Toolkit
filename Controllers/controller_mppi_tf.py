@@ -10,8 +10,8 @@ from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
-        super().__init__(environment_model)
+    def __init__(self, environment: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, predictor_name: str, **kwargs):
+        super().__init__(environment)
         
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
@@ -38,14 +38,14 @@ class controller_mppi_tf(template_controller):
 
         #instantiate predictor
         predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
+        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
             horizon=self.mppi_samples,
             dt=dt,
             intermediate_steps=predictor_intermediate_steps,
             disable_individual_compilation=True,
             batch_size=num_rollouts,
             net_name=NET_NAME,
-            planning_environment=environment_model,
+            planning_environment=self.env_mock,
         )
         if predictor_name == "predictor_autoregressive_tf":
             self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
@@ -57,7 +57,7 @@ class controller_mppi_tf(template_controller):
             net_name=NET_NAME,
         )
         else:
-            self.predictor_single_trajectory = self.predictor
+            self.predictor_single_trajectory = self.env_mock.predictor
 
         self.get_rollouts_from_mppi = True
         self.get_optimal_trajectory = False
@@ -130,7 +130,7 @@ class controller_mppi_tf(template_controller):
         delta_u = self.inizialize_pertubation(random_gen)
         u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1])+delta_u
         u_run = tf.clip_by_value(u_run, self.clip_control_input_low, self.clip_control_input_high)
-        rollout_trajectory = self.predictor.predict_tf(s, u_run)
+        rollout_trajectory = self.env_mock.predictor.predict_tf(s, u_run)
         traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
         u_nom = tf.clip_by_value(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.clip_control_input_low, self.clip_control_input_high)
         u = u_nom[0, 0, :]
@@ -139,7 +139,7 @@ class controller_mppi_tf(template_controller):
 
     def update_internal_state_of_RNN(self, s, u_nom):
         u_tiled = tf.tile(u_nom[:, :1, :], tf.constant([self.num_rollouts, 1, 1]))
-        self.predictor.update_internal_state_tf(s=s, Q0=u_tiled)
+        self.env_mock.predictor.update_internal_state_tf(s=s, Q0=u_tiled)
 
     @Compile
     def predict_optimal_trajectory(self, s, u_nom):
