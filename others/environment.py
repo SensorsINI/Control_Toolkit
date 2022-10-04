@@ -49,7 +49,9 @@ class ComputationLibrary:
     concat: Callable[["list[TensorType]", int], TensorType]
     pi: TensorType = None
     any: Callable[[TensorType], bool] = None
+    all: Callable[[TensorType], bool] = None
     reduce_any: Callable[[TensorType, int], bool] = None
+    reduce_all: Callable[[TensorType, int], bool] = None
     reduce_max: Callable[[TensorType, int], bool] = None
     min: Callable[[TensorType, TensorType], TensorType] = None
     max: Callable[[TensorType, TensorType], TensorType] = None
@@ -94,7 +96,9 @@ class NumpyLibrary(ComputationLibrary):
     concat = lambda x, a: np.concatenate(x, axis=a)
     pi = np.array(np.pi).astype(np.float32)
     any = np.any
+    all = np.all
     reduce_any = lambda a, axis: np.any(a, axis=axis)
+    reduce_all = lambda a, axis: np.all(a, axis=axis)
     reduce_max = lambda a, axis: np.max(a, axis=axis)
     min = np.minimum
     max = np.maximum
@@ -139,7 +143,9 @@ class TensorFlowLibrary(ComputationLibrary):
     concat = lambda x, a: tf.concat(x, a)
     pi = tf.convert_to_tensor(np.array(np.pi), dtype=tf.float32)
     any = tf.reduce_any
+    all = tf.reduce_all
     reduce_any = lambda a, axis: tf.reduce_any(a, axis=axis)
+    reduce_all = lambda a, axis: tf.reduce_all(a, axis=axis)
     reduce_max = lambda a, axis: tf.reduce_max(a, axis=axis)
     min = tf.minimum
     max = tf.maximum
@@ -188,7 +194,9 @@ class PyTorchLibrary(ComputationLibrary):
     concat = lambda x, a: torch.concat(x, dim=a)
     pi = torch.from_numpy(np.array(np.pi)).float()
     any = torch.any
+    all = torch.all
     reduce_any = lambda a, axis: torch.any(a, dim=axis)
+    reduce_all = lambda a, axis: torch.all(a, dim=axis)
     reduce_max = lambda a, axis: torch.max(a, dim=axis)
     min = torch.minimum
     max = torch.maximum

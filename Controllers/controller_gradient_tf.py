@@ -18,7 +18,7 @@ class controller_gradient_tf(template_controller):
         dt: float,
         mpc_horizon: int,
         gradient_steps: int,
-        mpc_rollouts: int,
+        num_rollouts: int,
         initial_action_stdev: float,
         predictor_name: str,
         predictor_intermediate_steps: int,
@@ -41,7 +41,7 @@ class controller_gradient_tf(template_controller):
         self.num_control_inputs = num_control_inputs
 
         # MPC params
-        self.num_rollouts = mpc_rollouts
+        self.num_rollouts = num_rollouts
         self.gradient_steps = gradient_steps
         self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
         self.intermediate_steps = predictor_intermediate_steps
