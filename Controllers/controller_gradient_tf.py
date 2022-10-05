@@ -1,28 +1,24 @@
-from importlib import import_module
-
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.others.environment import EnvironmentBatched
-from others.globals_and_utils import create_rng
-from SI_Toolkit.Functions.TF.Compile import Compile
-
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Cost_Functions import cost_function_default
+from gym.spaces.box import Box
+from SI_Toolkit.Functions.TF.Compile import Compile
+from SI_Toolkit.Predictors import predictor
 
 
 class controller_gradient_tf(template_controller):
     def __init__(
         self,
-        environment: EnvironmentBatched,
+        predictor: predictor,
+        cost_function: cost_function_default,
         seed: int,
-        num_control_inputs: int,
-        dt: float,
+        action_space: Box,
+        observation_space: Box,
         mpc_horizon: int,
         gradient_steps: int,
         num_rollouts: int,
         initial_action_stdev: float,
-        predictor_name: str,
-        predictor_intermediate_steps: int,
-        CEM_NET_NAME: str,
         learning_rate: float,
         adam_beta_1: float,
         adam_beta_2: float,
@@ -31,24 +27,16 @@ class controller_gradient_tf(template_controller):
         rtol: float,
         warmup: bool,
         warmup_iterations: int,
+        controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(environment)
-        # First configure random sampler
-        self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # Parametrization
-        self.num_control_inputs = num_control_inputs
-
-        # MPC params
-        self.num_rollouts = num_rollouts
+        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # MPC parameters
         self.gradient_steps = gradient_steps
-        self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
         self.initial_action_stdev = initial_action_stdev
 
-        self.NET_NAME = CEM_NET_NAME
-
+        # Initialize optimizer
         self.optim = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
             beta_1=adam_beta_1,
@@ -57,33 +45,15 @@ class controller_gradient_tf(template_controller):
         )
         self.gradmax_clip = gradmax_clip
         self.rtol = rtol
-
         self.warmup = warmup
         self.warmup_iterations = warmup_iterations
 
-        # warmup setup
+        # Setup warmup
         self.first_iter_count = self.gradient_steps
         if self.warmup:
             self.first_iter_count = self.warmup_iterations
-
-        # instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=self.NET_NAME,
-            planning_environment=self.env_mock,
-        )
-
-        self.action_low = self.env_mock.action_space.low
-        self.action_high = self.env_mock.action_space.high
-
-        # Initialization
+        
         self.controller_reset()
-        self.u = 0
 
     @Compile
     def gradient_optimization(self, s: tf.Tensor, Q_tf: tf.Variable, optim):
@@ -105,14 +75,16 @@ class controller_gradient_tf(template_controller):
     @Compile
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
-        rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
-        traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )
         return traj_cost, rollout_trajectory
 
     # step function to find control
     def step(self, s: np.ndarray, time=None):
+        if self.controller_logging:
+            self.s_logged = s.copy()
         # Start all trajectories in current state
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -142,14 +114,16 @@ class controller_gradient_tf(template_controller):
         best_idx = sorted_cost[0]
 
         self.u: np.ndarray = tf.squeeze(Q[best_idx, 0, :]).numpy()
-
-        self.Q_logged, self.J_logged = Q.numpy(), traj_cost.numpy()
-        self.rollout_trajectories_logged = rollout_trajectory.numpy()
-        self.u_logged = self.u.copy()
+        
+        if self.controller_logging:
+            self.Q_logged = Q.numpy()
+            self.J_logged = traj_cost.numpy()
+            self.rollout_trajectories_logged = rollout_trajectory.numpy()
+            self.u_logged = self.u
 
         # Shift Q, Adam weights by one time step
         self.count += 1
-        Q_s = self.rng_cem.uniform(
+        Q_s = self.rng.uniform(
             shape=[self.num_rollouts, 1, self.num_control_inputs],
             minval=self.action_low,
             maxval=self.action_high,
@@ -180,12 +154,9 @@ class controller_gradient_tf(template_controller):
         return self.u
 
     def controller_reset(self):
-        self.dist_mue = (self.action_high + self.action_low) * 0.5 * tf.ones([1, self.cem_samples, self.num_control_inputs])
-        self.stdev = self.initial_action_stdev * tf.ones([1, self.cem_samples, self.num_control_inputs])
 
         # generate random input sequence and clip to control limits
-        Q = self.rng_cem.uniform(
-                shape=[self.num_rollouts, self.cem_samples, self.num_control_inputs],
+        Q = self.rng.uniform(
                 minval=self.action_low,
                 maxval=self.action_high,
                 dtype=tf.float32,

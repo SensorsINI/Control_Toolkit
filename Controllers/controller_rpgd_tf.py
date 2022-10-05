@@ -1,11 +1,10 @@
-from importlib import import_module
-
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
-
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Cost_Functions import cost_function_default
+from Control_Toolkit.others.globals_and_utils import Compile
+from gym.spaces.box import Box
+from SI_Toolkit.Predictors import predictor
 from Utilities.utils import get_logger
 
 logger = get_logger(__name__)
@@ -14,82 +13,45 @@ logger = get_logger(__name__)
 class controller_rpgd_tf(template_controller):
     def __init__(
         self,
-        environment: EnvironmentBatched,
+        predictor: predictor,
+        cost_function: cost_function_default,
         seed: int,
-        num_control_inputs: int,
-        dt: float,
+        action_space: Box,
+        observation_space: Box,
         mpc_horizon: int,
         num_rollouts: int,
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
-        predictor_name: str,
-        predictor_intermediate_steps: int,
-        NET_NAME: str,
         SAMPLING_TYPE: str,
         interpolation_step: int,
         warmup: bool,
         warmup_iterations: int,
-        cem_LR: float,
+        learning_rate: float,
         opt_keep_k: int,
         gradmax_clip: float,
         rtol: float,
         adam_beta_1: float,
         adam_beta_2: float,
         adam_epsilon: float,
+        controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(environment)
-        # configure random sampler
-        self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # set Environment References
-        self.action_low: tf.Tensor = tf.convert_to_tensor(
-            self.env_mock.action_space.low, dtype=tf.float32
-        )
-        self.action_high: tf.Tensor = tf.convert_to_tensor(
-            self.env_mock.action_space.high, dtype=tf.float32
-        )
-
-        # basic params
-        self.num_control_inputs = num_control_inputs
-
-        self.num_rollouts = num_rollouts
+        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # RPGD parameters
         self.outer_its = outer_its
         self.sample_stdev = sample_stdev
-        self.cem_samples = mpc_horizon  # number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
-
         self.resamp_per = resamp_per
-
-        self.NET_NAME = NET_NAME
-        self.predictor_name = predictor_name
-
         self.SAMPLING_TYPE = SAMPLING_TYPE
         self.interpolation_step = interpolation_step
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
-
-        # optimization params
         self.opt_keep_k = opt_keep_k
-        self.cem_LR = tf.constant(cem_LR, dtype=tf.float32)
-
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
 
-        # instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.env_mock.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=NET_NAME,
-            planning_environment=self.env_mock,
-        )
-
-        # warmup setup
+        # Warmup setup
         self.first_iter_count = self.outer_its
         if self.do_warmup:
             self.first_iter_count = self.warmup_iterations
@@ -97,7 +59,7 @@ class controller_rpgd_tf(template_controller):
         # if sampling type is "interpolated" setup linear interpolation as a matrix multiplication
         if SAMPLING_TYPE == "interpolated":
             step = interpolation_step
-            self.num_valid_vals = int(np.ceil(self.cem_samples / step) + 1)
+            self.num_valid_vals = int(np.ceil(self.mpc_horizon / step) + 1)
             self.interp_mat = np.zeros(
                 (
                     (self.num_valid_vals - 1) * step,
@@ -116,26 +78,22 @@ class controller_rpgd_tf(template_controller):
                 )
             for i in range(self.num_valid_vals - 1):
                 self.interp_mat[i * step : (i + 1) * step, i : i + 2, :] = step_block
-            self.interp_mat = self.interp_mat[: self.cem_samples, :, :] / step
+            self.interp_mat = self.interp_mat[: self.mpc_horizon, :, :] / step
             self.interp_mat = tf.constant(
                 tf.transpose(self.interp_mat, perm=(1, 0, 2)), dtype=tf.float32
             )
         else:
             self.interp_mat = None
-            self.num_valid_vals = self.cem_samples
+            self.num_valid_vals = self.mpc_horizon
 
         self.opt = tf.keras.optimizers.Adam(
-            learning_rate=cem_LR,
+            learning_rate=learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
             epsilon=adam_epsilon,
         )
-
-        # setup sampling distribution
+        
         self.controller_reset()
-        self.u = 0.0
-
-        self.bestQ = None
 
     @Compile
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -163,8 +121,8 @@ class controller_rpgd_tf(template_controller):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
-            traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
+            rollout_trajectory = self.predictor.predict_tf(s, Q)
+            traj_cost = self.cost_function.get_trajectory_cost(
                 rollout_trajectory, Q, self.u
             )
         # retrieve gradient of cost w.r.t. input sequence
@@ -179,8 +137,8 @@ class controller_rpgd_tf(template_controller):
     @Compile
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.env_mock.predictor.predict_tf(s, Q)
-        traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )
         # sort the costs and find best k costs
@@ -221,6 +179,9 @@ class controller_rpgd_tf(template_controller):
         return u, Qn, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
+        if self.controller_logging:
+            self.s_logged = s.copy()
+            
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -252,15 +213,17 @@ class controller_rpgd_tf(template_controller):
         (
             self.u,
             Qn,
-            self.bestQ,
+            best_Q,
             J,
             rollout_trajectory,
         ) = self.get_action(s, self.Q_tf)
-
-        self.u_logged = self.u
-        self.Q_logged, self.J_logged = self.Q_tf.numpy(), J.numpy()
-        self.rollout_trajectories_logged = rollout_trajectory.numpy()
-        self.trajectory_ages_logged = self.trajectory_ages.numpy()
+        
+        if self.controller_logging:
+            self.Q_logged = self.Q_tf.numpy()
+            self.J_logged = J.numpy()
+            self.rollout_trajectories_logged = rollout_trajectory.numpy()
+            self.trajectory_ages_logged = self.trajectory_ages.numpy()
+            self.u_logged = self.u
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -269,12 +232,12 @@ class controller_rpgd_tf(template_controller):
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
-                self.rng_cem, self.num_rollouts - self.opt_keep_k
+                self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, self.bestQ)  # resorting according to costs
+            Q_keep = tf.gather(Qn, best_Q)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
-                tf.gather(self.trajectory_ages, self.bestQ),
+                tf.gather(self.trajectory_ages, best_Q),
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
             # Updating the weights of adam:
@@ -282,14 +245,14 @@ class controller_rpgd_tf(template_controller):
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], self.bestQ)[:, 1:, :],
+                        tf.gather(adam_weights[1], best_Q)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 wk2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], self.bestQ)[:, 1:, :],
+                        tf.gather(adam_weights[2], best_Q)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
@@ -298,14 +261,14 @@ class controller_rpgd_tf(template_controller):
                 w1 = tf.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
-                        self.cem_samples,
+                        self.mpc_horizon,
                         self.num_control_inputs,
                     ]
                 )
                 w2 = tf.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
-                        self.cem_samples,
+                        self.mpc_horizon,
                         self.num_control_inputs,
                     ]
                 )
@@ -341,15 +304,15 @@ class controller_rpgd_tf(template_controller):
         # self.dist_mue = (
         #     (self.action_low + self.action_high)
         #     * 0.5
-        #     * tf.ones([1, self.cem_samples, self.num_control_inputs])
+        #     * tf.ones([1, self.mpc_horizon, self.num_control_inputs])
         # )
         # self.stdev = self.sample_stdev * tf.ones(
-        #     [1, self.cem_samples, self.num_control_inputs]
+        #     [1, self.mpc_horizon, self.num_control_inputs]
         # )
         # # end of unnecessary part
 
         # sample new initial guesses for trajectories
-        Qn = self.sample_actions(self.rng_cem, self.num_rollouts)
+        Qn = self.sample_actions(self.rng, self.num_rollouts)
         self.Q_tf = tf.Variable(Qn)
         self.count = 0
 

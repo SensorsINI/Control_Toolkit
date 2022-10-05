@@ -208,25 +208,8 @@ class PyTorchLibrary(ComputationLibrary):
 
 class EnvironmentBatched:
     """Has no __init__ method."""
-    class cost_functions_wrapper:
-        def __init__(self, env) -> None:
-            self.env: EnvironmentBatched = env
-
-        def get_terminal_cost(self, s_hor):
-            return 0.0
-
-        def get_stage_cost(self, s, u, u_prev):
-            return -self.env.get_reward(s, u)
-
-        def get_trajectory_cost(self, s_hor, u, u_prev=None):
-            return (
-                self.env.lib.sum(self.get_stage_cost(s_hor[:, :-1, :], u, None), 1)
-                + self.get_terminal_cost(s_hor)
-            )
-    
     action_space: Box
     observation_space: Box
-    cost_functions: cost_functions_wrapper
     dt: float
     _predictor = None
     
@@ -241,9 +224,9 @@ class EnvironmentBatched:
         self._predictor = x
 
     def step(
-        self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
+        self, action: TensorType
     ) -> Tuple[
-        Union[np.ndarray, tf.Tensor, torch.Tensor],
+        TensorType,
         Union[np.ndarray, float],
         Union[np.ndarray, bool],
         dict,
@@ -252,10 +235,10 @@ class EnvironmentBatched:
     
     def step_dynamics(
         self,
-        state: Union[np.ndarray, tf.Tensor, torch.Tensor],
-        action: Union[np.ndarray, tf.Tensor, torch.Tensor],
-        dt:float,
-    ) -> Union[np.ndarray, tf.Tensor, torch.Tensor]:
+        state: TensorType,
+        action: TensorType,
+        dt: float,
+    ) -> TensorType:
         return NotImplementedError()
 
     def reset(
