@@ -229,8 +229,16 @@ class EnvironmentBatched:
         TensorType,
         Union[np.ndarray, float],
         Union[np.ndarray, bool],
+        Union[np.ndarray, bool],
         dict,
     ]:
+        """Step function with new OpenAI Gym API (gym>=0.26)
+
+        :param action: control input to system
+        :type action: TensorType
+        :return: observation, reward, terminated, truncated, info
+        :rtype: Tuple[ TensorType, Union[np.ndarray, float], Union[np.ndarray, bool], Union[np.ndarray, bool], dict, ]
+        """
         return NotImplementedError()
     
     def step_dynamics(
@@ -243,11 +251,20 @@ class EnvironmentBatched:
 
     def reset(
         self,
-        state: np.ndarray = None,
-        seed: Optional[int] = None,
-        return_info: bool = False,
-        options: Optional[dict] = None,
-    ) -> Tuple[np.ndarray, Optional[dict]]:
+        seed: "Optional[int]" = None,
+        options: "Optional[dict]" = None,
+    ) -> "Tuple[np.ndarray, dict]":
+        """Reset function with new OpenAI Gym API (gym>=0.26)
+
+        :param state: State to set environment to, set random if default (None) is specified
+        :type state: np.ndarray, optional
+        :param seed: Seed for random number generator, defaults to None
+        :type seed: Optional[int], optional
+        :param options: Additional information to specify how the environment is reset, defaults to None. This can include a "state" key
+        :type options: Optional[dict], optional
+        :return: Observation of the initial state and auxiliary information
+        :rtype: Tuple[np.ndarray, Optional[dict]]
+        """
         return NotImplementedError()
 
     def _set_up_rng(self, seed: int = None) -> None:
@@ -288,13 +305,10 @@ class EnvironmentBatched:
             )
         return state, action
 
-    def _get_reset_return_val(self, return_info: bool = False):
+    def _get_reset_return_val(self):
         if self._batch_size == 1:
             self.state = self.lib.to_numpy(self.lib.squeeze(self.state))
-
-        if return_info:
-            return tuple((self.state, {}))
-        return self.state
+        return self.state, {}
 
     def set_computation_library(self, computation_lib: "type[ComputationLibrary]"):
         try:
