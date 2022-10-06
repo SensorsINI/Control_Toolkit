@@ -154,13 +154,13 @@ class controller_gradient_tf(template_controller):
         return self.u
 
     def controller_reset(self):
-
         # generate random input sequence and clip to control limits
         Q = self.rng.uniform(
-                minval=self.action_low,
-                maxval=self.action_high,
-                dtype=tf.float32,
-            )
+            [self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
+            self.action_low,
+            self.action_high,
+            dtype=tf.float32,
+        )
         Q = tf.clip_by_value(Q, self.action_low, self.action_high)
         self.Q_tf = tf.Variable(Q, dtype=tf.float32)
 
