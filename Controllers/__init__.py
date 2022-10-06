@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-from Control_Toolkit.Cost_Functions import cost_function_default
+from Control_Toolkit.Cost_Functions import cost_function_base
 from Control_Toolkit.others.environment import TensorType
 from Control_Toolkit.others.globals_and_utils import create_rng
 from gym.spaces.box import Box
@@ -25,7 +25,7 @@ class template_controller(ABC):
     def __init__(
         self,
         predictor: predictor,
-        cost_function: cost_function_default,
+        cost_function: cost_function_base,
         seed: int,
         action_space: Box,
         observation_space: Box,
@@ -38,9 +38,10 @@ class template_controller(ABC):
         
         # Environment-related parameters
         assert len(action_space.shape) == 1, "Only vector action space currently supported"
-        assert len(observation_space.shape) == 1, "Only vector observation space currently supported"
         self.num_control_inputs = action_space.shape[0]
-        self.num_states = observation_space.shape[0]
+        if isinstance(observation_space, Box):
+            assert len(observation_space.shape) == 1, "Only vector observation space currently supported"
+            self.num_states = observation_space.shape[0]
         self.action_low = action_space.low
         self.action_high = action_space.high
         

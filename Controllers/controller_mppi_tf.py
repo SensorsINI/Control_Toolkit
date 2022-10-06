@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit.Cost_Functions import cost_function_default
+from Control_Toolkit.Cost_Functions import cost_function_base
 from Control_Toolkit.others.globals_and_utils import Compile
 from gym.spaces.box import Box
 from SI_Toolkit.Predictors import predictor
@@ -14,7 +14,7 @@ class controller_mppi_tf(template_controller):
     def __init__(
         self,
         predictor: predictor,
-        cost_function: cost_function_default,
+        cost_function: cost_function_base,
         seed: int,
         action_space: Box,
         observation_space: Box,
