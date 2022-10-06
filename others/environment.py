@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -301,6 +301,9 @@ class EnvironmentBatched:
             self.lib = computation_lib
         except KeyError as error:
             log.exception(error)
+    
+    def set_logs(self, logs: dict[str, Any]):
+        self._logs = logs
 
     # Overloading properties/methods for Bharadhwaj implementation
     @property

@@ -145,22 +145,23 @@ class controller_mppi_tf(template_controller):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         s = self.check_dimensions_s(s)
 
         self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
+        self.u = tf.squeeze(self.u).numpy()
         
         if self.controller_logging:
-            self.Q_logged = u_run.numpy()
-            self.J_logged = traj_cost.numpy()
-            self.rollout_trajectories_logged = rollout_trajectory.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = u_run.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.current_log["u_logged"] = self.u
 
         if False:
             self.optimal_trajectory = self.predict_optimal_trajectory(s, self.u_nom).numpy()
 
-        return tf.squeeze(self.u).numpy()
+        return self.u
     
     def controller_report(self):
         pass

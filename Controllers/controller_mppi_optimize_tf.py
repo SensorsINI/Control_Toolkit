@@ -144,7 +144,7 @@ class controller_mppi_optimize_tf(template_controller):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -158,18 +158,18 @@ class controller_mppi_optimize_tf(template_controller):
             Q_opt, traj_cost = self.grad_step(s, self.Q_opt, self.opt)
             self.Q_opt.assign(Q_opt)
 
-        self.u = self.Q_opt[0, 0, :]
+        self.u = np.squeeze(self.Q_opt[0, 0, :].numpy())
         
         if self.controller_logging:
-            self.Q_logged = self.Q_opt.numpy()
-            self.J_logged = traj_cost.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = self.Q_opt.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["u_logged"] = self.u
         
         self.Q_opt.assign(tf.concat([self.Q_opt[:, 1:, :], tf.zeros([1,1,self.num_control_inputs])], axis=1)) #shift and initialize new input with 0
         #reset adam optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        return np.squeeze(self.u.numpy())
+        return self.u
 
     def controller_reset(self):
         #reset prototype control sequence

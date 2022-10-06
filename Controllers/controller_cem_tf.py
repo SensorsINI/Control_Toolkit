@@ -70,7 +70,7 @@ class controller_cem_tf(template_controller):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         Q = tf.zeros((self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
@@ -90,10 +90,10 @@ class controller_cem_tf(template_controller):
         self.dist_mue = tf.concat([self.dist_mue[:,1:,:], (self.action_low + self.action_high) * 0.5 * tf.ones((1,1,self.num_control_inputs))], axis=1)
         
         if self.controller_logging:
-            self.Q_logged = Q
-            self.J_logged = traj_cost
-            self.rollout_trajectories_logged = rollout_trajectory
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = Q
+            self.current_log["J_logged"] = traj_cost
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory
+            self.current_log["u_logged"] = self.u
 
         self.count += 1
         return self.u

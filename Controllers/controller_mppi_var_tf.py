@@ -131,15 +131,15 @@ class controller_mppi_var_tf(template_controller):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng, self.u, self.nuvec)
         
         if self.controller_logging:
-            self.Q_logged = u_run.numpy()
-            self.J_logged = traj_cost.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = u_run.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["u_logged"] = self.u
         
         self.nuvec.assign(new_nuvec)
         return tf.squeeze(self.u).numpy()

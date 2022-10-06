@@ -35,7 +35,7 @@ class controller_random_action(template_controller):
     # step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         # Start all trajectories in current state
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -55,10 +55,10 @@ class controller_random_action(template_controller):
         self.u: np.ndarray = tf.squeeze(Q[best_idx, 0, :]).numpy()
         
         if self.controller_logging:
-            self.Q_logged = Q.numpy()
-            self.J_logged = traj_cost.numpy()
-            self.rollout_trajectories_logged = rollout_trajectory.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = Q.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.current_log["u_logged"] = self.u
 
         return self.u
 

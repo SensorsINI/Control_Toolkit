@@ -126,7 +126,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
         # tile s and convert inputs to tensor
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -141,18 +141,18 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         
         #after all inner loops, clip std min, so enough is explored
         #and shove all the values down by one for next control input
-        self.u = tf.squeeze(elite_Q[0,0,:])
+        self.u = tf.squeeze(elite_Q[0,0,:]).numpy()
         self.dist_mue, self.stdev = self.apply_time_delta(self.dist_mue, self.stdev)
         
         # Log variables
         if self.controller_logging:
-            self.Q_logged = Q.numpy()
-            self.J_logged = J.numpy()
-            self.rollout_trajectories_logged = rollout_trajectory.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = Q.numpy()
+            self.current_log["J_logged"] = J.numpy()
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.current_log["u_logged"] = self.u
         
         self.count += 1
-        return self.u.numpy()
+        return self.u
 
     def controller_reset(self):
         #reset controller initial distribution

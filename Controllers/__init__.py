@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from Control_Toolkit.Cost_Functions import cost_function_default
-from Control_Toolkit.others.environment import EnvironmentBatched
+from Control_Toolkit.others.environment import TensorType
 from Control_Toolkit.others.globals_and_utils import create_rng
 from gym.spaces.box import Box
 from SI_Toolkit.Predictors import predictor
@@ -59,12 +59,14 @@ class template_controller(ABC):
         self.save_vars = [
             "Q_logged",
             "J_logged",
-            "realized_cost_logged",
             "s_logged",
             "u_logged",
+            "realized_cost_logged",
             "trajectory_ages_logged",
+            "rollout_trajectories_logged",
         ]
-        self.logs = {s: [] for s in self.save_vars}
+        self.logs: "dict[str, list[TensorType]]" = {s: [] for s in self.save_vars}
+        self.current_log: "dict[str, TensorType]" = {s: None for s in self.save_vars}
         for v in self.save_vars:
             setattr(self, v, None)
     
@@ -97,18 +99,19 @@ class template_controller(ABC):
     
     def get_outputs(self) -> "dict[str, np.ndarray]":
         """Retrieve a dictionary of controller outputs. These could be saved traces of input plans or the like.
+        The values for each control iteration are stacked along the first axis.
 
         :return: A dictionary of numpy arrays
         :rtype: dict[str, np.ndarray]
         """
         return {
-            k: np.stack(v, axis=0) if len(v) > 0 else None for k, v in self.logs.items()
+            name: np.stack(v, axis=0) if len(v) > 0 else None for name, v in self.logs.items()
         }
         
     def update_logs(self) -> None:
         if self.controller_logging:
             for name, var in zip(
-                self.save_vars, [getattr(self, var_name, None) for var_name in self.save_vars]
+                self.save_vars, [self.current_log.get(var_name, None) for var_name in self.save_vars]
             ):
                 if var is not None:
                     self.logs[name].append(

@@ -180,7 +180,7 @@ class controller_rpgd_tf(template_controller):
 
     def step(self, s: np.ndarray, time=None):
         if self.controller_logging:
-            self.s_logged = s.copy()
+            self.current_log["s_logged"] = s.copy()
             
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
@@ -218,12 +218,14 @@ class controller_rpgd_tf(template_controller):
             rollout_trajectory,
         ) = self.get_action(s, self.Q_tf)
         
+        self.u = self.u.numpy()
+        
         if self.controller_logging:
-            self.Q_logged = self.Q_tf.numpy()
-            self.J_logged = J.numpy()
-            self.rollout_trajectories_logged = rollout_trajectory.numpy()
-            self.trajectory_ages_logged = self.trajectory_ages.numpy()
-            self.u_logged = self.u
+            self.current_log["Q_logged"] = self.Q_tf.numpy()
+            self.current_log["J_logged"] = J.numpy()
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.current_log["trajectory_ages_logged"] = self.trajectory_ages.numpy()
+            self.current_log["u_logged"] = self.u
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -297,7 +299,7 @@ class controller_rpgd_tf(template_controller):
         self.trajectory_ages += 1
         self.Q_tf.assign(Qn)
         self.count += 1
-        return self.u.numpy()
+        return self.u
 
     def controller_reset(self):
         # # unnecessary part: Adaptive sampling distribution
