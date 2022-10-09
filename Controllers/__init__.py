@@ -33,13 +33,13 @@ class template_controller(ABC):
         num_rollouts: int,
         controller_logging: bool,
     ):
-        self.predictor = predictor
+        self.predictor: predictor = predictor
         self.cost_function = cost_function
         
         # Environment-related parameters
         assert len(action_space.shape) == 1, "Only vector action space currently supported"
         self.num_control_inputs = action_space.shape[0]
-        if isinstance(observation_space, Box):
+        if observation_space is not None:
             assert len(observation_space.shape) == 1, "Only vector observation space currently supported"
             self.num_states = observation_space.shape[0]
         self.action_low = action_space.low

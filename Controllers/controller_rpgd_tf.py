@@ -2,10 +2,9 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile
+from Control_Toolkit.others.globals_and_utils import Compile, get_logger
 from gym.spaces.box import Box
 from SI_Toolkit.Predictors import predictor
-from Utilities.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -128,7 +127,7 @@ class controller_rpgd_tf(template_controller):
         # retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
-        # use optimizer to applay gradients and retrieve next set of input sequences
+        # use optimizer to apply gradients and retrieve next set of input sequences
         opt.apply_gradients(zip([dc_dQ_prc], [Q]))
         # clip
         Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
@@ -315,7 +314,10 @@ class controller_rpgd_tf(template_controller):
 
         # sample new initial guesses for trajectories
         Qn = self.sample_actions(self.rng, self.num_rollouts)
-        self.Q_tf = tf.Variable(Qn)
+        if hasattr(self, "Q_tf"):
+            self.Q_tf.assign(Qn)
+        else:
+            self.Q_tf = tf.Variable(Qn)
         self.count = 0
 
         # reset optimizer

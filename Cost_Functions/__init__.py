@@ -1,7 +1,9 @@
-from Control_Toolkit.others.environment import TensorType
+from Control_Toolkit.others.environment import EnvironmentBatched, TensorType
 
 
 class cost_function_base:
+    environment: EnvironmentBatched
+    
     def get_terminal_cost(self, s_hor: TensorType):
         raise NotImplementedError()
 
