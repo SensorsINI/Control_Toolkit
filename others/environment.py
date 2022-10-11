@@ -12,12 +12,16 @@ log = get_logger(__name__)
 
 TensorType = Union[np.ndarray, tf.Tensor, torch.Tensor]
 RandomGeneratorType = Union[Generator, tf.random.Generator, torch.Generator]
-
+NumericType = Union[float, int]
 
 class ComputationLibrary:
+    lib = None
     reshape: Callable[[TensorType, "tuple[int]"], TensorType] = None
+    permute: Callable[[TensorType, "tuple[int]"], TensorType] = None
+    newaxis = None
     shape: Callable[[TensorType], "list[int]"] = None
     to_numpy: Callable[[TensorType], np.ndarray] = None
+    to_variable: Callable[[TensorType], np.ndarray] = None
     to_tensor: Callable[[TensorType, type], TensorType] = None
     constant: Callable[[TensorType, type], TensorType] = None
     unstack: Callable[[TensorType, int, int], "list[TensorType]"] = None
@@ -37,7 +41,9 @@ class ComputationLibrary:
     bool = None
     tile: Callable[[TensorType, "tuple[int]"], TensorType] = None
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
+    arange: Callable[[NumericType, NumericType, NumericType], TensorType] = None
     zeros: Callable[["tuple[int]"], TensorType] = None
+    zeros_like: Callable[[TensorType], TensorType] = None
     ones: Callable[["tuple[int]"], TensorType] = None
     sign: Callable[[TensorType], TensorType] = None
     create_rng: Callable[[int], RandomGeneratorType] = None
@@ -50,7 +56,9 @@ class ComputationLibrary:
     concat: Callable[["list[TensorType]", int], TensorType]
     pi: TensorType = None
     any: Callable[[TensorType], bool] = None
+    all: Callable[[TensorType], bool] = None
     reduce_any: Callable[[TensorType, int], bool] = None
+    reduce_all: Callable[[TensorType, int], bool] = None
     reduce_max: Callable[[TensorType, int], bool] = None
     less: Callable[[TensorType, TensorType], TensorType] = None
     greater: Callable[[TensorType, TensorType], TensorType] = None
@@ -68,7 +76,10 @@ class ComputationLibrary:
 
 
 class NumpyLibrary(ComputationLibrary):
+    lib = 'Numpy'
     reshape = lambda x, shape: np.reshape(x, shape)
+    permute = np.transpose
+    newaxis = np.newaxis
     shape = np.shape
     to_numpy = lambda x: np.array(x)
     to_tensor = lambda x, t: np.array(x, dtype=t)
@@ -90,7 +101,9 @@ class NumpyLibrary(ComputationLibrary):
     bool = np.bool_
     tile = np.tile
     gather = lambda x, i, a: np.take(x, i, axis=a)
+    arange = np.arange
     zeros = np.zeros
+    zeros_like = np.zeros_like
     ones = np.ones
     sign = np.sign
     create_rng = lambda seed: Generator(SFC64(seed))
@@ -103,7 +116,9 @@ class NumpyLibrary(ComputationLibrary):
     concat = lambda x, a: np.concatenate(x, axis=a)
     pi = np.array(np.pi).astype(np.float32)
     any = np.any
+    all = np.all
     reduce_any = lambda a, axis: np.any(a, axis=axis)
+    reduce_all = lambda a, axis: np.all(a, axis=axis)
     reduce_max = lambda a, axis: np.max(a, axis=axis)
     less = lambda x, y: np.less(x, y)
     greater = lambda x, y: np.greater(x, y)
@@ -121,7 +136,10 @@ class NumpyLibrary(ComputationLibrary):
 
 
 class TensorFlowLibrary(ComputationLibrary):
+    lib = 'TF'
     reshape = tf.reshape
+    permute = tf.transpose
+    newaxis = tf.newaxis
     shape = lambda x: x.get_shape()  # .as_list()
     to_numpy = lambda x: x.numpy()
     to_tensor = lambda x, t: tf.convert_to_tensor(x, dtype=t)
@@ -136,14 +154,16 @@ class TensorFlowLibrary(ComputationLibrary):
     squeeze = tf.squeeze
     unsqueeze = tf.expand_dims
     stack = tf.stack
-    gather = lambda x, i, a: tf.gather(x, i, axis=a)
     cast = lambda x, t: tf.cast(x, dtype=t)
     floormod = tf.math.floormod
     float32 = tf.float32
     int32 = tf.int32
     bool = tf.bool
     tile = tf.tile
+    gather = lambda x, i, a: tf.gather(x, i, axis=a)
+    arange = tf.range
     zeros = tf.zeros
+    zeros_like = tf.zeros_like
     ones = tf.ones
     sign = tf.sign
     create_rng = lambda seed: tf.random.Generator.from_seed(seed)
@@ -156,7 +176,9 @@ class TensorFlowLibrary(ComputationLibrary):
     concat = lambda x, a: tf.concat(x, a)
     pi = tf.convert_to_tensor(np.array(np.pi), dtype=tf.float32)
     any = tf.reduce_any
+    all = tf.reduce_all
     reduce_any = lambda a, axis: tf.reduce_any(a, axis=axis)
+    reduce_all = lambda a, axis: tf.reduce_all(a, axis=axis)
     reduce_max = lambda a, axis: tf.reduce_max(a, axis=axis)
     less = lambda x, y: tf.math.less(x, y)
     greater = lambda x, y: tf.math.greater(x, y)
@@ -174,7 +196,10 @@ class TensorFlowLibrary(ComputationLibrary):
 
 
 class PyTorchLibrary(ComputationLibrary):
+    lib = 'Pytorch'
     reshape = torch.reshape
+    permute = torch.permute
+    newaxis = None
     shape = lambda x: list(x.size())
     to_numpy = lambda x: x.cpu().detach().numpy()
     to_tensor = lambda x, t: torch.as_tensor(x, dtype=t)
@@ -189,14 +214,16 @@ class PyTorchLibrary(ComputationLibrary):
     squeeze = torch.squeeze
     unsqueeze = torch.unsqueeze
     stack = torch.stack
-    gather = lambda x, i, a: torch.gather(x, dim=a, index=i)
     cast = lambda x, t: x.type(t)
     floormod = torch.remainder
     float32 = torch.float32
     int32 = torch.int32
     bool = torch.bool
     tile = torch.tile
+    gather = lambda x, i, a: torch.gather(x, dim=a, index=i)
+    arange = torch.arange
     zeros = torch.zeros
+    zeros_like = torch.zeros_like
     ones = torch.ones
     sign = torch.sign
     create_rng = lambda seed: torch.Generator().manual_seed(seed)
@@ -213,7 +240,9 @@ class PyTorchLibrary(ComputationLibrary):
     concat = lambda x, a: torch.concat(x, dim=a)
     pi = torch.from_numpy(np.array(np.pi)).float()
     any = torch.any
+    all = torch.all
     reduce_any = lambda a, axis: torch.any(a, dim=axis)
+    reduce_all = lambda a, axis: torch.all(a, dim=axis)
     reduce_max = lambda a, axis: torch.max(a, dim=axis)
     less = lambda x, y: torch.less(x, y)
     greater = lambda x, y: torch.greater(x, y)
