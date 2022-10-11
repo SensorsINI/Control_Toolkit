@@ -142,7 +142,7 @@ class TensorFlowLibrary(ComputationLibrary):
     newaxis = tf.newaxis
     shape = lambda x: x.get_shape()  # .as_list()
     to_numpy = lambda x: x.numpy()
-    to_tensor = lambda x, t: tf.convert_to_tensor(x, dtype=t)
+    to_tensor = lambda x, dtype: tf.convert_to_tensor(x, dtype=dtype)
     constant = lambda x, t: tf.constant(x, dtype=t)
     unstack = lambda x, num, axis: tf.unstack(x, num=num, axis=axis)
     ndim = tf.rank
