@@ -82,7 +82,7 @@ class NumpyLibrary(ComputationLibrary):
     newaxis = np.newaxis
     shape = np.shape
     to_numpy = lambda x: np.array(x)
-    to_tensor = lambda x, t: np.array(x, dtype=t)
+    to_tensor = lambda x, dtype: np.array(x, dtype=dtype)
     constant = lambda x, t: np.array(x, dtype=t)
     unstack = lambda x, num, axis: list(np.moveaxis(x, axis, 0))
     ndim = np.ndim
@@ -202,7 +202,7 @@ class PyTorchLibrary(ComputationLibrary):
     newaxis = None
     shape = lambda x: list(x.size())
     to_numpy = lambda x: x.cpu().detach().numpy()
-    to_tensor = lambda x, t: torch.as_tensor(x, dtype=t)
+    to_tensor = lambda x, dtype: torch.as_tensor(x, dtype=dtype)
     constant = lambda x, t: torch.as_tensor(x, dtype=t)
     unstack = lambda x, num, dim: torch.unbind(x, dim=dim)
     ndim = lambda x: x.ndim
