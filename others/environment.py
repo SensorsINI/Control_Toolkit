@@ -94,6 +94,7 @@ class NumpyLibrary(ComputationLibrary):
     newaxis = np.newaxis
     shape = np.shape
     to_numpy = lambda x: np.array(x)
+    to_variable = np.array
     to_tensor = lambda x, dtype: np.array(x, dtype=dtype)
     constant = lambda x, t: np.array(x, dtype=t)
     unstack = lambda x, num, axis: list(np.moveaxis(x, axis, 0))
@@ -155,6 +156,7 @@ class TensorFlowLibrary(ComputationLibrary):
     newaxis = tf.newaxis
     shape = lambda x: x.get_shape()  # .as_list()
     to_numpy = lambda x: x.numpy()
+    to_variable = tf.Variable
     to_tensor = lambda x, dtype: tf.convert_to_tensor(x, dtype=dtype)
     constant = lambda x, t: tf.constant(x, dtype=t)
     unstack = lambda x, num, axis: tf.unstack(x, num=num, axis=axis)
@@ -216,6 +218,7 @@ class PyTorchLibrary(ComputationLibrary):
     newaxis = None
     shape = lambda x: list(x.size())
     to_numpy = lambda x: x.cpu().detach().numpy()
+    to_variable = torch.as_tensor
     to_tensor = lambda x, dtype: torch.as_tensor(x, dtype=dtype)
     constant = lambda x, t: torch.as_tensor(x, dtype=t)
     unstack = lambda x, num, dim: torch.unbind(x, dim=dim)
