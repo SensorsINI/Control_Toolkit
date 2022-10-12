@@ -49,9 +49,11 @@ class ComputationLibrary:
     floormod: Callable[[TensorType], TensorType] = None
     float32 = None
     int32 = None
+    int64 = None
     bool = None
     tile: Callable[[TensorType, "tuple[int]"], TensorType] = None
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
+    gather_last: Callable[[TensorType, TensorType], TensorType] = None
     arange: Callable[[Optional[NumericType], NumericType, Optional[NumericType]], TensorType] = None
     zeros: Callable[["tuple[int]"], TensorType] = None
     zeros_like: Callable[[TensorType], TensorType] = None
@@ -111,9 +113,11 @@ class NumpyLibrary(ComputationLibrary):
     floormod = np.mod
     float32 = np.float32
     int32 = np.int32
+    int64 = np.int64
     bool = np.bool_
     tile = np.tile
     gather = lambda x, i, a: np.take(x, i, axis=a)
+    gather_last = lambda x, i: np.take(x, i, axis=-1)
     arange = np.arange
     zeros = np.zeros
     zeros_like = np.zeros_like
@@ -173,9 +177,11 @@ class TensorFlowLibrary(ComputationLibrary):
     floormod = tf.math.floormod
     float32 = tf.float32
     int32 = tf.int32
+    int64 = tf.int64
     bool = tf.bool
     tile = tf.tile
     gather = lambda x, i, a: tf.gather(x, i, axis=a)
+    gather_last = lambda x, i: tf.gather(x, i, axis=-1)
     arange = tf.range
     zeros = tf.zeros
     zeros_like = tf.zeros_like
@@ -212,6 +218,11 @@ class TensorFlowLibrary(ComputationLibrary):
 
 
 class PyTorchLibrary(ComputationLibrary):
+
+    @staticmethod
+    def gather_last_pytorch(a, index_vector):
+        return a[..., index_vector]
+
     lib = 'Pytorch'
     reshape = torch.reshape
     permute = torch.permute
@@ -235,9 +246,11 @@ class PyTorchLibrary(ComputationLibrary):
     floormod = torch.remainder
     float32 = torch.float32
     int32 = torch.int32
+    int64 = torch.int64
     bool = torch.bool
     tile = torch.tile
     gather = lambda x, i, a: torch.gather(x, dim=a, index=i)
+    gather_last = gather_last_pytorch
     arange = torch.arange
     zeros = torch.zeros
     zeros_like = torch.zeros_like
