@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -107,7 +107,7 @@ class controller_mppi_optimize_tf(template_controller):
             delta_u = random_gen.normal([self.num_rollouts, self.mppi_samples, self.num_control_inputs], dtype=tf.float32) * stdev
         return delta_u
 
-    @Compile
+    @CompileTF
     def mppi_prior(self, s, u_nom, random_gen, u_old):
         # generate random input sequence and clip to control limits
         delta_u = self.inizialize_pertubation(random_gen)
@@ -121,7 +121,7 @@ class controller_mppi_optimize_tf(template_controller):
         u_nom = tf.clip_by_value(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
         return u_nom
 
-    @Compile
+    @CompileTF
     def grad_step(self, s, Q, opt):
         #do a gradient descent step
         #setup gradient tape

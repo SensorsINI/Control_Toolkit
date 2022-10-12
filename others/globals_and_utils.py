@@ -11,7 +11,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
 import tensorflow as tf
 from numpy.random import SFC64, Generator
-from SI_Toolkit.Functions.TF.Compile import Compile
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 LOGGING_LEVEL = logging.INFO
 

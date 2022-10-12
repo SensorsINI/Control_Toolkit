@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
 from others.globals_and_utils import create_rng
-from SI_Toolkit.Functions.TF.Compile import Compile
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -55,7 +55,7 @@ class controller_random_action(template_controller):
         self.controller_reset()
         self.u = 0
     
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)

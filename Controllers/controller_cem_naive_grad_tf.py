@@ -6,7 +6,7 @@ from importlib import import_module
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -59,7 +59,7 @@ class controller_cem_naive_grad_tf(template_controller):
         self.controller_reset()
         self.u = 0.0
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, rng_cem, dist_mue, stdev):
         # generate random input sequence and clip to control limits
         Q = tf.tile(dist_mue, [self.num_rollouts, 1, 1]) + rng_cem.normal(

@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -104,7 +104,7 @@ class controller_mppi_var_tf(template_controller):
             delta_u = tf.transpose(tf.matmul(tf.transpose(delta_u, perm=(2,0,1)), tf.transpose(self.interp_mat, perm=(2,0,1))), perm=(1,2,0)) #here interpolation is simply a multiplication with a matrix
         return delta_u
 
-    @Compile
+    @CompileTF
     def do_step(self, s, u_nom, random_gen, u_old, nuvec):
         #start gradient tape
         with tf.GradientTape(watch_accessed_variables=False) as tape:

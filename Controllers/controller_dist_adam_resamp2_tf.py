@@ -3,7 +3,7 @@ from importlib import import_module
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.others.globals_and_utils import get_logger
@@ -141,7 +141,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.traj_cost = None
         self.optimal_trajectory = None
 
-    @Compile
+    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         Qn = rng_gen.uniform(
             [batch_size, self.num_valid_vals, self.num_control_inputs],
@@ -160,7 +160,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
             )
         return Qn
 
-    @Compile
+    @CompileTF
     def grad_step(
         self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
@@ -180,7 +180,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    @Compile
+    @CompileTF
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)

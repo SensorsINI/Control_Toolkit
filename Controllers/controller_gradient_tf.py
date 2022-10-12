@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
 from others.globals_and_utils import create_rng
-from SI_Toolkit.Functions.TF.Compile import Compile
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -85,7 +85,7 @@ class controller_gradient_tf(template_controller):
         self.controller_reset()
         self.u = 0
 
-    @Compile
+    @CompileTF
     def gradient_optimization(self, s: tf.Tensor, Q_tf: tf.Variable, optim):
         # rollout the trajectories and get cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -102,7 +102,7 @@ class controller_gradient_tf(template_controller):
         # traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         return Q
     
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)

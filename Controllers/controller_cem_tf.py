@@ -3,7 +3,7 @@ from importlib import import_module
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -49,14 +49,14 @@ class controller_cem_tf(template_controller):
         self.controller_reset()
         self.u = 0.0
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
         traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Q, self.u)
         return traj_cost, rollout_trajectory
 
-    @Compile
+    @CompileTF
     def update_distribution(self, s: tf.Tensor, Q: tf.Tensor, traj_cost: tf.Tensor, rollout_trajectory: tf.Tensor, dist_mue: tf.Tensor, stdev: tf.Tensor, rng: tf.random.Generator):
         #generate random input sequence and clip to control limits
         Q = tf.tile(dist_mue,(self.num_rollouts,1,1)) + tf.multiply(rng.normal(

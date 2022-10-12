@@ -6,7 +6,7 @@ from importlib import import_module
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -71,7 +71,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
             dtype=tf.float32,
         )
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, elite_Q, Q_tf: tf.Variable, opt, rng: tf.random.Generator):
         Q_sampled = self._sample_actions(rng, self.num_rollouts - self.cem_best_k)
         Q = tf.concat([elite_Q, Q_sampled], axis=0)
@@ -103,7 +103,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         stdev = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
         return dist_mue, stdev, Qn, elite_Q, traj_cost, rollout_trajectory
     
-    @Compile
+    @CompileTF
     def _sample_actions(self, rng: tf.random.Generator, num_samples: int):
         return (
             tf.tile(self.dist_mue, [num_samples, 1, 1])
@@ -112,7 +112,7 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
             )
         )
     
-    @Compile
+    @CompileTF
     def apply_time_delta(self, dist_mue, stdev):
         dist_mue_shifted = tf.concat([
             dist_mue[:, 1:, :],

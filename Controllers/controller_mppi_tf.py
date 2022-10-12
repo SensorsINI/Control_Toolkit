@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, Compile
+from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -123,7 +123,7 @@ class controller_mppi_tf(template_controller):
             delta_u = random_gen.normal([self.num_rollouts, self.mppi_samples, self.num_control_inputs], dtype=tf.float32) * stdev
         return delta_u
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, u_nom, random_gen, u_old):
         s = tf.tile(s, tf.constant([self.num_rollouts, 1]))
         # generate random input sequence and clip to control limits
@@ -142,7 +142,7 @@ class controller_mppi_tf(template_controller):
         u_tiled = tf.tile(u_nom[:, :1, :], tf.constant([self.num_rollouts, 1, 1]))
         self.predictor.update_internal_state_tf(s=s, Q0=u_tiled)
 
-    @Compile
+    @CompileTF
     def predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
         if self.predictor_name ==  'predictor_autoregressive_tf':
