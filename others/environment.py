@@ -249,7 +249,7 @@ class PyTorchLibrary(ComputationLibrary):
     int64 = torch.int64
     bool = torch.bool
     tile = torch.tile
-    gather = lambda x, i, a: torch.gather(x, dim=a, index=i)
+    gather = lambda x, i, a: torch.gather(x, dim=a, index=i)  # FIXME: It works very differently to TF!!!
     gather_last = gather_last_pytorch
     arange = torch.arange
     zeros = torch.zeros
