@@ -18,7 +18,7 @@ NumericType = Union[float, int]
 class LibraryHelperFunctions:
     @staticmethod
     def set_to_value(v: TensorType, x: TensorType):
-        v = x
+        v[...] = x
 
     @staticmethod
     def set_to_variable(v: tf.Variable, x: tf.Tensor):
