@@ -14,6 +14,17 @@ TensorType = Union[np.ndarray, tf.Tensor, torch.Tensor]
 RandomGeneratorType = Union[Generator, tf.random.Generator, torch.Generator]
 NumericType = Union[float, int]
 
+
+class LibraryHelperFunctions:
+    @staticmethod
+    def set_to_value(v: TensorType, x: TensorType):
+        v = x
+
+    @staticmethod
+    def set_to_variable(v: tf.Variable, x: tf.Tensor):
+        v.assign(x)
+
+
 class ComputationLibrary:
     lib = None
     reshape: Callable[[TensorType, "tuple[int]"], TensorType] = None
@@ -41,7 +52,7 @@ class ComputationLibrary:
     bool = None
     tile: Callable[[TensorType, "tuple[int]"], TensorType] = None
     gather: Callable[[TensorType, TensorType, int], TensorType] = None
-    arange: Callable[[NumericType, NumericType, NumericType], TensorType] = None
+    arange: Callable[[Optional[NumericType], NumericType, Optional[NumericType]], TensorType] = None
     zeros: Callable[["tuple[int]"], TensorType] = None
     zeros_like: Callable[[TensorType], TensorType] = None
     ones: Callable[["tuple[int]"], TensorType] = None
@@ -73,6 +84,7 @@ class ComputationLibrary:
     cross: Callable[[TensorType, TensorType], TensorType] = None
     dot: Callable[[TensorType, TensorType], TensorType] = None
     stop_gradient: Callable[[TensorType], TensorType] = None
+    assign: Callable[[Union[TensorType, tf.Variable], TensorType], Union[TensorType, tf.Variable]] = None
 
 
 class NumpyLibrary(ComputationLibrary):
@@ -133,6 +145,7 @@ class NumpyLibrary(ComputationLibrary):
     cross = np.cross
     dot = np.dot
     stop_gradient = lambda x: x
+    assign = LibraryHelperFunctions.set_to_value
 
 
 class TensorFlowLibrary(ComputationLibrary):
@@ -193,6 +206,7 @@ class TensorFlowLibrary(ComputationLibrary):
     cross = tf.linalg.cross
     dot = lambda a, b: tf.tensordot(a, b, 1)
     stop_gradient = tf.stop_gradient
+    assign = LibraryHelperFunctions.set_to_variable
 
 
 class PyTorchLibrary(ComputationLibrary):
@@ -257,6 +271,7 @@ class PyTorchLibrary(ComputationLibrary):
     cross = torch.linalg.cross
     dot = torch.dot
     stop_gradient = tf.stop_gradient # FIXME: How to imlement this in torch?
+    assign = LibraryHelperFunctions.set_to_value
 
 
 class EnvironmentBatched:
