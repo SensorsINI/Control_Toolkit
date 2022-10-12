@@ -130,7 +130,7 @@ class NumpyLibrary(ComputationLibrary):
     ).astype(dtype)
     sum = lambda x, a: np.sum(x, axis=a, keepdims=False)
     set_shape = lambda x, shape: x
-    concat = lambda x, a: np.concatenate(x, axis=a)
+    concat = lambda x, axis: np.concatenate(x, axis=axis)
     pi = np.array(np.pi).astype(np.float32)
     any = np.any
     all = np.all
@@ -194,7 +194,7 @@ class TensorFlowLibrary(ComputationLibrary):
     )
     sum = lambda x, a: tf.reduce_sum(x, axis=a, keepdims=False)
     set_shape = lambda x, shape: x.set_shape(shape)
-    concat = lambda x, a: tf.concat(x, a)
+    concat = lambda x, axis: tf.concat(x, axis)
     pi = tf.convert_to_tensor(np.array(np.pi), dtype=tf.float32)
     any = tf.reduce_any
     all = tf.reduce_all
@@ -267,7 +267,7 @@ class PyTorchLibrary(ComputationLibrary):
     )
     sum = lambda x, a: torch.sum(x, a, keepdim=False)
     set_shape = lambda x, shape: x
-    concat = lambda x, a: torch.concat(x, dim=a)
+    concat = lambda x, axis: torch.concat(x, dim=axis)
     pi = torch.from_numpy(np.array(np.pi)).float()
     any = torch.any
     all = torch.all
