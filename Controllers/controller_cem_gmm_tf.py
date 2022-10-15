@@ -3,16 +3,16 @@ import tensorflow as tf
 import tensorflow_probability.python.distributions as tfpd
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class controller_cem_gmm_tf(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -36,14 +36,14 @@ class controller_cem_gmm_tf(template_controller):
         
         self.controller_reset()
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
         traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q, self.u)
         return traj_cost, rollout_trajectory
 
-    @Compile
+    @CompileTF
     def update_distribution(self, s: tf.Tensor, Q: tf.Tensor, traj_cost: tf.Tensor, rollout_trajectory: tf.Tensor, sampling_dist: tfpd.Distribution, rng: tf.random.Generator):
         #generate random input sequence and clip to control limits
         Q = sampling_dist.sample(sample_shape=[self.num_rollouts])

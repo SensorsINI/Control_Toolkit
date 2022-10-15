@@ -2,9 +2,9 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile, get_logger
+from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 
 logger = get_logger(__name__)
 
@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 class controller_rpgd_tf(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -94,7 +94,7 @@ class controller_rpgd_tf(template_controller):
         
         self.controller_reset()
 
-    @Compile
+    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         Qn = rng_gen.uniform(
             [batch_size, self.num_valid_vals, self.num_control_inputs],
@@ -113,7 +113,7 @@ class controller_rpgd_tf(template_controller):
             )
         return Qn
 
-    @Compile
+    @CompileTF
     def grad_step(
         self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
@@ -133,7 +133,7 @@ class controller_rpgd_tf(template_controller):
         Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    @Compile
+    @CompileTF
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)

@@ -3,14 +3,14 @@ import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Functions.TF.Compile import Compile
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Functions.TF.Compile import CompileTF
+from SI_Toolkit.Predictors import template_predictor
 
 
 class controller_random_action(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -22,8 +22,8 @@ class controller_random_action(template_controller):
     ):
         super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
         self.controller_reset()
-        
-    @Compile
+    
+    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)

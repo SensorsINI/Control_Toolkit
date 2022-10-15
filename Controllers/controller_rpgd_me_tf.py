@@ -2,9 +2,9 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile, get_logger
+from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 import tensorflow_probability as tfp
 
 logger = get_logger(__name__)
@@ -18,7 +18,7 @@ class controller_rpgd_me_tf(template_controller):
     """
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -131,7 +131,7 @@ class controller_rpgd_me_tf(template_controller):
         l, r = tf.unstack(theta, 2, -1)
         return tf.math.log(tf.maximum(r - l, 1e-8))
         
-    @Compile
+    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         # Reparametrization trick
         epsilon = rng_gen.normal([batch_size, self.num_valid_vals, self.num_control_inputs], dtype=tf.float32)
@@ -147,7 +147,7 @@ class controller_rpgd_me_tf(template_controller):
             )
         return epsilon
 
-    @Compile
+    @CompileTF
     def grad_step(
         self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
@@ -170,7 +170,7 @@ class controller_rpgd_me_tf(template_controller):
         theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
         return theta, traj_cost
 
-    @Compile
+    @CompileTF
     def get_action(self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable):
         Q = self.zeta(theta, epsilon)
         # Rollout trajectories and retrieve cost

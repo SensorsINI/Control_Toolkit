@@ -4,16 +4,16 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -45,7 +45,7 @@ class controller_cem_naive_grad_tf(template_controller):
         
         self.controller_reset()
 
-    @Compile
+    @CompileTF
     def predict_and_cost(self, s, rng, dist_mue, stdev):
         # generate random input sequence and clip to control limits
         Q = tf.tile(dist_mue, [self.num_rollouts, 1, 1]) + rng.normal(

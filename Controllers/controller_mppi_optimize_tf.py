@@ -3,16 +3,16 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 
 
 #controller class
 class controller_mppi_optimize_tf(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -104,7 +104,7 @@ class controller_mppi_optimize_tf(template_controller):
             delta_u = random_gen.normal([self.num_rollouts, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32) * stdev
         return delta_u
 
-    @Compile
+    @CompileTF
     def mppi_prior(self, s, u_nom, random_gen, u_old):
         # generate random input sequence and clip to control limits
         delta_u = self.inizialize_pertubation(random_gen)
@@ -118,7 +118,7 @@ class controller_mppi_optimize_tf(template_controller):
         u_nom = tf.clip_by_value(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
         return u_nom
 
-    @Compile
+    @CompileTF
     def grad_step(self, s, Q, opt):
         #do a gradient descent step
         #setup gradient tape

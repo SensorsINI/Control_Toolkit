@@ -3,16 +3,16 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
-from Control_Toolkit.others.globals_and_utils import Compile
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import predictor
+from SI_Toolkit.Predictors import template_predictor
 
 
 #controller class
 class controller_mppi_var_tf(template_controller):
     def __init__(
         self,
-        predictor: predictor,
+        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -99,7 +99,7 @@ class controller_mppi_var_tf(template_controller):
             delta_u = tf.transpose(tf.matmul(tf.transpose(delta_u, perm=(2,0,1)), tf.transpose(self.interp_mat, perm=(2,0,1))), perm=(1,2,0)) #here interpolation is simply a multiplication with a matrix
         return delta_u
 
-    @Compile
+    @CompileTF
     def do_step(self, s, u_nom, random_gen, u_old, nuvec):
         #start gradient tape
         with tf.GradientTape(watch_accessed_variables=False) as tape:
