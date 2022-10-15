@@ -33,7 +33,7 @@ class template_controller(ABC):
         num_rollouts: int,
         controller_logging: bool,
     ):
-        self.predictor: predictor = predictor
+        self.predictor: template_predictor = predictor
         self.cost_function = cost_function
         
         # Environment-related parameters
