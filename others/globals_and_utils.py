@@ -105,7 +105,7 @@ def get_available_controller_names() -> "list[str]":
     return controller_names
 
 
-def get_controller(controller_names=None, controller_name=None, controller_idx=None) -> type:
+def get_controller_name(controller_names=None, controller_name=None, controller_idx=None) -> type:
     """
     The method sets a new controller as the current controller.
     The controller may be indicated either by its name
@@ -135,11 +135,4 @@ def get_controller(controller_names=None, controller_name=None, controller_idx=N
     else:
         controller_name = controller_names[controller_idx]
 
-    # Load controller
-    if controller_name == 'manual-stabilization':
-        Controller = None
-    else:
-        controller_full_name = 'controller_' + controller_name.replace('-', '_')
-        Controller = import_controller_by_name(controller_full_name)
-
-    return Controller, controller_name, controller_idx
+    return controller_name, controller_idx

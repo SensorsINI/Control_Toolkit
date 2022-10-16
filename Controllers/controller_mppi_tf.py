@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit.Cost_Functions import cost_function_base
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from gym.spaces.box import Box
 from SI_Toolkit.Predictors import template_predictor
