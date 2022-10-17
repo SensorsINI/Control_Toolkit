@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
@@ -24,18 +25,15 @@ class template_controller(ABC):
 
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
         observation_space: Box,
         mpc_horizon: int,
         num_rollouts: int,
+        predictor_specification: str,
         controller_logging: bool,
     ):
-        self.predictor: template_predictor = predictor
-        self.cost_function = cost_function
-        
         # Environment-related parameters
         assert len(action_space.shape) == 1, "Only vector action space currently supported"
         self.num_control_inputs = action_space.shape[0]
@@ -48,6 +46,13 @@ class template_controller(ABC):
         # MPC parameters
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
+        
+        # Predictor
+        self.cost_function = cost_function
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
         
         # Initialize random sampler
         self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)

@@ -12,7 +12,6 @@ from SI_Toolkit.Predictors import template_predictor
 class controller_mppi_var_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -22,6 +21,7 @@ class controller_mppi_var_tf(template_controller):
         LBD_mc: float,
         mpc_horizon: int,
         num_rollouts: int,
+        predictor_specification: str,
         dt: float,
         NU_mc: float,
         SQRTRHOINV_mc: float,
@@ -35,7 +35,7 @@ class controller_mppi_var_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # MPPI parameters
         self.SAMPLING_TYPE = SAMPLING_TYPE

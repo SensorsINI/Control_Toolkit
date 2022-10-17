@@ -1,19 +1,17 @@
-from importlib import import_module
+import copy
 
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import template_predictor
 
 
 class controller_mppi_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -23,7 +21,7 @@ class controller_mppi_tf(template_controller):
         LBD: float,
         mpc_horizon: int,
         num_rollouts: int,
-        dt: float,
+        predictor_specification: str,
         predictor_intermediate_steps: int,
         NU: float,
         SQRTRHOINV: float,
@@ -34,36 +32,23 @@ class controller_mppi_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # MPPI parameters
         self.cc_weight = cc_weight
+        self.predictor_single_trajectory = copy.deepcopy(self.predictor)
+        self.predictor_single_trajectory.configure(batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
+                                                   predictor_specification=predictor_specification)
+
+        dt = self.predictor.predictor_config['dt']
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
         self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.math.sqrt(dt)), dtype=tf.float32)
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
-        
-        # Instantiate single trajectory predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        if predictor_name == "predictor_autoregressive_tf":
-            self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
-            horizon=self.mpc_horizon,
-            dt=dt,
-            intermediate_steps=predictor_intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=1,
-            net_name=NET_NAME,
-        )
-        else:
-            self.predictor_single_trajectory = self.predictor
 
-        # Defining function - the compiled part must not have if-else statements with changing output dimensions
-        if predictor_name == 'predictor_autoregressive_tf':
-            self.update_internal_state = self.update_internal_state_of_RNN
-        else:
-            self.update_internal_state = lambda s, u_nom: ...
+        self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
         if True:
             self.mppi_output = self.return_all
@@ -133,13 +118,12 @@ class controller_mppi_tf(template_controller):
 
     def update_internal_state_of_RNN(self, s, u_nom):
         u_tiled = tf.tile(u_nom[:, :1, :], tf.constant([self.num_rollouts, 1, 1]))
-        self.predictor.update_internal_state_tf(s=s, Q0=u_tiled)
+        self.predictor.update(s=s, Q0=u_tiled)
 
     @CompileTF
     def predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
-        if self.predictor_name ==  'predictor_autoregressive_tf':
-            self.predictor_single_trajectory.update_internal_state_tf(s=s, Q0=u_nom[:, :1, :])
+        self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
 
     #step function to find control

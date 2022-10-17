@@ -3,17 +3,15 @@
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import template_predictor
 
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -21,6 +19,7 @@ class controller_cem_naive_grad_tf(template_controller):
         mpc_horizon: int,
         cem_outer_it: int,
         num_rollouts: int,
+        predictor_specification: str,
         cem_initial_action_stdev: float,
         cem_stdev_min: float,
         cem_best_k: int,
@@ -29,7 +28,7 @@ class controller_cem_naive_grad_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # CEM parameters
         self.cem_outer_it = cem_outer_it
@@ -38,10 +37,8 @@ class controller_cem_naive_grad_tf(template_controller):
         self.cem_best_k = cem_best_k
 
         # Optimization parameters
-        self.learning_rate = learning_rate
-        self.learning_rate = tf.constant(self.learning_rate, dtype=tf.float32)
-        self.gradmax_clip = gradmax_clip
-        self.gradmax_clip = tf.constant(self.gradmax_clip, dtype = tf.float32)
+        self.learning_rate = tf.constant(learning_rate, dtype=tf.float32)
+        self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         
         self.controller_reset()
 

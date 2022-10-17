@@ -12,7 +12,6 @@ from SI_Toolkit.Predictors import template_predictor
 class controller_mppi_optimize_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -22,6 +21,7 @@ class controller_mppi_optimize_tf(template_controller):
         LBD: float,
         mpc_horizon: int,
         num_rollouts: int,
+        predictor_specification: str,
         dt: float,
         NU: float,
         SQRTRHOINV: float,
@@ -36,7 +36,7 @@ class controller_mppi_optimize_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)  
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # Cost function parameters
         self.cc_weight = cc_weight
@@ -54,8 +54,7 @@ class controller_mppi_optimize_tf(template_controller):
         self.optim_steps = optim_steps
 
         # Setup prototype control sequence
-        self.Q_opt = tf.zeros([1,self.mpc_horizon,self.num_control_inputs], dtype=tf.float32)
-        self.Q_opt = tf.Variable(self.Q_opt)
+        self.Q_opt = tf.Variable(tf.zeros([1,self.mpc_horizon,self.num_control_inputs], dtype=tf.float32))
         
         # Setup Adam optimizer
         mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)

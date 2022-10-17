@@ -4,13 +4,11 @@ from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 from SI_Toolkit.Functions.TF.Compile import CompileTF
-from SI_Toolkit.Predictors import template_predictor
 
 
 class controller_gradient_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
@@ -19,6 +17,7 @@ class controller_gradient_tf(template_controller):
         gradient_steps: int,
         num_rollouts: int,
         initial_action_stdev: float,
+        predictor_specification: str,
         learning_rate: float,
         adam_beta_1: float,
         adam_beta_2: float,
@@ -30,7 +29,7 @@ class controller_gradient_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # MPC parameters
         self.gradient_steps = gradient_steps
