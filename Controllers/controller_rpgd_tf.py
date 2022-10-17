@@ -1,10 +1,9 @@
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import template_predictor
 
 logger = get_logger(__name__)
 
@@ -12,13 +11,13 @@ logger = get_logger(__name__)
 class controller_rpgd_tf(template_controller):
     def __init__(
         self,
-        predictor: template_predictor,
         cost_function: cost_function_base,
         seed: int,
         action_space: Box,
         observation_space: Box,
         mpc_horizon: int,
         num_rollouts: int,
+        predictor_specification: str,
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
@@ -36,7 +35,7 @@ class controller_rpgd_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(predictor=predictor, cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
         
         # RPGD parameters
         self.outer_its = outer_its

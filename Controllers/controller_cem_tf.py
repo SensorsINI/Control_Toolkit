@@ -4,7 +4,6 @@ from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import template_predictor
 
 
 #cem class

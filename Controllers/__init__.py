@@ -1,12 +1,11 @@
 from abc import ABC, abstractmethod
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from Control_Toolkit.others.environment import TensorType
 from Control_Toolkit.others.globals_and_utils import create_rng
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors import template_predictor
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:

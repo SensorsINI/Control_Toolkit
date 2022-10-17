@@ -1,15 +1,9 @@
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.others.environment import EnvironmentBatched
-from others.globals_and_utils import create_rng
-from SI_Toolkit.Functions.TF.Compile import CompileTF
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 from SI_Toolkit.Functions.TF.Compile import CompileTF
-from SI_Toolkit.Predictors import template_predictor
 
 
 class controller_random_action(template_controller):
