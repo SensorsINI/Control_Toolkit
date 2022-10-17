@@ -1,3 +1,4 @@
+import copy
 from importlib import import_module
 
 import numpy as np
@@ -5,12 +6,13 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from Control_Toolkit.Controllers import template_controller
 
 
 class controller_mppi_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, INTERPOLATION_STEP: int, NET_NAME: str, predictor_name: str, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, INTERPOLATION_STEP: int,predictor_specification: str, **kwargs):
         super().__init__(environment_model)
 
         #First configure random sampler
@@ -23,9 +25,17 @@ class controller_mppi_tf(template_controller):
 
         self.cc_weight = cc_weight
 
-        self.predictor_name = predictor_name
         self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
 
+        self.predictor = PredictorWrapper()
+        self.predictor_single_trajectory = copy.deepcopy(self.predictor)
+
+        self.predictor.configure(batch_size=num_rollouts, horizon=self.mppi_samples,
+                                 predictor_specification=predictor_specification)
+        self.predictor_single_trajectory.configure(batch_size=1, horizon=self.mppi_samples,  # TF requires constant batch size
+                                                   predictor_specification=predictor_specification)
+
+        dt = self.predictor.predictor_config['dt']
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
@@ -37,29 +47,6 @@ class controller_mppi_tf(template_controller):
         self.clip_control_input_low = tf.constant(self.env_mock.action_space.low)
         self.clip_control_input_high = tf.constant(self.env_mock.action_space.high)
 
-        #instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.mppi_samples,
-            dt=dt,
-            intermediate_steps=predictor_intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=num_rollouts,
-            net_name=NET_NAME,
-            planning_environment=environment_model,
-        )
-        if predictor_name == "predictor_autoregressive_tf":
-            self.predictor_single_trajectory = getattr(predictor_module, predictor_name)(
-            horizon=self.mppi_samples,
-            dt=dt,
-            intermediate_steps=predictor_intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=1,
-            net_name=NET_NAME,
-        )
-        else:
-            self.predictor_single_trajectory = self.predictor
-
         self.get_rollouts_from_mppi = True
         self.get_optimal_trajectory = False
 
@@ -68,11 +55,7 @@ class controller_mppi_tf(template_controller):
         self.traj_cost = None
         self.optimal_trajectory = None
 
-        # Defining function - the compiled part must not have if-else statements with changing output dimensions
-        if predictor_name == 'predictor_autoregressive_tf':
-            self.update_internal_state = self.update_internal_state_of_RNN
-        else:
-            self.update_internal_state = lambda s, u_nom: ...
+        self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
         if self.get_rollouts_from_mppi:
             self.mppi_output = self.return_all
@@ -140,13 +123,12 @@ class controller_mppi_tf(template_controller):
 
     def update_internal_state_of_RNN(self, s, u_nom):
         u_tiled = tf.tile(u_nom[:, :1, :], tf.constant([self.num_rollouts, 1, 1]))
-        self.predictor.update_internal_state_tf(s=s, Q0=u_tiled)
+        self.predictor.update(s=s, Q0=u_tiled)
 
     @CompileTF
     def predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
-        if self.predictor_name ==  'predictor_autoregressive_tf':
-            self.predictor_single_trajectory.update_internal_state_tf(s=s, Q0=u_nom[:, :1, :])
+        self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
 
     #step function to find control

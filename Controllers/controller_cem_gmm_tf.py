@@ -5,13 +5,14 @@ import tensorflow as tf
 import tensorflow_probability.python.distributions as tfpd
 from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from Control_Toolkit.Controllers import template_controller
 
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class controller_cem_gmm_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_specification: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
         #First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -25,21 +26,9 @@ class controller_cem_gmm_tf(template_controller):
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
         self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
 
-        self.NET_NAME = CEM_NET_NAME
-
-        #instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=self.NET_NAME,
-            planning_environment=environment_model,
-        )
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(batch_size=self.num_rollouts, horizon=self.cem_samples, predictor_specification=predictor_specification)
 
         super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low

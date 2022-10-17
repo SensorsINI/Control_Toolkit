@@ -8,12 +8,14 @@ import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
 
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+
 from Control_Toolkit.Controllers import template_controller
 
 
 #controller class
 class controller_cem_naive_grad_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, mpc_horizon: int, cem_outer_it: int, num_rollouts: int, predictor_specification: str, CEM_NET_NAME: str, cem_initial_action_stdev: float, cem_stdev_min: float, cem_R: int, cem_best_k: int, cem_LR: float, gradmax_clip: float, **kwargs):
         # First configure random sampler
         self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -28,10 +30,8 @@ class controller_cem_naive_grad_tf(template_controller):
         self.cem_initial_action_stdev = cem_initial_action_stdev
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
-        self.intermediate_steps = predictor_intermediate_steps
 
         self.NET_NAME = CEM_NET_NAME
-        self.predictor_name = predictor_name
 
         #optimization params
         self.cem_LR = cem_LR
@@ -40,16 +40,8 @@ class controller_cem_naive_grad_tf(template_controller):
         self.gradmax_clip = tf.constant(self.gradmax_clip, dtype = tf.float32)
 
         #instantiate predictor
-        self.predictor_module = import_module(f"SI_Toolkit.Predictors.{self.predictor_name}")
-        self.predictor = getattr(self.predictor_module, self.predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=self.NET_NAME,
-            planning_environment=environment_model,
-        )
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(batch_size=self.num_rollouts, horizon=self.cem_samples, predictor_specification=predictor_specification)
 
         super().__init__(environment_model)
         self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)

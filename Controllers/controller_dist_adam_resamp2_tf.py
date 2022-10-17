@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.others.globals_and_utils import get_logger
@@ -23,9 +24,7 @@ class controller_dist_adam_resamp2_tf(template_controller):
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
-        predictor_name: str,
-        predictor_intermediate_steps: int,
-        NET_NAME: str,
+        predictor_specification: str,
         SAMPLING_TYPE: str,
         interpolation_step: int,
         warmup: bool,
@@ -58,12 +57,8 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.outer_its = outer_its
         self.sample_stdev = sample_stdev
         self.cem_samples = mpc_horizon  # number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
 
         self.resamp_per = resamp_per
-
-        self.NET_NAME = NET_NAME
-        self.predictor_name = predictor_name
 
         self.SAMPLING_TYPE = SAMPLING_TYPE
         self.interpolation_step = interpolation_step
@@ -78,16 +73,10 @@ class controller_dist_adam_resamp2_tf(template_controller):
         self.rtol = rtol
 
         # instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=NET_NAME,
-            planning_environment=environment_model,
-        )
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(batch_size=self.num_rollouts, horizon=self.cem_samples,
+                                 predictor_specification=predictor_specification)
+
 
         # warmup setup
         self.first_iter_count = self.outer_its

@@ -5,13 +5,14 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.others.environment import EnvironmentBatched
 from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from Control_Toolkit.Controllers import template_controller
 
 
 #controller class
 class controller_mppi_optimize_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, predictor_intermediate_steps: int, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, NET_NAME: str, gradmax_clip: float, optim_steps: int, predictor_name: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
+    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, gradmax_clip: float, optim_steps: int, predictor_specification: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
         #First configure random sampler
         self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
 
@@ -32,25 +33,15 @@ class controller_mppi_optimize_tf(template_controller):
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
-        self.NET_NAME = NET_NAME
-
         #optimization params
         mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
 
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)
         self.optim_steps = optim_steps
 
-        #instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.mppi_samples,
-            dt=dt,
-            intermediate_steps=predictor_intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=num_rollouts,
-            net_name=NET_NAME,
-            planning_environment=environment_model,
-        )
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(batch_size=num_rollouts, horizon=self.mppi_samples,
+                                 predictor_specification=predictor_specification)
 
         #Setup prototype control sequence
         self.Q_opt = tf.zeros([1,self.mppi_samples,num_control_inputs], dtype=tf.float32)

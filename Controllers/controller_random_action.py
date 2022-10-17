@@ -5,6 +5,7 @@ import tensorflow as tf
 from Control_Toolkit.others.environment import EnvironmentBatched
 from others.globals_and_utils import create_rng
 from SI_Toolkit.Functions.TF.Compile import CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from Control_Toolkit.Controllers import template_controller
 
@@ -15,12 +16,9 @@ class controller_random_action(template_controller):
         environment_model: EnvironmentBatched,
         seed: int,
         num_control_inputs: int,
-        dt: float,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_name: str,
-        predictor_intermediate_steps: int,
-        CEM_NET_NAME: str,
+        predictor_specification: str,
         **kwargs,
     ):
         # First configure random sampler
@@ -32,20 +30,10 @@ class controller_random_action(template_controller):
         # MPC params
         self.num_rollouts = num_rollouts
         self.num_horizon = mpc_horizon  # Number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
-        self.NET_NAME = CEM_NET_NAME
 
-        # instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.num_horizon,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=self.NET_NAME,
-            planning_environment=environment_model,
-        )
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(batch_size=self.num_rollouts, horizon=self.num_horizon,
+                                 predictor_specification=predictor_specification)
 
         super().__init__(environment_model)
         self.action_low = self.env_mock.action_space.low
