@@ -1,4 +1,5 @@
 import copy
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
 import tensorflow as tf
@@ -22,17 +23,20 @@ class controller_mppi_tf(template_controller):
         mpc_horizon: int,
         num_rollouts: int,
         predictor_specification: str,
-        predictor_intermediate_steps: int,
         NU: float,
         SQRTRHOINV: float,
         GAMMA: float,
         SAMPLING_TYPE: str,
-        NET_NAME: str,
-        predictor_name: str,
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # Predictor
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
         
         # MPPI parameters
         self.cc_weight = cc_weight

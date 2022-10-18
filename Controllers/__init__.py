@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
+from typing import Optional
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
 from Control_Toolkit.others.environment import TensorType
 from Control_Toolkit.others.globals_and_utils import create_rng
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
@@ -30,7 +32,6 @@ class template_controller(ABC):
         observation_space: Box,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
         controller_logging: bool,
     ):
         # Environment-related parameters
@@ -46,12 +47,8 @@ class template_controller(ABC):
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         
-        # Predictor
+        # Cost Function
         self.cost_function = cost_function
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
-        )
         
         # Initialize random sampler
         self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)

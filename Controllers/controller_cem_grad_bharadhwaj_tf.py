@@ -2,6 +2,7 @@
 #
 
 
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
@@ -35,8 +36,14 @@ class controller_cem_grad_bharadhwaj_tf(template_controller):
         controller_logging: bool,
         **kwargs,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, predictor_specification=predictor_specification, controller_logging=controller_logging)
-          
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # Predictor
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
+        
         # CEM parameters
         self.cem_outer_it = cem_outer_it
         self.cem_initial_action_stdev = cem_initial_action_stdev

@@ -78,6 +78,10 @@ def import_controller_by_name(controller_full_name: str) -> type:
     :return: The controller class
     :rtype: type[template_controller]
     """
+    controller_full_name = controller_full_name.replace("-", "_")
+    if not controller_full_name.startswith("controller"):
+        controller_full_name = "controller_" + controller_full_name
+    
     controller_relative_paths = (
         glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
         + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
