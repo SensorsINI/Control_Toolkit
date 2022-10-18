@@ -34,16 +34,19 @@ class controller_mppi_tf(template_controller):
         
         # Predictor
         self.predictor = PredictorWrapper()
+        self.predictor_single_trajectory = self.predictor.copy()
+        
         self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon,
+            predictor_specification=predictor_specification,
+        )
+        self.predictor_single_trajectory.configure(
+            batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
+            predictor_specification=predictor_specification,
         )
         
         # MPPI parameters
         self.cc_weight = cc_weight
-        self.predictor_single_trajectory = copy.deepcopy(self.predictor)
-        self.predictor_single_trajectory.configure(batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
-                                                   predictor_specification=predictor_specification)
-
         dt = self.predictor.predictor_config['dt']
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
