@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -13,54 +13,63 @@ log = get_logger(__name__)
 
 class EnvironmentBatched:
     """Has no __init__ method."""
-    class cost_functions_wrapper:
-        def __init__(self, env) -> None:
-            self.env: EnvironmentBatched = env
-
-        def get_terminal_cost(self, s_hor):
-            return 0.0
-
-        def get_stage_cost(self, s, u, u_prev):
-            return -self.env.get_reward(s, u)
-
-        def get_trajectory_cost(self, s_hor, u, u_prev=None):
-            return (
-                self.env.lib.sum(self.get_stage_cost(s_hor[:, :-1, :], u, None), 1)
-                + self.get_terminal_cost(s_hor)
-            )
-    
     action_space: Box
     observation_space: Box
-    cost_functions: cost_functions_wrapper
     dt: float
+    _predictor = None
+    
+    @property
+    def predictor(self):
+        if self._predictor is None:
+            raise ValueError("Predictor not set for this environment yet")
+        return self._predictor
+
+    @predictor.setter
+    def predictor(self, x):
+        self._predictor = x
 
     def step(
-        self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
+        self, action: TensorType
     ) -> Tuple[
-        Union[np.ndarray, tf.Tensor, torch.Tensor],
+        TensorType,
         Union[np.ndarray, float],
+        Union[np.ndarray, bool],
         Union[np.ndarray, bool],
         dict,
     ]:
+        """Step function with new OpenAI Gym API (gym>=0.26)
+
+        :param action: control input to system
+        :type action: TensorType
+        :return: observation, reward, terminated, truncated, info
+        :rtype: Tuple[ TensorType, Union[np.ndarray, float], Union[np.ndarray, bool], Union[np.ndarray, bool], dict, ]
+        """
         return NotImplementedError()
     
-    def step_tf(
-        self, action: Union[np.ndarray, tf.Tensor, torch.Tensor]
-    ) -> Tuple[
-        Union[np.ndarray, tf.Tensor, torch.Tensor],
-        Union[np.ndarray, float],
-        Union[np.ndarray, bool],
-        dict,
-    ]:
+    def step_dynamics(
+        self,
+        state: TensorType,
+        action: TensorType,
+        dt: float,
+    ) -> TensorType:
         return NotImplementedError()
 
     def reset(
         self,
-        state: np.ndarray = None,
-        seed: Optional[int] = None,
-        return_info: bool = False,
-        options: Optional[dict] = None,
-    ) -> Tuple[np.ndarray, Optional[dict]]:
+        seed: "Optional[int]" = None,
+        options: "Optional[dict]" = None,
+    ) -> "Tuple[np.ndarray, dict]":
+        """Reset function with new OpenAI Gym API (gym>=0.26)
+
+        :param state: State to set environment to, set random if default (None) is specified
+        :type state: np.ndarray, optional
+        :param seed: Seed for random number generator, defaults to None
+        :type seed: Optional[int], optional
+        :param options: Additional information to specify how the environment is reset, defaults to None. This can include a "state" key
+        :type options: Optional[dict], optional
+        :return: Observation of the initial state and auxiliary information
+        :rtype: Tuple[np.ndarray, Optional[dict]]
+        """
         return NotImplementedError()
 
     def _set_up_rng(self, seed: int = None) -> None:
@@ -101,19 +110,19 @@ class EnvironmentBatched:
             )
         return state, action
 
-    def _get_reset_return_val(self, return_info: bool = False):
+    def _get_reset_return_val(self):
         if self._batch_size == 1:
             self.state = self.lib.to_numpy(self.lib.squeeze(self.state))
+        return self.state, {}
 
-        if return_info:
-            return tuple((self.state, {}))
-        return self.state
-
-    def set_computation_library(self, computation_lib: "type[ComputationLibrary]"):
+    def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         try:
-            self.lib = computation_lib
+            self.lib = ComputationLib
         except KeyError as error:
             log.exception(error)
+    
+    def set_logs(self, logs: dict[str, Any]):
+        self._logs = logs
 
     # Overloading properties/methods for Bharadhwaj implementation
     @property

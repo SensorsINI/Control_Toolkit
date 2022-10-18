@@ -3,7 +3,6 @@ import logging
 import os
 from datetime import datetime
 from importlib import import_module
-from importlib.util import find_spec
 
 import numpy as np
 
@@ -79,6 +78,10 @@ def import_controller_by_name(controller_full_name: str) -> type:
     :return: The controller class
     :rtype: type[template_controller]
     """
+    controller_full_name = controller_full_name.replace("-", "_")
+    if not controller_full_name.startswith("controller"):
+        controller_full_name = "controller_" + controller_full_name
+    
     controller_relative_paths = (
         glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
         + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
@@ -106,7 +109,7 @@ def get_available_controller_names() -> "list[str]":
     return controller_names
 
 
-def get_controller(controller_names=None, controller_name=None, controller_idx=None) -> type:
+def get_controller_name(controller_names=None, controller_name=None, controller_idx=None) -> type:
     """
     The method sets a new controller as the current controller.
     The controller may be indicated either by its name
@@ -136,11 +139,4 @@ def get_controller(controller_names=None, controller_name=None, controller_idx=N
     else:
         controller_name = controller_names[controller_idx]
 
-    # Load controller
-    if controller_name == 'manual-stabilization':
-        Controller = None
-    else:
-        controller_full_name = 'controller_' + controller_name.replace('-', '_')
-        Controller = import_controller_by_name(controller_full_name)
-
-    return Controller, controller_name, controller_idx
+    return controller_name, controller_idx

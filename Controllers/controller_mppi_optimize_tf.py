@@ -1,61 +1,72 @@
-from importlib import import_module
-
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from gym.spaces.box import Box
 
 
 #controller class
 class controller_mppi_optimize_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD: float, mpc_horizon: int, num_rollouts: int, dt: float, NU: float, SQRTRHOINV: float, GAMMA: float, SAMPLING_TYPE: str, gradmax_clip: float, optim_steps: int, predictor_specification: str, mppi_LR: float, adam_beta_1: float, adam_beta_2: float, adam_epsilon: float, **kwargs):
-        #First configure random sampler
-        self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # Parametrization
-        self.num_control_inputs = num_control_inputs
-
-        #cost funciton params
+    def __init__(
+        self,
+        cost_function: cost_function_base,
+        seed: int,
+        action_space: Box,
+        observation_space: Box,
+        cc_weight: float,
+        R: float,
+        LBD: float,
+        mpc_horizon: int,
+        num_rollouts: int,
+        predictor_specification: str,
+        dt: float,
+        NU: float,
+        SQRTRHOINV: float,
+        GAMMA: float,
+        SAMPLING_TYPE: str,
+        gradmax_clip: float,
+        optim_steps: int,
+        mppi_LR: float,
+        adam_beta_1: float,
+        adam_beta_2: float,
+        adam_epsilon: float,
+        controller_logging: bool,
+        **kwargs,
+    ):
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # Predictor
+        self.predictor = PredictorWrapper()
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
+        
+        # Cost function parameters
         self.cc_weight = cc_weight
         self.R = R
         self.LBD = LBD
 
-        #mppi params
-        self.num_rollouts = num_rollouts
-        self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
-
+        # MPPI parameters
         self.NU = NU
         self.SQRTRHODTINV = SQRTRHOINV * (1 / np.math.sqrt(dt))
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
-        #optimization params
-        mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
-
+        # Optimization params
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)
         self.optim_steps = optim_steps
 
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(batch_size=num_rollouts, horizon=self.mppi_samples,
-                                 predictor_specification=predictor_specification)
-
-        #Setup prototype control sequence
-        self.Q_opt = tf.zeros([1,self.mppi_samples,num_control_inputs], dtype=tf.float32)
-        self.Q_opt = tf.Variable(self.Q_opt)
-        self.u = 0.0
-        #setup adam optimizer
-        self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2,
-                                            epsilon=adam_epsilon)
-
-        super().__init__(environment_model)
-        self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
-        self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
-
-    
+        # Setup prototype control sequence
+        self.Q_opt = tf.Variable(tf.zeros([1,self.mpc_horizon,self.num_control_inputs], dtype=tf.float32))
+        
+        # Setup Adam optimizer
+        mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
+        self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2, epsilon=adam_epsilon)
+        
+        self.controller_reset()
 
     #mppi correction for importance sampling
     def mppi_correction_cost(self, u, delta_u):
@@ -64,11 +75,11 @@ class controller_mppi_optimize_tf(template_controller):
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
         #stage costs
-        stage_cost = self.env_mock.cost_functions.get_stage_cost(s_hor[:,1:,:],u, u_prev)
+        stage_cost = self.cost_function.get_stage_cost(s_hor[:,1:,:],u, u_prev)
         stage_cost = stage_cost + self.mppi_correction_cost(u, delta_u)
         #reduce alonge rollouts and add final cost
         total_cost = tf.math.reduce_sum(stage_cost,axis=1)
-        total_cost = total_cost + self.env_mock.cost_functions.get_terminal_cost(s_hor)
+        total_cost = total_cost + self.cost_function.get_terminal_cost(s_hor)
         return total_cost
 
     #path integral approximation: sum deltaU's weighted with exponential funciton of trajectory costs
@@ -87,15 +98,15 @@ class controller_mppi_optimize_tf(template_controller):
         sampling_type = self.SAMPLING_TYPE
         if sampling_type == "interpolated":
             step = 10
-            range_stop = int(tf.math.ceil(self.mppi_samples / step) * step) + 1
+            range_stop = int(tf.math.ceil(self.mpc_horizon / step) * step) + 1
             t = tf.range(range_stop, delta = step)
             t_interp = tf.cast(tf.range(range_stop), tf.float32)
             delta_u = random_gen.normal([self.num_rollouts, t.shape[0], self.num_control_inputs], dtype=tf.float32) * stdev
             interp = tfp.math.interp_regular_1d_grid(t_interp, t_interp[0], t_interp[-1], delta_u, axis=1)
-            delta_u = interp[:,:self.mppi_samples,:]
+            delta_u = interp[:,:self.mpc_horizon,:]
         else:
             #otherwise i.i.d. generation
-            delta_u = random_gen.normal([self.num_rollouts, self.mppi_samples, self.num_control_inputs], dtype=tf.float32) * stdev
+            delta_u = random_gen.normal([self.num_rollouts, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32) * stdev
         return delta_u
 
     @CompileTF
@@ -120,7 +131,7 @@ class controller_mppi_optimize_tf(template_controller):
             tape.watch(Q)
             #rollout trajectory and retrive cost
             rollout_trajectory = self.predictor.predict_tf(s, Q)
-            traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Q, self.u)
+            traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q, self.u)
         #retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
         #modify gradients: makes sure biggest entry of each gradient is at most "gradmax_clip". (For this controller only one sequence
@@ -137,12 +148,14 @@ class controller_mppi_optimize_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
+        if self.controller_logging:
+            self.current_log["s_logged"] = s.copy()
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         #first retrieve suboptimal control sequence with mppi
-        Q_mppi = self.mppi_prior(s, self.Q_opt, self.rng_mppi, self.u)
+        Q_mppi = self.mppi_prior(s, self.Q_opt, self.rng, self.u)
         self.Q_opt.assign(Q_mppi)
 
         #optimize control sequence with gradient based optimization
@@ -150,20 +163,22 @@ class controller_mppi_optimize_tf(template_controller):
             Q_opt, traj_cost = self.grad_step(s, self.Q_opt, self.opt)
             self.Q_opt.assign(Q_opt)
 
-        self.u = self.Q_opt[0, 0, :]
-
-        self.u_logged = self.u
-        self.Q_logged, self.J_logged = self.Q_opt.numpy(), traj_cost.numpy()
+        self.u = np.squeeze(self.Q_opt[0, 0, :].numpy())
+        
+        if self.controller_logging:
+            self.current_log["Q_logged"] = self.Q_opt.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["u_logged"] = self.u
         
         self.Q_opt.assign(tf.concat([self.Q_opt[:, 1:, :], tf.zeros([1,1,self.num_control_inputs])], axis=1)) #shift and initialize new input with 0
         #reset adam optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        return np.squeeze(self.u.numpy())
+        return self.u
 
     def controller_reset(self):
         #reset prototype control sequence
-        self.Q_opt.assign(tf.zeros([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32))
+        self.Q_opt.assign(tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32))
         self.u = 0.0
         #reset adam optimizer
         adam_weights = self.opt.get_weights()

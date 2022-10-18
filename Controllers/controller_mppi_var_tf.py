@@ -1,75 +1,86 @@
-from importlib import import_module
-
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from gym.spaces.box import Box
 
 
 #controller class
 class controller_mppi_var_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, cc_weight: float, R: float, LBD_mc: float, mpc_horizon: int, num_rollouts: int, NU_mc: float, SQRTRHOINV_mc: float, GAMMA: float, SAMPLING_TYPE: str, predictor_specification: str, LR: float, max_grad_norm: float, STDEV_min: float, STDEV_max: float, interpolation_step: int, **kwargs):
-        #First configure random sampler
-        self.rng_mppi = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # Parametrization
-        self.num_control_inputs = num_control_inputs
-
-        self.num_rollouts = num_rollouts
-        self.SAMPLING_TYPE = SAMPLING_TYPE
-
-        self.cc_weight = cc_weight
-
-        self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
-
+    def __init__(
+        self,
+        cost_function: cost_function_base,
+        seed: int,
+        action_space: Box,
+        observation_space: Box,
+        cc_weight: float,
+        R: float,
+        LBD_mc: float,
+        mpc_horizon: int,
+        num_rollouts: int,
+        predictor_specification: str,
+        dt: float,
+        NU_mc: float,
+        SQRTRHOINV_mc: float,
+        GAMMA: float,
+        SAMPLING_TYPE: str,
+        LR: float,
+        max_grad_norm: float,
+        STDEV_min: float,
+        STDEV_max: float,
+        interpolation_step: int,
+        controller_logging: bool,
+        **kwargs,
+    ):
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # Predictor
         self.predictor = PredictorWrapper()
-        self.predictor.configure(batch_size=num_rollouts, horizon=self.mppi_samples,
-                                 predictor_specification=predictor_specification)
-        dt = self.predictor.predictor_config['dt']
-
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
+        
+        # MPPI parameters
+        self.SAMPLING_TYPE = SAMPLING_TYPE
+        self.cc_weight = cc_weight
         self.R = R
         self.LBD = LBD_mc
         self.NU = NU_mc
         self.SQRTRHODTINV = SQRTRHOINV_mc * (1 / np.math.sqrt(dt))
         self.GAMMA = GAMMA
-
         self.mppi_lr = LR
         self.stdev_min = STDEV_min
         self.stdev_max = STDEV_max
         self.max_grad_norm = max_grad_norm
 
-        #setup interpolation matrix
+        # Setup interpolation matrix
         if SAMPLING_TYPE == "interpolated":
             step = interpolation_step
-            num_valid_vals = int(np.ceil(self.mppi_samples / step) + 1)
-            interp_mat = np.zeros(((num_valid_vals - 1) * step, num_valid_vals, num_control_inputs), dtype=np.float32)
-            step_block = np.zeros((step, 2, num_control_inputs), dtype=np.float32)
+            num_valid_vals = int(np.ceil(self.mpc_horizon / step) + 1)
+            interp_mat = np.zeros(((num_valid_vals - 1) * step, num_valid_vals, self.num_control_inputs), dtype=np.float32)
+            step_block = np.zeros((step, 2, self.num_control_inputs), dtype=np.float32)
             for j in range(step):
-                step_block[j, 0, :] = (step - j) * np.ones((num_control_inputs), dtype=np.float32)
-                step_block[j, 1, :] = j * np.ones((num_control_inputs), dtype=np.float32)
+                step_block[j, 0, :] = (step - j) * np.ones((self.num_control_inputs), dtype=np.float32)
+                step_block[j, 1, :] = j * np.ones((self.num_control_inputs), dtype=np.float32)
             for i in range(num_valid_vals - 1):
                 interp_mat[i * step:(i + 1) * step, i:i + 2, :] = step_block
-            interp_mat = interp_mat[:self.mppi_samples, :, :] / step
+            interp_mat = interp_mat[:self.mpc_horizon, :, :] / step
             interp_mat = tf.constant(tf.transpose(interp_mat, perm=(1,0,2)), dtype=tf.float32)
         else:
             interp_mat = None
-            num_valid_vals = self.mppi_samples
+            num_valid_vals = self.mpc_horizon
         self.num_valid_vals, self.interp_mat = num_valid_vals, interp_mat
         
-        #set up nominal u
-        self.u_nom = tf.zeros([1,self.mppi_samples,num_control_inputs], dtype=tf.float32)
-        #set up vector of variances to be optimized
-        self.nuvec = np.math.sqrt(self.NU)*tf.ones([1, num_valid_vals, num_control_inputs])
+        # Set up nominal u
+        self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
+        # Set up vector of variances to be optimized
+        self.nuvec = np.math.sqrt(self.NU)*tf.ones([1, num_valid_vals, self.num_control_inputs])
         self.nuvec = tf.Variable(self.nuvec)
-        self.u = 0.0
-        
-        super().__init__(environment_model)
-        self.action_low = tf.convert_to_tensor(self.env_mock.action_space.low)
-        self.action_high = tf.convert_to_tensor(self.env_mock.action_space.high)
+
+        self.controller_reset()
     
     #mppi correction
     def mppi_correction_cost(self, u, delta_u, nuvec):
@@ -105,7 +116,7 @@ class controller_mppi_var_tf(template_controller):
             u_run = tfp.math.clip_by_value_preserve_gradient(u_run, self.action_low, self.action_high)
             #rollout and cost
             rollout_trajectory = self.predictor.predict_tf(s, u_run)
-            unc_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, u_run, u_old)
+            unc_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, u_run, u_old)
             mean_uncost = tf.math.reduce_mean(unc_cost)
             #retrieve gradient
             dc_ds = tape.gradient(mean_uncost, nuvec)
@@ -125,18 +136,21 @@ class controller_mppi_var_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
+        if self.controller_logging:
+            self.current_log["s_logged"] = s.copy()
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
-        self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng_mppi, self.u, self.nuvec)
+        self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng, self.u, self.nuvec)
         
-        self.u_logged = self.u
-        self.Q_logged, self.J_logged = u_run.numpy(), traj_cost.numpy()
+        if self.controller_logging:
+            self.current_log["Q_logged"] = u_run.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["u_logged"] = self.u
         
         self.nuvec.assign(new_nuvec)
         return tf.squeeze(self.u).numpy()
 
     #reset to initial values
     def controller_reset(self):
-        self.u_nom = tf.zeros([1, self.mppi_samples, self.num_control_inputs], dtype=tf.float32)
+        self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
         self.nuvec.assign(np.math.sqrt(self.NU)*tf.ones([1, self.num_valid_vals, self.num_control_inputs]))
-        self.u = 0.0

@@ -1,65 +1,54 @@
-from importlib import import_module
-
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.others.environment import EnvironmentBatched
-from others.globals_and_utils import create_rng
-from SI_Toolkit.Functions.TF.Compile import CompileTF
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from gym.spaces.box import Box
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 
-class controller_random_action(template_controller):
+class controller_random_action_tf(template_controller):
     def __init__(
         self,
-        environment_model: EnvironmentBatched,
+        cost_function: cost_function_base,
         seed: int,
-        num_control_inputs: int,
+        action_space: Box,
+        observation_space: Box,
         mpc_horizon: int,
         num_rollouts: int,
         predictor_specification: str,
+        controller_logging: bool,
         **kwargs,
     ):
-        # First configure random sampler
-        self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # Parametrization
-        self.num_control_inputs = num_control_inputs
-
-        # MPC params
-        self.num_rollouts = num_rollouts
-        self.num_horizon = mpc_horizon  # Number of steps in MPC horizon
-
+        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
+        
+        # Predictor
         self.predictor = PredictorWrapper()
-        self.predictor.configure(batch_size=self.num_rollouts, horizon=self.num_horizon,
-                                 predictor_specification=predictor_specification)
-
-        super().__init__(environment_model)
-        self.action_low = self.env_mock.action_space.low
-        self.action_high = self.env_mock.action_space.high
-
-        # Initialization
+        self.predictor.configure(
+            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        )
+        
         self.controller_reset()
-        self.u = 0
     
     @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.env_mock.cost_functions.get_trajectory_cost(
+        traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )
         return traj_cost, rollout_trajectory
 
     # step function to find control
     def step(self, s: np.ndarray, time=None):
+        if self.controller_logging:
+            self.current_log["s_logged"] = s.copy()
         # Start all trajectories in current state
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         
         Q = self.rng.uniform(
-            shape=[self.num_rollouts, self.num_horizon, self.num_control_inputs],
+            shape=[self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
             minval=self.action_low,
             maxval=self.action_high,
             dtype=tf.float32,
@@ -71,17 +60,19 @@ class controller_random_action(template_controller):
         best_idx = sorted_cost[0]
 
         self.u: np.ndarray = tf.squeeze(Q[best_idx, 0, :]).numpy()
-
-        self.Q_logged, self.J_logged = Q.numpy(), traj_cost.numpy()
-        self.rollout_trajectories_logged = rollout_trajectory.numpy()
-        self.u_logged = self.u.copy()
+        
+        if self.controller_logging:
+            self.current_log["Q_logged"] = Q.numpy()
+            self.current_log["J_logged"] = traj_cost.numpy()
+            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.current_log["u_logged"] = self.u
 
         return self.u
 
     def controller_reset(self):
         # generate random input sequence and clip to control limits
         Q = self.rng.uniform(
-                shape=[self.num_rollouts, self.num_horizon, self.num_control_inputs],
+                shape=[self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
                 minval=self.action_low,
                 maxval=self.action_high,
                 dtype=tf.float32,
