@@ -1,10 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Optional
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
-from Control_Toolkit.others.environment import TensorType
+from SI_Toolkit.computation_library import TensorType
 from Control_Toolkit.others.globals_and_utils import create_rng
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
