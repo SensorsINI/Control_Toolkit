@@ -394,9 +394,9 @@ class EnvironmentBatched:
             self.state = self.lib.to_numpy(self.lib.squeeze(self.state))
         return self.state, {}
 
-    def set_computation_library(self, computation_lib: "type[ComputationLibrary]"):
+    def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         try:
-            self.lib = computation_lib
+            self.lib = ComputationLib
         except KeyError as error:
             log.exception(error)
     

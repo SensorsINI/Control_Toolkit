@@ -26,17 +26,17 @@ class Planner:
         
         # Determine the library used by the environment
         if controller_name.endswith("tf"):
-            computation_lib = TensorFlowLibrary
+            ComputationLib = TensorFlowLibrary
         elif controller_name.endswith("pytorch"):
-            computation_lib = PyTorchLibrary
+            ComputationLib = PyTorchLibrary
         else:
-            computation_lib = NumpyLibrary
+            ComputationLib = NumpyLibrary
         
         
         # Create cost function
         cost_function_name: str = config_cost_function["cost_function_name"]
         cost_function_module = import_module(f"Control_Toolkit_ASF.Cost_Functions.{environment_name}.{cost_function_name}")
-        self.cost_function: cost_function_base = getattr(cost_function_module, cost_function_name)(computation_lib)
+        self.cost_function: cost_function_base = getattr(cost_function_module, cost_function_name)(ComputationLib)
         
         # Create controller
         Controller = import_controller_by_name(controller_name)
