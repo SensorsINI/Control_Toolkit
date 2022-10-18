@@ -28,7 +28,7 @@ class controller_mppi_tf(template_controller):
         self.mppi_samples = mpc_horizon  # Number of steps in MPC horizon
 
         self.predictor = PredictorWrapper()
-        self.predictor_single_trajectory = copy.deepcopy(self.predictor)
+        self.predictor_single_trajectory = self.predictor.copy()
 
         self.predictor.configure(batch_size=num_rollouts, horizon=self.mppi_samples,
                                  predictor_specification=predictor_specification)
