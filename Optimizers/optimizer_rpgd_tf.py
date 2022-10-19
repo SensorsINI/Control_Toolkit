@@ -2,6 +2,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
@@ -9,13 +10,15 @@ from gym.spaces.box import Box
 logger = get_logger(__name__)
 
 
-class controller_rpgd_tf(template_controller):
+class optimizer_rpgd_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         mpc_horizon: int,
         num_rollouts: int,
         predictor_specification: str,
@@ -33,15 +36,19 @@ class controller_rpgd_tf(template_controller):
         adam_beta_1: float,
         adam_beta_2: float,
         adam_epsilon: float,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
+            predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
         
         # RPGD parameters
@@ -98,7 +105,7 @@ class controller_rpgd_tf(template_controller):
             epsilon=adam_epsilon,
         )
         
-        self.controller_reset()
+        self.optimizer_reset()
 
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -184,8 +191,8 @@ class controller_rpgd_tf(template_controller):
         return u, Qn, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
             
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
@@ -225,12 +232,13 @@ class controller_rpgd_tf(template_controller):
         
         self.u = self.u.numpy()
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = self.Q_tf.numpy()
-            self.current_log["J_logged"] = J.numpy()
-            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            self.current_log["trajectory_ages_logged"] = self.trajectory_ages.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = self.Q_tf.numpy()
+            logging_values["J_logged"] = J.numpy()
+            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -306,7 +314,7 @@ class controller_rpgd_tf(template_controller):
         self.count += 1
         return self.u
 
-    def controller_reset(self):
+    def optimizer_reset(self):
         # # unnecessary part: Adaptive sampling distribution
         # self.dist_mue = (
         #     (self.action_low + self.action_high)

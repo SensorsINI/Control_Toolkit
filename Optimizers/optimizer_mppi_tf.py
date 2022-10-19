@@ -5,18 +5,21 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
-class controller_mppi_tf(template_controller):
+class optimizer_mppi_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         cc_weight: float,
         R: float,
         LBD: float,
@@ -27,19 +30,23 @@ class controller_mppi_tf(template_controller):
         SQRTRHOINV: float,
         GAMMA: float,
         SAMPLING_TYPE: str,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor_single_trajectory = self.predictor.copy()
-        
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon,
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
             predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
+        
+        # Create second predictor for computing optimal trajectories
+        self.predictor_single_trajectory = self.predictor.copy()
         self.predictor_single_trajectory.configure(
             batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
             predictor_specification=predictor_specification,
@@ -62,7 +69,7 @@ class controller_mppi_tf(template_controller):
         else:
             self.mppi_output = self.return_restricted
         
-        self.controller_reset()
+        self.optimizer_reset()
         
     def return_all(self, u, u_nom, rollout_trajectory, traj_cost, u_run):
         return u, u_nom, rollout_trajectory, traj_cost, u_run
@@ -135,19 +142,20 @@ class controller_mppi_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         s = self.check_dimensions_s(s)
 
         self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
         self.u = tf.squeeze(self.u).numpy()
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = u_run.numpy()
-            self.current_log["J_logged"] = traj_cost.numpy()
-            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = u_run.numpy()
+            logging_values["J_logged"] = traj_cost.numpy()
+            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
 
         if False:
             self.optimal_trajectory = self.predict_optimal_trajectory(s, self.u_nom).numpy()
@@ -157,7 +165,7 @@ class controller_mppi_tf(template_controller):
     def controller_report(self):
         pass
 
-    def controller_reset(self):
+    def optimizer_reset(self):
         self.u_nom = (
             0.5 * (self.action_low + self.action_high)
             * tf.ones([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)

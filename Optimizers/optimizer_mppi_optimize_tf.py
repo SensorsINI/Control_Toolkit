@@ -3,19 +3,22 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
 #controller class
-class controller_mppi_optimize_tf(template_controller):
+class optimizer_mppi_optimize_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         cc_weight: float,
         R: float,
         LBD: float,
@@ -33,15 +36,19 @@ class controller_mppi_optimize_tf(template_controller):
         adam_beta_1: float,
         adam_beta_2: float,
         adam_epsilon: float,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
+            predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
         
         # Cost function parameters
@@ -51,7 +58,7 @@ class controller_mppi_optimize_tf(template_controller):
 
         # MPPI parameters
         self.NU = NU
-        self.SQRTRHODTINV = SQRTRHOINV * (1 / np.math.sqrt(dt))
+        self.SQRTRHODTINV = SQRTRHOINV * (1.0 / np.sqrt(dt))
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
@@ -66,7 +73,7 @@ class controller_mppi_optimize_tf(template_controller):
         mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
         self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2, epsilon=adam_epsilon)
         
-        self.controller_reset()
+        self.optimizer_reset()
 
     #mppi correction for importance sampling
     def mppi_correction_cost(self, u, delta_u):
@@ -148,8 +155,8 @@ class controller_mppi_optimize_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -165,10 +172,11 @@ class controller_mppi_optimize_tf(template_controller):
 
         self.u = np.squeeze(self.Q_opt[0, 0, :].numpy())
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = self.Q_opt.numpy()
-            self.current_log["J_logged"] = traj_cost.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = self.Q_opt.numpy()
+            logging_values["J_logged"] = traj_cost.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
         
         self.Q_opt.assign(tf.concat([self.Q_opt[:, 1:, :], tf.zeros([1,1,self.num_control_inputs])], axis=1)) #shift and initialize new input with 0
         #reset adam optimizer
@@ -176,7 +184,7 @@ class controller_mppi_optimize_tf(template_controller):
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         return self.u
 
-    def controller_reset(self):
+    def optimizer_reset(self):
         #reset prototype control sequence
         self.Q_opt.assign(tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32))
         self.u = 0.0

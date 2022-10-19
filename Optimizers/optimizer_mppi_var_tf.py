@@ -3,19 +3,22 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
 #controller class
-class controller_mppi_var_tf(template_controller):
+class optimizer_mppi_var_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         cc_weight: float,
         R: float,
         LBD_mc: float,
@@ -32,15 +35,19 @@ class controller_mppi_var_tf(template_controller):
         STDEV_min: float,
         STDEV_max: float,
         interpolation_step: int,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
+            predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
         
         # MPPI parameters
@@ -80,7 +87,7 @@ class controller_mppi_var_tf(template_controller):
         self.nuvec = np.math.sqrt(self.NU)*tf.ones([1, num_valid_vals, self.num_control_inputs])
         self.nuvec = tf.Variable(self.nuvec)
 
-        self.controller_reset()
+        self.optimizer_reset()
     
     #mppi correction
     def mppi_correction_cost(self, u, delta_u, nuvec):
@@ -136,21 +143,22 @@ class controller_mppi_var_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng, self.u, self.nuvec)
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = u_run.numpy()
-            self.current_log["J_logged"] = traj_cost.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = u_run.numpy()
+            logging_values["J_logged"] = traj_cost.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
         
         self.nuvec.assign(new_nuvec)
         return tf.squeeze(self.u).numpy()
 
     #reset to initial values
-    def controller_reset(self):
+    def optimizer_reset(self):
         self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
         self.nuvec.assign(np.math.sqrt(self.NU)*tf.ones([1, self.num_valid_vals, self.num_control_inputs]))

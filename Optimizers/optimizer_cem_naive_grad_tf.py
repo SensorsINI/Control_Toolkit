@@ -4,19 +4,22 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
 #controller class
-class controller_cem_naive_grad_tf(template_controller):
+class optimizer_cem_naive_grad_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         mpc_horizon: int,
         cem_outer_it: int,
         num_rollouts: int,
@@ -26,15 +29,19 @@ class controller_cem_naive_grad_tf(template_controller):
         cem_best_k: int,
         learning_rate: float,
         gradmax_clip: float,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
+            predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
         
         # CEM parameters
@@ -47,7 +54,7 @@ class controller_cem_naive_grad_tf(template_controller):
         self.learning_rate = tf.constant(learning_rate, dtype=tf.float32)
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         
-        self.controller_reset()
+        self.optimizer_reset()
 
     @CompileTF
     def predict_and_cost(self, s, rng, dist_mue, stdev):
@@ -82,8 +89,8 @@ class controller_cem_naive_grad_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
         # tile s and convert inputs to tensor
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -99,15 +106,16 @@ class controller_cem_naive_grad_tf(template_controller):
         self.u = tf.squeeze(self.dist_mue[0,0,:]).numpy()
         self.dist_mue = tf.concat([self.dist_mue[:, 1:, :], tf.constant((self.action_low + self.action_high) * 0.5, shape=(1,1,self.num_control_inputs))], axis=1)
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = Q.numpy()
-            self.current_log["J_logged"] = J.numpy()
-            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = Q.numpy()
+            logging_values["J_logged"] = J.numpy()
+            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
         
         return self.u
 
-    def controller_reset(self):
+    def optimizer_reset(self):
         #reset controller initial distribution
         self.dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([1, self.mpc_horizon, self.num_control_inputs])
         self.stdev = self.cem_initial_action_stdev * tf.ones([1, self.mpc_horizon, self.num_control_inputs])

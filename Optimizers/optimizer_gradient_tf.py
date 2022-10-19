@@ -2,18 +2,21 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 
-class controller_gradient_tf(template_controller):
+class optimizer_gradient_tf(template_optimizer):
     def __init__(
         self,
+        controller: template_controller,
+        predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        seed: int,
         action_space: Box,
         observation_space: Box,
+        seed: int,
         mpc_horizon: int,
         gradient_steps: int,
         num_rollouts: int,
@@ -27,15 +30,19 @@ class controller_gradient_tf(template_controller):
         rtol: float,
         warmup: bool,
         warmup_iterations: int,
-        controller_logging: bool,
-        **kwargs,
+        optimizer_logging: bool,
     ):
-        super().__init__(cost_function=cost_function, seed=seed, action_space=action_space, observation_space=observation_space, mpc_horizon=mpc_horizon, num_rollouts=num_rollouts, controller_logging=controller_logging)
-        
-        # Predictor
-        self.predictor = PredictorWrapper()
-        self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+        super().__init__(
+            controller=controller,
+            predictor=predictor,
+            cost_function=cost_function,
+            predictor_specification=predictor_specification,
+            action_space=action_space,
+            observation_space=observation_space,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            optimizer_logging=optimizer_logging,
         )
         
         # MPC parameters
@@ -59,7 +66,7 @@ class controller_gradient_tf(template_controller):
         if self.warmup:
             self.first_iter_count = self.warmup_iterations
         
-        self.controller_reset()
+        self.optimizer_reset()
 
     @CompileTF
     def gradient_optimization(self, s: tf.Tensor, Q_tf: tf.Variable, optim):
@@ -89,8 +96,8 @@ class controller_gradient_tf(template_controller):
 
     # step function to find control
     def step(self, s: np.ndarray, time=None):
-        if self.controller_logging:
-            self.current_log["s_logged"] = s.copy()
+        if self.optimizer_logging:
+            logging_values = {"s_logged": s.copy()}
         # Start all trajectories in current state
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -121,11 +128,12 @@ class controller_gradient_tf(template_controller):
 
         self.u: np.ndarray = tf.squeeze(Q[best_idx, 0, :]).numpy()
         
-        if self.controller_logging:
-            self.current_log["Q_logged"] = Q.numpy()
-            self.current_log["J_logged"] = traj_cost.numpy()
-            self.current_log["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            self.current_log["u_logged"] = self.u
+        if self.optimizer_logging:
+            logging_values["Q_logged"] = Q.numpy()
+            logging_values["J_logged"] = traj_cost.numpy()
+            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            logging_values["u_logged"] = self.u
+            self.send_logs_to_controller(logging_values)
 
         # Shift Q, Adam weights by one time step
         self.count += 1
@@ -159,7 +167,7 @@ class controller_gradient_tf(template_controller):
 
         return self.u
 
-    def controller_reset(self):
+    def optimizer_reset(self):
         # generate random input sequence and clip to control limits
         Q = self.rng.uniform(
             [self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
