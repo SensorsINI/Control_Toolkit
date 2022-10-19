@@ -13,6 +13,7 @@ class template_optimizer:
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         self.cost_function = cost_function
+        self.u = 0.0
         
         # Configure predictor
         self.predictor = predictor
@@ -42,7 +43,7 @@ class template_optimizer:
         self.controller.update_logs(logging_values)
     
     def step(self, s: np.ndarray, time=None):
-        return NotImplementedError()
+        raise NotImplementedError()
     
     def optimizer_reset(self):
-        return NotImplementedError()
+        raise NotImplementedError()

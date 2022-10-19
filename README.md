@@ -28,8 +28,9 @@ To use the controllers, add this and the [SI_Toolkit](https://github.com/Sensors
 - `mpc-opti`:
     Custom implementation of MPC with Casadi "opti" library
 
-- `mppi`:
-    A CPU-only implementation of Model Predictive Path Integral Control (Williams et al. 2015). 
+- `mppi-cartpole`:
+    A CPU-only implementation of Model Predictive Path Integral Control (Williams et al. 2015).
+    This controller is application-specific for the simulated cartpole. 
     Thousands of randomly perturbed inputs are simulated through the optimization horizon, 
     then averaged by weighted cost, to produce the next control input.
 

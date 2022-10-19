@@ -58,7 +58,7 @@ class optimizer_mppi_tf(template_optimizer):
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
-        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.math.sqrt(dt)), dtype=tf.float32)
+        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.sqrt(dt)), dtype=tf.float32)
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 

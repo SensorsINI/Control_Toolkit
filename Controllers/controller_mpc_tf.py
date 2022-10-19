@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from typing import Optional
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
@@ -11,7 +12,7 @@ from gym.spaces.box import Box
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import (NumpyLibrary, PyTorchLibrary,
                                                 TensorFlowLibrary, TensorType)
-from Control_Toolkit.others.globals_and_utils import import_optimizer_by_name
+from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
 
 config_optimizer = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -19,9 +20,17 @@ config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_c
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
 
 
+logger = get_logger(__name__)
+
+
 class controller_mpc_tf(template_controller):
-    def configure(self):
-        optimizer_name = str(config_controller["mpc-tf"]["optimizer"])
+    _computation_library = TensorFlowLibrary
+    _has_optimizer = True
+    
+    def configure(self, optimizer_name: Optional[str]=None):
+        if optimizer_name in {None, ""}:
+            optimizer_name = str(config_controller["mpc-tf"]["optimizer"])
+            logger.info(f"Using default optimizer {optimizer_name} specified in config file")
         
         # Create cost function
         cost_function_name: str = config_cost_function["cost_function_name"]

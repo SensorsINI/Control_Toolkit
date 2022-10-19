@@ -44,7 +44,7 @@ class EnvironmentBatched:
         :return: observation, reward, terminated, truncated, info
         :rtype: Tuple[ TensorType, Union[np.ndarray, float], Union[np.ndarray, bool], Union[np.ndarray, bool], dict, ]
         """
-        return NotImplementedError()
+        raise NotImplementedError()
     
     def step_dynamics(
         self,
@@ -52,7 +52,7 @@ class EnvironmentBatched:
         action: TensorType,
         dt: float,
     ) -> TensorType:
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def reset(
         self,
@@ -70,7 +70,7 @@ class EnvironmentBatched:
         :return: Observation of the initial state and auxiliary information
         :rtype: Tuple[np.ndarray, Optional[dict]]
         """
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def _set_up_rng(self, seed: int = None) -> None:
         if seed is None:
@@ -80,10 +80,10 @@ class EnvironmentBatched:
         self.rng = self.lib.create_rng(seed)
 
     def is_done(self, state):
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def get_reward(self, state, action):
-        return NotImplementedError()
+        raise NotImplementedError()
 
     def _apply_actuator_noise(self, action: TensorType):
         disturbance = (

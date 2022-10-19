@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import os
 import numpy as np
 import yaml
-from SI_Toolkit.computation_library import NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
+from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
 from gym.spaces.box import Box
 
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
@@ -23,6 +23,9 @@ config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_c
 
 
 class template_controller(ABC):
+    _computation_library: type[ComputationLibrary] = None  # Define this in your controller class
+    _has_optimizer = False
+    
     def __init__(
         self,
         environment_name: str,
@@ -44,17 +47,9 @@ class template_controller(ABC):
         self.action_low = action_space.low
         self.action_high = action_space.high
         
-        # Set computation library
-        if self.controller_name.endswith("tf"):
-            self.computation_library = TensorFlowLibrary
-        elif self.controller_name.endswith("pytorch"):
-            self.computation_library = PyTorchLibrary
-        else:
-            self.computation_library = NumpyLibrary
-        
         # Set properties like target positions on this controller
         for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, self.computation_library.to_variable(new_value))
+            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
                 
         # Initialize control variable
         self.u = 0.0
@@ -71,11 +66,8 @@ class template_controller(ABC):
             "rollout_trajectories_logged",
         ]
         self.logs: "dict[str, list[TensorType]]" = {s: [] for s in self.save_vars}
-        
-        # Final configuration of controller
-        self.configure()
     
-    def configure(self):
+    def configure(self, **kwargs):
         # In your controller, implement any additional initialization steps here
         pass
     
@@ -113,6 +105,16 @@ class template_controller(ABC):
     @property
     def controller_data_for_csv(self):
         return {}
+
+    @property
+    def computation_library(self):
+        if self._computation_library == None:
+            raise NotImplementedError("Controller class needs to specify its computation library")
+        return self._computation_library
+    
+    @property
+    def has_optimizer(self):
+        return self._has_optimizer
     
     def get_outputs(self) -> "dict[str, np.ndarray]":
         """Retrieve a dictionary of controller outputs. These could be saved traces of input plans or the like.

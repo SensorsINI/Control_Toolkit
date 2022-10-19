@@ -4,8 +4,6 @@ import os
 from datetime import datetime
 from importlib import import_module
 
-import numpy as np
-
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
 import tensorflow as tf
@@ -134,6 +132,19 @@ def import_controller_by_name(controller_name: str) -> type:
     
     Controller: type = getattr(import_module(controller_relative_path.replace(".py", "").replace(os.sep, ".")), controller_full_name)
     return Controller
+
+
+def get_available_optimizer_names() -> "list[str]":
+    """
+    Method returns the list of optimizers available in the Control Toolkit or Application Specific Files
+    """
+    optimizer_files = (
+        glob.glob(f"Control_Toolkit_ASF/Optimizers/optimizer_*.py")
+        + glob.glob(f"**/Control_Toolkit/Optimizers/optimizer_*.py", recursive=True)
+    )
+    optimizer_names = [os.path.basename(item)[len('optimizer_'):-len('.py')].replace('_', '-') for item in optimizer_files]
+    optimizer_names.sort()
+    return optimizer_names
     
     
 def get_available_controller_names() -> "list[str]":
@@ -147,14 +158,6 @@ def get_available_controller_names() -> "list[str]":
     controller_names = ['manual-stabilization']
     controller_names.extend([os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files])
     
-    if "mpc-tf" in controller_names:
-        # MPC controller can run with any optimizer. List all optimizers as separate controllers.
-        optimizer_files = (
-            glob.glob(f"Control_Toolkit_ASF/Optimizers/optimizer_*.py")
-            + glob.glob(f"**/Control_Toolkit/Optimizers/optimizer_*.py", recursive=True)
-        )
-        controller_names.extend([os.path.basename(item)[len('optimizer_'):-len('.py')].replace('_', '-') for item in optimizer_files])
-
     controller_names.sort()
     return controller_names
 
@@ -190,3 +193,36 @@ def get_controller_name(controller_names=None, controller_name=None, controller_
         controller_name = controller_names[controller_idx]
 
     return controller_name, controller_idx
+
+
+def get_optimizer_name(optimizer_names=None, optimizer_name=None, optimizer_idx=None) -> type:
+    """
+    The method sets a new optimizer as the current optimizer.
+    The optimizer may be indicated either by its name
+    or by the index on the optimizer list (see get_available_optimizer_names method).
+    """
+
+    # Check if the proper information was provided: either optimizer_name or optimizer_idx
+    if (optimizer_name is None) and (optimizer_idx is None):
+        raise ValueError('You have to specify either optimizer_name or optimizer_idx to set a new optimizer.'
+                            'You have specified none of the two.')
+    elif (optimizer_name is not None) and (optimizer_idx is not None):
+        raise ValueError('You have to specify either optimizer_name or optimizer_idx to set a new optimizer.'
+                            'You have specified both.')
+    else:
+        pass
+        
+    if optimizer_names is None:
+        optimizer_names = get_available_optimizer_names()
+
+    # If optimizer name provided get optimizer index and vice versa
+    if (optimizer_name is not None):
+        try:
+            optimizer_idx = optimizer_names.index(optimizer_name)
+        except ValueError:
+            print('{} is not in list. \n In list are: {}'.format(optimizer_name, optimizer_names))
+            return None
+    else:
+        optimizer_name = optimizer_names[optimizer_idx]
+
+    return optimizer_name, optimizer_idx
