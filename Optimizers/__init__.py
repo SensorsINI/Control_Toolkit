@@ -38,7 +38,7 @@ class template_optimizer:
         self.optimizer_logging = optimizer_logging
     
     def send_logs_to_controller(self, logging_values: dict[str, TensorType]):
-        # Observer pattern: If logging is enabled, notify controller of logging values
+        # Very basic observer pattern: If logging is enabled, notify controller of logging values
         self.controller.update_logs(logging_values)
     
     def step(self, s: np.ndarray, time=None):
