@@ -2,14 +2,13 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 from SI_Toolkit.computation_library import TensorType
 import numpy as np
 from gym.spaces.box import Box
-from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.others.globals_and_utils import create_rng
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 
 
 class template_optimizer:
-    def __init__(self, controller: template_controller, predictor: PredictorWrapper, cost_function: cost_function_base, predictor_specification: str, action_space: Box, observation_space: Box, seed: int, num_rollouts: int, mpc_horizon: int, optimizer_logging: bool) -> None:
+    def __init__(self, predictor: PredictorWrapper, cost_function: cost_function_base, predictor_specification: str, action_space: Box, observation_space: Box, seed: int, num_rollouts: int, mpc_horizon: int, optimizer_logging: bool) -> None:
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         self.cost_function = cost_function
@@ -35,12 +34,8 @@ class template_optimizer:
         # Initialize random sampler
         self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)
         
-        self.controller = controller  # Reference to controller instance using this optimizer
+        self.logging_values = {}  # Can store trajectories and other things we want to log
         self.optimizer_logging = optimizer_logging
-    
-    def send_logs_to_controller(self, logging_values: dict[str, TensorType]):
-        # Very basic observer pattern: If logging is enabled, notify controller of logging values
-        self.controller.update_logs(logging_values)
     
     def step(self, s: np.ndarray, time=None):
         raise NotImplementedError()

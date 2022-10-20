@@ -5,7 +5,6 @@
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
@@ -15,7 +14,6 @@ from gym.spaces.box import Box
 class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
     def __init__(
         self,
-        controller: template_controller,
         predictor: PredictorWrapper,
         cost_function: cost_function_base,
         action_space: Box,
@@ -38,7 +36,6 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         optimizer_logging: bool,
     ):
         super().__init__(
-            controller=controller,
             predictor=predictor,
             cost_function=cost_function,
             predictor_specification=predictor_specification,
@@ -136,7 +133,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
-            logging_values = {"s_logged": s.copy()}
+            self.logging_values = {"s_logged": s.copy()}
         # tile s and convert inputs to tensor
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -156,11 +153,10 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         
         # Log variables
         if self.optimizer_logging:
-            logging_values["Q_logged"] = Q.numpy()
-            logging_values["J_logged"] = J.numpy()
-            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            logging_values["u_logged"] = self.u
-            self.send_logs_to_controller(logging_values)
+            self.logging_values["Q_logged"] = Q.numpy()
+            self.logging_values["J_logged"] = J.numpy()
+            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.logging_values["u_logged"] = self.u
         
         self.count += 1
         return self.u

@@ -1,7 +1,6 @@
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
-from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
@@ -13,7 +12,6 @@ logger = get_logger(__name__)
 class optimizer_rpgd_tf(template_optimizer):
     def __init__(
         self,
-        controller: template_controller,
         predictor: PredictorWrapper,
         cost_function: cost_function_base,
         action_space: Box,
@@ -39,7 +37,6 @@ class optimizer_rpgd_tf(template_optimizer):
         optimizer_logging: bool,
     ):
         super().__init__(
-            controller=controller,
             predictor=predictor,
             cost_function=cost_function,
             predictor_specification=predictor_specification,
@@ -158,7 +155,7 @@ class optimizer_rpgd_tf(template_optimizer):
         best_idx = sorted_cost[: self.opt_keep_k]
 
         # # Unnecessary Part
-        # # get distribution of kept trajectories. This is actually unnecessary for this controller, might be incorparated into another one tho
+        # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
         # elite_Q = tf.gather(Q, best_idx, axis=0)
         # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
         # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
@@ -192,7 +189,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
-            logging_values = {"s_logged": s.copy()}
+            self.logging_values = {"s_logged": s.copy()}
             
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
@@ -233,12 +230,11 @@ class optimizer_rpgd_tf(template_optimizer):
         self.u = self.u.numpy()
         
         if self.optimizer_logging:
-            logging_values["Q_logged"] = self.Q_tf.numpy()
-            logging_values["J_logged"] = J.numpy()
-            logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
-            logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
-            logging_values["u_logged"] = self.u
-            self.send_logs_to_controller(logging_values)
+            self.logging_values["Q_logged"] = self.Q_tf.numpy()
+            self.logging_values["J_logged"] = J.numpy()
+            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
+            self.logging_values["u_logged"] = self.u
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.

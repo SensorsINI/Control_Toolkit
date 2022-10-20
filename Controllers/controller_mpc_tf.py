@@ -7,7 +7,6 @@ import numpy as np
 import yaml
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
-from gym.spaces.box import Box
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import (NumpyLibrary, PyTorchLibrary,
@@ -43,7 +42,6 @@ class controller_mpc_tf(template_controller):
         # MPC Controller always has an optimizer
         Optimizer = import_optimizer_by_name(optimizer_name)
         self.optimizer: template_optimizer = Optimizer(
-            controller=self,
             predictor=self.predictor,
             cost_function=self.cost_function,
             action_space=self.action_space,
@@ -54,7 +52,9 @@ class controller_mpc_tf(template_controller):
         
     def step(self, s: np.ndarray, time=None, updated_attributes: dict[str, TensorType]={}):
         self.update_attributes(updated_attributes)
-        return self.optimizer.step(s, time)
+        u = self.optimizer.step(s, time)
+        self.update_logs(self.optimizer.logging_values)
+        return u
 
     def controller_reset(self):
         self.optimizer.optimizer_reset()

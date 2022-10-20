@@ -2,18 +2,16 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
-#controller class
+# optimizer class
 class optimizer_mppi_var_tf(template_optimizer):
     def __init__(
         self,
-        controller: template_controller,
         predictor: PredictorWrapper,
         cost_function: cost_function_base,
         action_space: Box,
@@ -38,7 +36,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         optimizer_logging: bool,
     ):
         super().__init__(
-            controller=controller,
             predictor=predictor,
             cost_function=cost_function,
             predictor_specification=predictor_specification,
@@ -144,16 +141,15 @@ class optimizer_mppi_var_tf(template_optimizer):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
-            logging_values = {"s_logged": s.copy()}
+            self.logging_values = {"s_logged": s.copy()}
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng, self.u, self.nuvec)
         
         if self.optimizer_logging:
-            logging_values["Q_logged"] = u_run.numpy()
-            logging_values["J_logged"] = traj_cost.numpy()
-            logging_values["u_logged"] = self.u
-            self.send_logs_to_controller(logging_values)
+            self.logging_values["Q_logged"] = u_run.numpy()
+            self.logging_values["J_logged"] = traj_cost.numpy()
+            self.logging_values["u_logged"] = self.u
         
         self.nuvec.assign(new_nuvec)
         return tf.squeeze(self.u).numpy()

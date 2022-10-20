@@ -2,18 +2,16 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 from gym.spaces.box import Box
 
 
-#controller class
+# optimizer class
 class optimizer_mppi_optimize_tf(template_optimizer):
     def __init__(
         self,
-        controller: template_controller,
         predictor: PredictorWrapper,
         cost_function: cost_function_base,
         action_space: Box,
@@ -39,7 +37,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         optimizer_logging: bool,
     ):
         super().__init__(
-            controller=controller,
             predictor=predictor,
             cost_function=cost_function,
             predictor_specification=predictor_specification,
@@ -141,7 +138,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
             traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q, self.u)
         #retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
-        #modify gradients: makes sure biggest entry of each gradient is at most "gradmax_clip". (For this controller only one sequence
+        #modify gradients: makes sure biggest entry of each gradient is at most "gradmax_clip". (For this optimizer only one sequence
         dc_dQ_max = tf.math.reduce_max(tf.abs(dc_dQ), axis=1, keepdims=True) #find max gradient for every sequence
         mask = (dc_dQ_max > self.gradmax_clip) #generate binary mask
         invmask = tf.logical_not(mask)
@@ -156,7 +153,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
     #step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
-            logging_values = {"s_logged": s.copy()}
+            self.logging_values = {"s_logged": s.copy()}
         # tile inital state and convert inputs to tensorflow tensors
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
@@ -173,10 +170,9 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         self.u = np.squeeze(self.Q_opt[0, 0, :].numpy())
         
         if self.optimizer_logging:
-            logging_values["Q_logged"] = self.Q_opt.numpy()
-            logging_values["J_logged"] = traj_cost.numpy()
-            logging_values["u_logged"] = self.u
-            self.send_logs_to_controller(logging_values)
+            self.logging_values["Q_logged"] = self.Q_opt.numpy()
+            self.logging_values["J_logged"] = traj_cost.numpy()
+            self.logging_values["u_logged"] = self.u
         
         self.Q_opt.assign(tf.concat([self.Q_opt[:, 1:, :], tf.zeros([1,1,self.num_control_inputs])], axis=1)) #shift and initialize new input with 0
         #reset adam optimizer
