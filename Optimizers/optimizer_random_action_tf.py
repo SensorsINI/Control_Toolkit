@@ -3,7 +3,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions import cost_function_base
 from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 

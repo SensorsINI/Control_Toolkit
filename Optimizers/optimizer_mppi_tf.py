@@ -7,7 +7,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions import cost_function_base
 
 
 class optimizer_mppi_tf(template_optimizer):

@@ -6,7 +6,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import yaml
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit_ASF.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions import cost_function_base
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import (NumpyLibrary, PyTorchLibrary,
