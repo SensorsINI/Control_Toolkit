@@ -20,7 +20,7 @@ class cost_function_base:
         self, s_hor: TensorType, u: TensorType, u_prev: TensorType = None
     ):
         # Helper function which computes the summed cost of a trajectory
-        # Can be overwritten in a subclass
+        # Can be overwritten in a subclass, e.g. if weighted sum is required
         stage_cost = self.get_stage_cost(s_hor[:, 1:, :], u, u_prev)
         total_cost = self.lib.sum(stage_cost, 1)
         total_cost = total_cost + self.get_terminal_cost(s_hor)
