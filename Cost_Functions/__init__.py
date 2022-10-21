@@ -19,7 +19,12 @@ class cost_function_base:
     def get_trajectory_cost(
         self, s_hor: TensorType, u: TensorType, u_prev: TensorType = None
     ):
-        raise NotImplementedError()
+        # Helper function which computes the summed cost of a trajectory
+        # Can be overwritten in a subclass
+        stage_cost = self.get_stage_cost(s_hor[:, 1:, :], u, u_prev)
+        total_cost = self.lib.sum(stage_cost, 1)
+        total_cost = total_cost + self.get_terminal_cost(s_hor)
+        return total_cost
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         assert isinstance(ComputationLib, type)
