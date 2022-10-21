@@ -1,11 +1,12 @@
 from typing import Tuple
-from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
-from Control_Toolkit.Cost_Functions import cost_function_base
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 logger = get_logger(__name__)
 
@@ -19,7 +20,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
     def __init__(
         self,
         predictor: PredictorWrapper,
-        cost_function: cost_function_base,
+        cost_function: CostFunctionWrapper,
         num_states: int,
         num_control_inputs: int,
         control_limits: Tuple[np.ndarray, np.ndarray],

@@ -1,12 +1,11 @@
 import os
-from importlib import import_module
 from typing import Optional
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
 import yaml
 from Control_Toolkit.Controllers import template_controller
-from Control_Toolkit.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import (NumpyLibrary, PyTorchLibrary,
@@ -20,6 +19,7 @@ config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "confi
 
 
 computation_library = str(config_controller["mpc"]["computation_library"])
+cost_function_specification = dict(config_controller["mpc"]).get("cost_function_specification", None)
 logger = get_logger(__name__)
 
 
@@ -42,9 +42,8 @@ class controller_mpc(template_controller):
             logger.info(f"Using default optimizer {optimizer_name} specified in config file")
         
         # Create cost function
-        cost_function_name: str = config_cost_function["cost_function_name_default"]
-        cost_function_module = import_module(f"Control_Toolkit_ASF.Cost_Functions.{self.environment_name}.{cost_function_name}")
-        self.cost_function: cost_function_base = getattr(cost_function_module, cost_function_name)(self, self.computation_library)
+        self.cost_function = CostFunctionWrapper()
+        self.cost_function.configure(self, cost_function_specification=cost_function_specification)
         
         # Create predictor
         self.predictor = PredictorWrapper()
