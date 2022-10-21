@@ -46,9 +46,9 @@ class CostFunctionWrapper:
         self, environment_name: str, cost_function_specification: str = None
     ):
         if cost_function_specification is None:
-            self.cost_function_name = self.cost_function_name_default
+            self.cost_function_name = self.cost_function_name_default.replace("-", "_")
         elif isinstance(cost_function_specification, str):
-            self.cost_function_name = cost_function_specification
+            self.cost_function_name = cost_function_specification.replace("-", "_")
         else:
             raise ValueError(
                 f"Cannot interpret cost function specification {cost_function_specification}."
