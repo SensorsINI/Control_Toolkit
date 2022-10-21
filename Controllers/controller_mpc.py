@@ -19,20 +19,30 @@ config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_c
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
 
 
+computation_library = str(config_controller["mpc"]["computation_library"])
 logger = get_logger(__name__)
 
 
-class controller_mpc_tf(template_controller):
-    _computation_library = TensorFlowLibrary
+class controller_mpc(template_controller):
     _has_optimizer = True
+    # Assign computation library
+    if "tensorflow" in computation_library.lower():
+        _computation_library = TensorFlowLibrary
+    elif "pytorch" in computation_library.lower():
+        _computation_library = PyTorchLibrary
+    elif "numpy" in computation_library.lower():
+        _computation_library = NumpyLibrary
+    else:
+        logger.warning(f"Found unknown spec {computation_library} for computation library in MPC controller. Using default numpy.")
+        _computation_library = NumpyLibrary
     
     def configure(self, optimizer_name: Optional[str]=None):
         if optimizer_name in {None, ""}:
-            optimizer_name = str(config_controller["mpc-tf"]["optimizer"])
+            optimizer_name = str(config_controller["mpc"]["optimizer"])
             logger.info(f"Using default optimizer {optimizer_name} specified in config file")
         
         # Create cost function
-        cost_function_name: str = config_cost_function["cost_function_name"]
+        cost_function_name: str = config_cost_function["cost_function_name_default"]
         cost_function_module = import_module(f"Control_Toolkit_ASF.Cost_Functions.{self.environment_name}.{cost_function_name}")
         self.cost_function: cost_function_base = getattr(cost_function_module, cost_function_name)(self, self.computation_library)
         
@@ -44,8 +54,9 @@ class controller_mpc_tf(template_controller):
         self.optimizer: template_optimizer = Optimizer(
             predictor=self.predictor,
             cost_function=self.cost_function,
-            action_space=self.action_space,
-            observation_space=self.observation_space,
+            num_states=self.num_states,
+            num_control_inputs=self.num_control_inputs,
+            control_limits=self.control_limits,
             optimizer_logging=self.controller_logging,
             **config_optimizer[optimizer_name],
         )

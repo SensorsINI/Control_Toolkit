@@ -117,7 +117,7 @@ def import_controller_by_name(controller_name: str) -> type:
     optimizer_full_name, _ = find_optimizer_if_it_exists(controller_name)
     if optimizer_full_name:
         # If the optimizer exists, the controller is MPC
-        controller_full_name = "controller_mpc_tf"
+        controller_full_name = "controller_mpc"
     
     # Search for the controller in the Controllers folders
     controller_relative_paths = (

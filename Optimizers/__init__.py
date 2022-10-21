@@ -1,14 +1,25 @@
+from typing import Tuple
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-from SI_Toolkit.computation_library import TensorType
 import numpy as np
-from gym.spaces.box import Box
 
 from Control_Toolkit.others.globals_and_utils import create_rng
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
 
 
 class template_optimizer:
-    def __init__(self, predictor: PredictorWrapper, cost_function: cost_function_base, predictor_specification: str, action_space: Box, observation_space: Box, seed: int, num_rollouts: int, mpc_horizon: int, optimizer_logging: bool) -> None:
+    def __init__(
+            self,
+            predictor: PredictorWrapper,
+            cost_function: cost_function_base,
+            num_states: int,
+            num_control_inputs: int,
+            control_limits: Tuple[np.ndarray, np.ndarray],
+            optimizer_logging: bool,
+            seed: int,
+            num_rollouts: int,
+            mpc_horizon: int,
+            predictor_specification: str,
+        ) -> None:
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         self.cost_function = cost_function
@@ -20,16 +31,9 @@ class template_optimizer:
             batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
         )
         
-        # Infer number of states and actions and their limits from the action and observation spaces
-        self.action_space = action_space
-        self.observation_space = observation_space
-        assert len(action_space.shape) == 1, "Only vector action space currently supported"
-        self.num_control_inputs = action_space.shape[0]
-        if observation_space is not None:
-            assert len(observation_space.shape) == 1, "Only vector observation space currently supported"
-            self.num_states = observation_space.shape[0]
-        self.action_low = action_space.low
-        self.action_high = action_space.high
+        self.num_states = num_states
+        self.num_control_inputs = num_control_inputs
+        self.action_low, self.action_high = control_limits
         
         # Initialize random sampler
         self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)

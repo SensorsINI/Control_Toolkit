@@ -1,9 +1,9 @@
+from typing import Tuple
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit_ASF.Cost_Functions import cost_function_base
-from gym.spaces.box import Box
 from SI_Toolkit.Functions.TF.Compile import CompileTF
 
 
@@ -12,8 +12,9 @@ class optimizer_gradient_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: cost_function_base,
-        action_space: Box,
-        observation_space: Box,
+        num_states: int,
+        num_control_inputs: int,
+        control_limits: Tuple[np.ndarray, np.ndarray],
         seed: int,
         mpc_horizon: int,
         gradient_steps: int,
@@ -33,13 +34,14 @@ class optimizer_gradient_tf(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            predictor_specification=predictor_specification,
-            action_space=action_space,
-            observation_space=observation_space,
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            control_limits=control_limits,
+            optimizer_logging=optimizer_logging,
             seed=seed,
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
-            optimizer_logging=optimizer_logging,
+            predictor_specification=predictor_specification,
         )
         
         # MPC parameters

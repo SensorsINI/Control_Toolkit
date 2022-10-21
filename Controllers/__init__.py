@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
 import os
+from typing import Tuple
 import numpy as np
 import yaml
-from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
-from gym.spaces.box import Box
+from SI_Toolkit.computation_library import ComputationLibrary, TensorType
 
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
 
@@ -29,23 +29,19 @@ class template_controller(ABC):
     def __init__(
         self,
         environment_name: str,
+        num_states: int,
+        num_control_inputs: int,
+        control_limits: Tuple[np.ndarray, np.ndarray],
         initial_environment_attributes: dict[str, TensorType],
-        action_space: Box,
-        observation_space: Box,
     ):
         # Environment-related parameters
         self.environment_name = environment_name
         self.initial_environment_attributes = initial_environment_attributes
-        self.action_space = action_space
-        self.observation_space = observation_space
         
-        assert len(action_space.shape) == 1, "Only vector action space currently supported"
-        self.num_control_inputs = action_space.shape[0]
-        assert len(observation_space.shape) == 1, "Only vector observation space currently supported"
-        self.num_states = observation_space.shape[0]
-        
-        self.action_low = action_space.low
-        self.action_high = action_space.high
+        self.num_states = num_states
+        self.num_control_inputs = num_control_inputs
+        self.control_limits = control_limits
+        self.action_low, self.action_high = self.control_limits
         
         # Set properties like target positions on this controller
         for property, new_value in initial_environment_attributes.items():
