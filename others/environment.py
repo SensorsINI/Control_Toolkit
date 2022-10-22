@@ -121,7 +121,7 @@ class EnvironmentBatched:
         except KeyError as error:
             log.exception(error)
     
-    def set_logs(self, logs: dict[str, Any]):
+    def set_logs(self, logs: "dict[str, Any]"):
         self._logs = logs
 
     # Overloading properties/methods for Bharadhwaj implementation

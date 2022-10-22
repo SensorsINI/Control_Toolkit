@@ -23,7 +23,7 @@ config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_c
 
 
 class template_controller(ABC):
-    _computation_library: type[ComputationLibrary] = None  # Define this in your controller class
+    _computation_library: "type[ComputationLibrary]" = None  # Define this in your controller class
     _has_optimizer = False
     
     def __init__(
@@ -32,7 +32,7 @@ class template_controller(ABC):
         num_states: int,
         num_control_inputs: int,
         control_limits: Tuple[np.ndarray, np.ndarray],
-        initial_environment_attributes: dict[str, TensorType],
+        initial_environment_attributes: "dict[str, TensorType]",
     ):
         # Environment-related parameters
         self.environment_name = environment_name
@@ -67,12 +67,12 @@ class template_controller(ABC):
         # In your controller, implement any additional initialization steps here
         pass
     
-    def update_attributes(self, updated_attributes: dict[str, TensorType]):
+    def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
             self.computation_library.assign(getattr(self, property), new_value)
     
     @abstractmethod
-    def step(self, s: np.ndarray, time=None, updated_attributes: dict[str, TensorType]={}):
+    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         Q = None  # This line is not obligatory. ;-) Just to indicate that Q must me defined and returned
         pass
         return Q  # normed control input in the range [-1,1]
@@ -123,7 +123,7 @@ class template_controller(ABC):
             name: np.stack(v, axis=0) if len(v) > 0 else None for name, v in self.logs.items()
         }
         
-    def update_logs(self, logging_values: dict[str, TensorType]) -> None:
+    def update_logs(self, logging_values: "dict[str, TensorType]") -> None:
         if self.controller_logging:
             for name, var in zip(
                 self.save_vars, [logging_values.get(var_name, None) for var_name in self.save_vars]
