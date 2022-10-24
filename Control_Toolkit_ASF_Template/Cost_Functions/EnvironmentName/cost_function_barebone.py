@@ -3,15 +3,12 @@ Every environment, be it a simulated or physical one, can be controlled using di
 A cost function is specific to an environment, which is why each cost function module is grouped by environment name within Control_Toolkit_ASF/Cost_Functions.
 """
 import os
+import yaml
 from Control_Toolkit.Cost_Functions import cost_function_base
 
-from others.globals_and_utils import load_config
-
-from CartPole.cartpole_model import TrackHalfLength
-from CartPole.state_utilities import ANGLE_IDX, POSITION_IDX
 
 # TODO: Load constants from the cost config file, like this:
-config = load_config(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
+config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"), Loader=yaml.FullLoader)
 
 # TODO: Rename parent folder from EnvironmentName to the actual name of you environment
 # TODO: Load constants like this:
@@ -50,6 +47,7 @@ class cost_function_barebone(cost_function_base):
         # TODO: Sum of stage costs + terminal cost already implemented in base class
         # but could be overwritten here, e.g. sum with exponentially decaying weights
         # stage_cost = self.get_stage_cost(s_hor[:, 1:, :], u, u_prev)
+        # gamma = np.array([0.99 ** i for i in range(s_hor.shape[1])])
         # total_cost = self.lib.sum(gamma*stage_cost, 1)
         # return total_cost
         pass
