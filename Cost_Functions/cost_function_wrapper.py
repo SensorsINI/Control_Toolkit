@@ -28,7 +28,7 @@ class CostFunctionWrapper:
         cost_function_specification=None,
     ):
         environment_name = controller.environment_name
-        computation_library = controller.computation_library
+        computation_library = controller.computation_library  # Use library dictated by controller
         
         # Set cost function attributes from given specification. Resort to defaults if required.
         self.update_cost_function_name_from_specification(

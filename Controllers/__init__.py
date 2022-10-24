@@ -32,7 +32,7 @@ class template_controller(ABC):
         environment_name: str,
         num_states: int,
         num_control_inputs: int,
-        control_limits: Tuple[np.ndarray, np.ndarray],
+        control_limits: "Tuple[np.ndarray, np.ndarray]",
         initial_environment_attributes: "dict[str, TensorType]",
     ):
         # Load controller config and select the entry for the current controller
@@ -75,7 +75,7 @@ class template_controller(ABC):
         self.u = 0.0
 
         # Logging-related
-        self.controller_logging = self.config_controllers[self.controller_name]["controller_logging"]
+        self.controller_logging = self.config_controller["controller_logging"]
         self.save_vars = [
             "Q_logged",
             "J_logged",
@@ -127,7 +127,7 @@ class template_controller(ABC):
         return {}
 
     @property
-    def computation_library(self):
+    def computation_library(self) -> "type[ComputationLibrary]":
         if self._computation_library == None:
             raise NotImplementedError("Controller class needs to specify its computation library")
         return self._computation_library

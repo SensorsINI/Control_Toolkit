@@ -1,4 +1,5 @@
 from typing import Tuple
+from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary
 
 import numpy as np
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
@@ -7,17 +8,20 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 class template_optimizer:
+    supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
+    
     def __init__(
             self,
             predictor: PredictorWrapper,
             cost_function: CostFunctionWrapper,
             num_states: int,
             num_control_inputs: int,
-            control_limits: Tuple[np.ndarray, np.ndarray],
+            control_limits: "Tuple[np.ndarray, np.ndarray]",
             optimizer_logging: bool,
             seed: int,
             num_rollouts: int,
             mpc_horizon: int,
+            computation_library: "type[ComputationLibrary]",
             predictor_specification: str,
         ) -> None:
         self.num_rollouts = num_rollouts
@@ -28,7 +32,10 @@ class template_optimizer:
         # Configure predictor
         self.predictor = predictor
         self.predictor.configure(
-            batch_size=self.num_rollouts, horizon=self.mpc_horizon, predictor_specification=predictor_specification
+            batch_size=self.num_rollouts,
+            horizon=self.mpc_horizon,
+            computation_library=computation_library,
+            predictor_specification=predictor_specification
         )
         
         self.num_states = num_states
@@ -40,6 +47,10 @@ class template_optimizer:
         
         self.logging_values = {}  # Can store trajectories and other things we want to log
         self.optimizer_logging = optimizer_logging
+        
+        # Check if the computation_library passed is compatible with this optimizer
+        if computation_library not in self.supported_computation_libraries:
+            raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library}")
     
     def step(self, s: np.ndarray, time=None):
         raise NotImplementedError()

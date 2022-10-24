@@ -1,4 +1,5 @@
 from typing import Tuple
+from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
 import tensorflow as tf
@@ -11,13 +12,16 @@ logger = get_logger(__name__)
 
 
 class optimizer_rpgd_particle_tf(template_optimizer):
+    supported_computation_libraries = {TensorFlowLibrary}
+    
     def __init__(
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
         num_states: int,
         num_control_inputs: int,
-        control_limits: Tuple[np.ndarray, np.ndarray],
+        control_limits: "Tuple[np.ndarray, np.ndarray]",
+        computation_library: "type[ComputationLibrary]",
         seed: int,
         mpc_horizon: int,
         num_rollouts: int,
@@ -48,6 +52,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             seed=seed,
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
+            computation_library=computation_library,
             predictor_specification=predictor_specification,
         )
         
