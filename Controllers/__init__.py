@@ -1,12 +1,16 @@
-from abc import ABC, abstractmethod
-
 import os
+from abc import ABC, abstractmethod
 from typing import Tuple
+
 import numpy as np
 import yaml
-from SI_Toolkit.computation_library import ComputationLibrary, TensorType
+from Control_Toolkit.others.globals_and_utils import get_logger
+from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
+                                            PyTorchLibrary, TensorFlowLibrary,
+                                            TensorType)
 
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+logger = get_logger(__name__)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
@@ -31,11 +35,28 @@ class template_controller(ABC):
         control_limits: Tuple[np.ndarray, np.ndarray],
         initial_environment_attributes: "dict[str, TensorType]",
     ):
-        self.config_controllers = yaml.load(
+        # Load controller config and select the entry for the current controller
+        config_controllers = yaml.load(
             open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
             Loader=yaml.FullLoader
         )
-        self.config_controller = self.config_controllers[self.controller_name]
+        # self.controller_name is inferred from the class name, which is the class being instantiated
+        # Example: If you create a controller_mpc, this controller_template.__init__ will be called
+        # but the class name will be controller_mpc, not template_controller.
+        self.config_controller = dict(config_controllers[self.controller_name])
+        
+        # Set computation library
+        computation_library_name = str(self.config_controller["computation_library"])
+        # Assign computation library
+        if "tensorflow" in computation_library_name.lower():
+            self._computation_library = TensorFlowLibrary
+        elif "pytorch" in computation_library_name.lower():
+            self._computation_library = PyTorchLibrary
+        elif "numpy" in computation_library_name.lower():
+            self._computation_library = NumpyLibrary
+        else:
+            logger.warning(f"Found unknown spec {computation_library_name} for computation library in MPC controller. Using default numpy.")
+            self._computation_library = NumpyLibrary
 
         # Environment-related parameters
         self.environment_name = environment_name

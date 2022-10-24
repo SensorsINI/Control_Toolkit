@@ -13,7 +13,8 @@ from others.globals_and_utils import create_rng
 
 # TODO: You can load and access config files here, like this:
 # config = yaml.load(open("config.yml", "r"), Loader=yaml.FullLoader)
-# config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")), Loader=yaml.FullLoader)
+# The controller-specific config is loaded automatically in template_controller.__init__
+# and you can use it as self.config_controller.
 
 
 class controller_barebone(template_controller):
@@ -22,7 +23,7 @@ class controller_barebone(template_controller):
     def configure(self):
         # TODO: Do things like defining a random number generator, loading models, computing constants, etc.
         # Examples:
-        # seed = config_lqr["seed"]
+        # seed = self.config_controller["seed"]
         # self.rng = create_rng(self.__class__.__name__, seed if seed==None else seed*2)
         # s = np.zeros((4,), dtype=np.float32)
         # u = 0.0
