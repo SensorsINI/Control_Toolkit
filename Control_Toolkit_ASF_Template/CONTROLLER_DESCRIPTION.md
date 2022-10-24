@@ -9,12 +9,3 @@
 
 - `lqr`:
     linear quadratic regulator controller, our very first well working controller
-
-- `mpc-opti`:
-    Custom implementation of MPC with Casadi "opti" library
-
-- `mppi-cartpole`:
-    A CPU-only implementation of Model Predictive Path Integral Control (Williams et al. 2015).
-    This controller is application-specific for the simulated cartpole. 
-    Thousands of randomly perturbed inputs are simulated through the optimization horizon, 
-    then averaged by weighted cost, to produce the next control input.
