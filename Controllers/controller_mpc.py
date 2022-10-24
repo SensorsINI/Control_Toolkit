@@ -42,6 +42,7 @@ class controller_mpc(template_controller):
             num_control_inputs=self.num_control_inputs,
             control_limits=self.control_limits,
             optimizer_logging=self.controller_logging,
+            computation_library=self.computation_library,
             **config_optimizer[optimizer_name],
         )
         

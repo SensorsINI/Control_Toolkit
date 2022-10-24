@@ -32,5 +32,5 @@ class cost_function_base:
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
         if not ComputationLib in self.supported_computation_libraries:
-            raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib}")
+            raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
         self.lib = ComputationLib

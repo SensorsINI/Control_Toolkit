@@ -18,7 +18,9 @@ from others.globals_and_utils import create_rng
 
 
 class controller_barebone(template_controller):
-    _computation_library = ...  # TODO: One of NumpyLibrary, TensorflowLibrary, PyTorchLibrary
+    _computation_library = ...  # TODO: One of NumpyLibrary, TensorflowLibrary, PyTorchLibrary.
+    # This is required if the controller only supports one computation library.
+    # In that case, you do not need to specify the computation_library in this controller's configuration.
     
     def configure(self):
         # TODO: Do things like defining a random number generator, loading models, computing constants, etc.
