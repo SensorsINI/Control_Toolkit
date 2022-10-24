@@ -19,9 +19,6 @@ We recommend you derive it from the provided template.
 See the provided examples of controllers to gain more insight.
 """
 
-config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")), Loader=yaml.FullLoader)
-
-
 class template_controller(ABC):
     _computation_library: "type[ComputationLibrary]" = None  # Define this in your controller class
     _has_optimizer = False
@@ -34,6 +31,12 @@ class template_controller(ABC):
         control_limits: Tuple[np.ndarray, np.ndarray],
         initial_environment_attributes: "dict[str, TensorType]",
     ):
+        self.config_controllers = yaml.load(
+            open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
+            Loader=yaml.FullLoader
+        )
+        self.config_controller = self.config_controllers[self.controller_name]
+
         # Environment-related parameters
         self.environment_name = environment_name
         self.initial_environment_attributes = initial_environment_attributes
@@ -51,7 +54,7 @@ class template_controller(ABC):
         self.u = 0.0
 
         # Logging-related
-        self.controller_logging = config_controller[self.controller_name]["controller_logging"]
+        self.controller_logging = self.config_controllers[self.controller_name]["controller_logging"]
         self.save_vars = [
             "Q_logged",
             "J_logged",

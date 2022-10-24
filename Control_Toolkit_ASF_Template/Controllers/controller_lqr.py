@@ -19,9 +19,6 @@ from others.globals_and_utils import create_rng
 config = yaml.load(open("config.yml", "r"), Loader=yaml.FullLoader)
 actuator_noise = config["cartpole"]["actuator_noise"]
 
-config_controller = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")), Loader=yaml.FullLoader)
-config_lqr = config_controller["lqr"]
-
 class controller_lqr(template_controller):
     _computation_library = NumpyLibrary
     
