@@ -62,7 +62,7 @@ class template_controller(ABC):
                 raise ValueError(f"Computation library {computation_library_name} could not be interpreted.")
         else:
             # Try using default computation library set as class attribute
-            if not isinstance(self.computation_library, ComputationLibrary):
+            if not issubclass(self.computation_library, ComputationLibrary):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
                 logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
