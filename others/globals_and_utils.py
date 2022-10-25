@@ -3,9 +3,6 @@ import logging
 import os
 from datetime import datetime
 from importlib import import_module
-from importlib.util import find_spec
-
-import numpy as np
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
@@ -56,7 +53,7 @@ def get_logger(name):
 log = get_logger(__name__)
 
 
-def create_rng(id: str, seed: str, use_tf: bool = False):
+def create_rng(id: str, seed: int, use_tf: bool = False):
     if seed == None:
         log.info(f"{id}: No random seed specified. Seeding with datetime.")
         seed = int(
@@ -69,26 +66,86 @@ def create_rng(id: str, seed: str, use_tf: bool = False):
         return Generator(SFC64(seed=seed))
 
 
-def import_controller_by_name(controller_full_name: str) -> type:
+def find_optimizer_if_it_exists(optimizer_name: str) -> str:
+    """Look up optimizer by name in the Control_Toolkit and Control_Toolkit_ASF folders.
+    If the optimizer exists, returns its full name and path to it. Otherwise, returns False.
+    """
+    optimizer_name = optimizer_name.replace("-", "_")
+    if not optimizer_name.startswith("optimizer"):
+        optimizer_full_name = "optimizer_" + optimizer_name
+    else:
+        optimizer_full_name = optimizer_name
+    
+    # Find optimizer if it exists.
+    optimizer_relative_paths = (
+        glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Optimizers', optimizer_full_name)}.py")
+        + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Optimizers', optimizer_full_name)}.py", recursive=True)
+    )
+    if len(optimizer_relative_paths) > 1:
+        raise ValueError(f"Optimizer {optimizer_full_name} must be in a unique location. {len(optimizer_relative_paths)} found.")
+    elif len(optimizer_relative_paths) == 1:
+        # If the optimizer exists, the controller is MPC
+        return optimizer_full_name, optimizer_relative_paths[0]
+    return False, None
+
+
+def import_optimizer_by_name(optimizer_name: str) -> type:
+    optimizer_full_name, optimizer_relative_path = find_optimizer_if_it_exists(optimizer_name)
+    
+    if optimizer_full_name:
+        Optimizer = getattr(import_module(optimizer_relative_path.replace(".py", "").replace(os.sep, ".")), optimizer_full_name)
+        return Optimizer
+    else:
+        raise ValueError(f"Optimizer {optimizer_full_name} not found.")
+
+
+def import_controller_by_name(controller_name: str) -> type:
     """Search for the specified controller name in the following order:
     1) Control_Toolkit_ASF/Controllers/
     2) Control_Toolkit/Controllers/
-
-    :param controller_full_name: The controller to import by full name
-    :type controller_full_name: str
-    :return: The controller class
-    :rtype: type[template_controller]
+    
+    Important to note: The controller name can refer to one of the optimizers in Control_Toolkit/Optimizers/.
+    In that case, the controller name is controller_mpc and the optimizer name is optimizer_<controller_name>.
     """
+    controller_name = controller_name.replace("-", "_")
+    if not controller_name.startswith("controller"):
+        controller_full_name = "controller_" + controller_name
+    else:
+        controller_full_name = controller_name
+    
+    # Find optimizer if it exists.
+    optimizer_full_name, _ = find_optimizer_if_it_exists(controller_name)
+    if optimizer_full_name:
+        # If the optimizer exists, the controller is MPC
+        controller_full_name = "controller_mpc"
+    
+    # Search for the controller in the Controllers folders
     controller_relative_paths = (
         glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
         + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
     )
+    
     assert len(controller_relative_paths) == 1, f"Controller {controller_full_name} must be in a unique location. {len(controller_relative_paths)} found."
     controller_relative_path = controller_relative_paths[0]
 
     log.info(f"Importing controller from {controller_relative_path}")
     
-    return getattr(import_module(controller_relative_path.replace(".py", "").replace("/", ".").replace("\\\\", ".").replace("\\", ".")), controller_full_name)
+    Controller: type = getattr(import_module(controller_relative_path.replace(".py", "").replace(os.sep, ".")), controller_full_name)
+    return Controller
+
+
+def get_available_optimizer_names() -> "list[str]":
+    """
+    Method returns the list of optimizers available in the Control Toolkit or Application Specific Files
+    """
+    optimizer_files = (
+        glob.glob(f"Control_Toolkit_ASF/Optimizers/optimizer_*.py")
+        + glob.glob(f"**/Control_Toolkit/Optimizers/optimizer_*.py", recursive=True)
+    )
+    optimizer_names = [os.path.basename(item)[len('optimizer_'):-len('.py')].replace('_', '-') for item in optimizer_files]
+    optimizer_names.sort()
+    return optimizer_names
+    
     
 def get_available_controller_names() -> "list[str]":
     """
@@ -99,14 +156,13 @@ def get_available_controller_names() -> "list[str]":
         + glob.glob(f"**/Control_Toolkit/Controllers/controller_*.py", recursive=True)
     )
     controller_names = ['manual-stabilization']
-    controller_names.extend(np.sort(
-        [os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files]
-    ))
-
+    controller_names.extend([os.path.basename(item)[len('controller_'):-len('.py')].replace('_', '-') for item in controller_files])
+    
+    controller_names.sort()
     return controller_names
 
 
-def get_controller(controller_names=None, controller_name=None, controller_idx=None) -> type:
+def get_controller_name(controller_names=None, controller_name=None, controller_idx=None) -> type:
     """
     The method sets a new controller as the current controller.
     The controller may be indicated either by its name
@@ -136,11 +192,37 @@ def get_controller(controller_names=None, controller_name=None, controller_idx=N
     else:
         controller_name = controller_names[controller_idx]
 
-    # Load controller
-    if controller_name == 'manual-stabilization':
-        Controller = None
-    else:
-        controller_full_name = 'controller_' + controller_name.replace('-', '_')
-        Controller = import_controller_by_name(controller_full_name)
+    return controller_name, controller_idx
 
-    return Controller, controller_name, controller_idx
+
+def get_optimizer_name(optimizer_names=None, optimizer_name=None, optimizer_idx=None) -> type:
+    """
+    The method sets a new optimizer as the current optimizer.
+    The optimizer may be indicated either by its name
+    or by the index on the optimizer list (see get_available_optimizer_names method).
+    """
+
+    # Check if the proper information was provided: either optimizer_name or optimizer_idx
+    if (optimizer_name is None) and (optimizer_idx is None):
+        raise ValueError('You have to specify either optimizer_name or optimizer_idx to set a new optimizer.'
+                            'You have specified none of the two.')
+    elif (optimizer_name is not None) and (optimizer_idx is not None):
+        raise ValueError('You have to specify either optimizer_name or optimizer_idx to set a new optimizer.'
+                            'You have specified both.')
+    else:
+        pass
+        
+    if optimizer_names is None:
+        optimizer_names = get_available_optimizer_names()
+
+    # If optimizer name provided get optimizer index and vice versa
+    if (optimizer_name is not None):
+        try:
+            optimizer_idx = optimizer_names.index(optimizer_name)
+        except ValueError:
+            print('{} is not in list. \n In list are: {}'.format(optimizer_name, optimizer_names))
+            return None
+    else:
+        optimizer_name = optimizer_names[optimizer_idx]
+
+    return optimizer_name, optimizer_idx

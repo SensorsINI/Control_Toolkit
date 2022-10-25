@@ -1,0 +1,47 @@
+<<controller-name>>:
+  # Add any required parameters for your controller like so:
+  <<parameter_name>>: <<value>>
+
+# Examples to get started:
+mpc:
+  optimizer: mppi-tf
+  predictor_specification: "ODE_TF"    # Can be "ODE", "ODE_TF", network/GP name (possibly with path) e.g. 'GRU-6IN-32H1-32H2-5OUT-0'/'SGP_30' or a name of a custom predictor. For more info see config_predictors in SI_Toolkit_ASF
+  cost_function_specification: default  # One of "default", "quadratic_boundary_grad", "quadratic_boundary_nonconvex", "quadratic_boundary"
+  computation_library: tensorflow  # One of "numpy", "tensorflow", "pytorch". Defaults to "numpy" if none given.
+  controller_logging: true
+do-mpc-discrete:
+  dt: 0.02  # s
+  mpc_horizon: 50                       # steps
+  num_rollouts: 1
+  # Initial positions
+  position_init: 0.0
+  positionD_init: 0.0
+  angle_init: 0.0
+  angleD_init: 0.0
+  controller_logging: True
+do-mpc:
+  seed: null                          # If null, random seed based on datetime is used
+  dt: 0.02                              # sec
+  mpc_horizon: 50                       # steps
+  num_rollouts: 1
+  p_Q: 0.00  # Perturbation factors: Change of output from optimal
+  # Random change of cost function by factor
+  p_position: 0.0
+  p_positionD: 0.0
+  p_angle: 0.0
+  # Cost factor
+  l_angle: 0.1
+  l_position: 1.0
+  l_positionD: 0.1
+  # Initial positions
+  position_init: 0.0
+  positionD_init: 0.0
+  angle_init: 0.0
+  angleD_init: 0.0
+  controller_logging: True
+lqr:
+  seed: null  # Seed for rng, for lqr only, put null to set random seed (do it when you generate data for training!)
+  Q: [10.0, 1.0, 1.0, 1.0]
+  R: 10.0
+  control_noise:  # Defined in cartpole config
+  controller_logging: True

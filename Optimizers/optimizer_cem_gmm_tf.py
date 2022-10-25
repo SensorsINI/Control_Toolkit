@@ -1,58 +1,64 @@
-from importlib import import_module
+from typing import Tuple
+from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability.python.distributions as tfpd
-from Control_Toolkit.others.environment import EnvironmentBatched
-from Control_Toolkit.others.globals_and_utils import create_rng, CompileTF
-
-from Control_Toolkit.Controllers import template_controller
+from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
+from Control_Toolkit.Optimizers import template_optimizer
+from Control_Toolkit.others.globals_and_utils import CompileTF
+from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 # CEM with Gaussian Mixture Model Sampling Distribution
-class controller_cem_gmm_tf(template_controller):
-    def __init__(self, environment_model: EnvironmentBatched, seed: int, num_control_inputs: int, dt: float, mpc_horizon: int, cem_outer_it: int, cem_initial_action_stdev: float, num_rollouts: int, predictor_name: str, predictor_intermediate_steps: int, CEM_NET_NAME: str, cem_stdev_min: float, cem_best_k: int, **kwargs):
-        #First configure random sampler
-        self.rng_cem = create_rng(self.__class__.__name__, seed, use_tf=True)
-
-        # Parametrization
-        self.num_control_inputs = num_control_inputs
-
-        #cem params
-        self.num_rollouts = num_rollouts
+class optimizer_cem_gmm_tf(template_optimizer):
+    supported_computation_libraries = {TensorFlowLibrary}
+    
+    def __init__(
+        self,
+        predictor: PredictorWrapper,
+        cost_function: CostFunctionWrapper,
+        num_states: int,
+        num_control_inputs: int,
+        control_limits: "Tuple[np.ndarray, np.ndarray]",
+        computation_library: "type[ComputationLibrary]",
+        seed: int,
+        mpc_horizon: int,
+        cem_outer_it: int,
+        cem_initial_action_stdev: float,
+        num_rollouts: int,
+        predictor_specification: str,
+        cem_stdev_min: float,
+        cem_best_k: int,
+        optimizer_logging: bool,
+    ):
+        super().__init__(
+            predictor=predictor,
+            cost_function=cost_function,
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            control_limits=control_limits,
+            optimizer_logging=optimizer_logging,
+            seed=seed,
+            num_rollouts=num_rollouts,
+            mpc_horizon=mpc_horizon,
+            computation_library=computation_library,
+            predictor_specification=predictor_specification,
+        )
+        
+        # CEM parameters
         self.cem_outer_it = cem_outer_it
         self.cem_initial_action_stdev = cem_initial_action_stdev
         self.cem_stdev_min = cem_stdev_min
         self.cem_best_k = cem_best_k
-        self.cem_samples = mpc_horizon  # Number of steps in MPC horizon
-        self.intermediate_steps = predictor_intermediate_steps
-
-        self.NET_NAME = CEM_NET_NAME
-
-        #instantiate predictor
-        predictor_module = import_module(f"SI_Toolkit.Predictors.{predictor_name}")
-        self.predictor = getattr(predictor_module, predictor_name)(
-            horizon=self.cem_samples,
-            dt=dt,
-            intermediate_steps=self.intermediate_steps,
-            disable_individual_compilation=True,
-            batch_size=self.num_rollouts,
-            net_name=self.NET_NAME,
-            planning_environment=environment_model,
-        )
-
-        super().__init__(environment_model)
-        self.action_low = self.env_mock.action_space.low
-        self.action_high = self.env_mock.action_space.high
-
-        self.controller_reset()
-        self.u = 0.0
+        
+        self.optimizer_reset()
 
     @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.env_mock.cost_functions.get_trajectory_cost(rollout_trajectory, Q, self.u)
+        traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q, self.u)
         return traj_cost, rollout_trajectory
 
     @CompileTF
@@ -63,7 +69,7 @@ class controller_cem_gmm_tf(template_controller):
 
         #rollout the trajectories and get cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.cem_samples+1, self.env_mock.num_states])
+        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.mpc_horizon+1, self.num_states])
 
         #sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
@@ -97,14 +103,16 @@ class controller_cem_gmm_tf(template_controller):
 
     #step function to find control
     def step(self, s: np.ndarray, time=None):
+        if self.optimizer_logging:
+            self.logging_values = {"s_logged": s.copy()}
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
-        Q = tf.zeros((self.num_rollouts, self.cem_samples, self.num_control_inputs), dtype=tf.float32)
-        rollout_trajectory = tf.zeros((self.num_rollouts, self.cem_samples+1, self.env_mock.num_states), dtype=tf.float32)
+        Q = tf.zeros((self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
+        rollout_trajectory = tf.zeros((self.num_rollouts, self.mpc_horizon+1, self.num_states), dtype=tf.float32)
         traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
 
         for _ in range(0, self.cem_outer_it):
-            self.sampling_dist, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.sampling_dist, self.rng_cem)
+            self.sampling_dist, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.sampling_dist, self.rng)
         
         Q, traj_cost, rollout_trajectory = Q.numpy(), traj_cost.numpy(), rollout_trajectory.numpy()
         self.u = tf.squeeze(elite_Q[0, 0, :]).numpy()
@@ -120,15 +128,17 @@ class controller_cem_gmm_tf(template_controller):
             )
         )
 
-        self.Q_logged, self.J_logged = Q, traj_cost
-        self.rollout_trajectories_logged = rollout_trajectory
-        self.u_logged = self.u
+        if self.optimizer_logging:
+            self.logging_values["Q_logged"] = Q
+            self.logging_values["J_logged"] = traj_cost
+            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory
+            self.logging_values["u_logged"] = self.u
 
         return self.u
 
-    def controller_reset(self):
-        dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([self.cem_samples, self.num_control_inputs])
-        dist_stdev = self.cem_initial_action_stdev * tf.ones([self.cem_samples, self.num_control_inputs])
+    def optimizer_reset(self):
+        dist_mue = (self.action_low + self.action_high) * 0.5 * tf.ones([self.mpc_horizon, self.num_control_inputs])
+        dist_stdev = self.cem_initial_action_stdev * tf.ones([self.mpc_horizon, self.num_control_inputs])
         self.sampling_dist = tfpd.MixtureSameFamily(
             mixture_distribution=tfpd.Categorical(probs=[0.5, 0.5]),
             components_distribution=tfpd.Normal(loc=tf.stack(2*[dist_mue], axis=-1), scale=tf.stack(2*[dist_stdev], axis=-1)),
