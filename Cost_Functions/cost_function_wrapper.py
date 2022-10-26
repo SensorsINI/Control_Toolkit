@@ -54,16 +54,19 @@ class CostFunctionWrapper:
                 f"Cannot interpret cost function specification {cost_function_specification}."
             )
 
-    def get_terminal_cost(self, s_hor: TensorType):
-        return self.cost_function.get_terminal_cost(s_hor)
+    def get_terminal_cost(self, terminal_states: TensorType):
+        """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_terminal_cost>`"""
+        return self.cost_function.get_terminal_cost(terminal_states)
 
-    def get_stage_cost(self, s: TensorType, u: TensorType, u_prev: TensorType):
-        return self.cost_function.get_stage_cost(s, u, u_prev)
+    def get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType):
+        """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_stage_cost>`"""
+        return self.cost_function.get_stage_cost(states, inputs, previous_input)
 
     def get_trajectory_cost(
-        self, s_hor: TensorType, u: TensorType, u_prev: TensorType = None,
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
     ):
-        return self.cost_function.get_trajectory_cost(s_hor, u, u_prev)
+        """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
+        return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
 
     def copy(self):
         """

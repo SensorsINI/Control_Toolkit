@@ -85,13 +85,13 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         return tf.reduce_sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), axis=2)
 
     #total cost of the trajectory
-    def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
+    def get_mppi_trajectory_cost(self, state_horizon, u, u_prev, delta_u):
         #stage costs
-        stage_cost = self.cost_function.get_stage_cost(s_hor[:,1:,:],u, u_prev)
+        stage_cost = self.cost_function.get_stage_cost(state_horizon[:, :-1, :], u, u_prev)
         stage_cost = stage_cost + self.mppi_correction_cost(u, delta_u)
         #reduce alonge rollouts and add final cost
         total_cost = tf.math.reduce_sum(stage_cost,axis=1)
-        total_cost = total_cost + self.cost_function.get_terminal_cost(s_hor)
+        total_cost = total_cost + self.cost_function.get_terminal_cost(state_horizon[:, -1, :])
         return total_cost
 
     #path integral approximation: sum deltaU's weighted with exponential funciton of trajectory costs

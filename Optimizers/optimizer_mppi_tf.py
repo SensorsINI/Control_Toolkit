@@ -91,8 +91,8 @@ class optimizer_mppi_tf(template_optimizer):
         return tf.math.reduce_sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), axis=[1, 2])
 
     #total cost of the trajectory
-    def get_mppi_trajectory_cost(self, s_hor ,u, u_prev, delta_u):
-        stage_cost = self.cost_function.get_trajectory_cost(s_hor,u, u_prev)
+    def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
+        stage_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev)
         total_cost = stage_cost + self.mppi_correction_cost(u, delta_u)
         return total_cost
 
