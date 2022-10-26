@@ -28,7 +28,6 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         mpc_horizon: int,
         cem_outer_it: int,
         num_rollouts: int,
-        predictor_specification: str,
         cem_initial_action_stdev: float,
         cem_stdev_min: float,
         cem_best_k: int,
@@ -52,7 +51,6 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # CEM parameters

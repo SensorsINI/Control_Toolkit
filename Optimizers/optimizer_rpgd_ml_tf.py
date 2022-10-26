@@ -31,7 +31,6 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         seed: int,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
@@ -61,7 +60,6 @@ class optimizer_rpgd_ml_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # RPGD parameters

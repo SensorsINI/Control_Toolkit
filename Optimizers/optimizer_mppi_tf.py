@@ -27,7 +27,6 @@ class optimizer_mppi_tf(template_optimizer):
         LBD: float,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
         NU: float,
         SQRTRHOINV: float,
         GAMMA: float,
@@ -45,23 +44,18 @@ class optimizer_mppi_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # Create second predictor for computing optimal trajectories
         self.predictor_single_trajectory = self.predictor.copy()
-        self.predictor_single_trajectory.configure(
-            batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
-            predictor_specification=predictor_specification,
-        )
+        
         
         # MPPI parameters
         self.cc_weight = cc_weight
-        dt = self.predictor.predictor_config['dt']
         self.R = tf.convert_to_tensor(R)
         self.LBD = LBD
         self.NU = tf.convert_to_tensor(NU)
-        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(SQRTRHOINV) * (1 / np.sqrt(dt)), dtype=tf.float32)
+        self._SQRTRHOINV = SQRTRHOINV
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
@@ -73,6 +67,15 @@ class optimizer_mppi_tf(template_optimizer):
             self.mppi_output = self.return_restricted
         
         self.optimizer_reset()
+    
+    def configure(self, dt: float, predictor_specification: str):
+        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), dtype=tf.float32)
+        del self._SQRTRHOINV
+        
+        self.predictor_single_trajectory.configure(
+            batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
+            predictor_specification=predictor_specification,
+        )
         
     def return_all(self, u, u_nom, rollout_trajectory, traj_cost, u_run):
         return u, u_nom, rollout_trajectory, traj_cost, u_run

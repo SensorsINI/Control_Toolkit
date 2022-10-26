@@ -25,7 +25,6 @@ class optimizer_gradient_tf(template_optimizer):
         gradient_steps: int,
         num_rollouts: int,
         initial_action_stdev: float,
-        predictor_specification: str,
         learning_rate: float,
         adam_beta_1: float,
         adam_beta_2: float,
@@ -47,7 +46,6 @@ class optimizer_gradient_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # MPC parameters

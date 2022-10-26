@@ -23,7 +23,6 @@ class optimizer_random_action_tf(template_optimizer):
         seed: int,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
         optimizer_logging: bool,
     ):
         super().__init__(
@@ -37,7 +36,6 @@ class optimizer_random_action_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         self.optimizer_reset()

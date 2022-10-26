@@ -28,8 +28,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         LBD: float,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
-        dt: float,
         NU: float,
         SQRTRHOINV: float,
         GAMMA: float,
@@ -53,7 +51,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # Cost function parameters
@@ -63,7 +60,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
 
         # MPPI parameters
         self.NU = NU
-        self.SQRTRHODTINV = SQRTRHOINV * (1.0 / np.sqrt(dt))
+        self._SQRTRHOINV = SQRTRHOINV
         self.GAMMA = GAMMA
         self.SAMPLING_TYPE = SAMPLING_TYPE
 
@@ -79,7 +76,11 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2, epsilon=adam_epsilon)
         
         self.optimizer_reset()
-
+    
+    def configure(self, dt: float):
+        self.SQRTRHODTINV = self._SQRTRHOINV * (1.0 / np.sqrt(dt))
+        del self._SQRTRHOINV
+        
     #mppi correction for importance sampling
     def mppi_correction_cost(self, u, delta_u):
         return tf.reduce_sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), axis=2)

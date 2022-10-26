@@ -28,8 +28,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         LBD_mc: float,
         mpc_horizon: int,
         num_rollouts: int,
-        predictor_specification: str,
-        dt: float,
         NU_mc: float,
         SQRTRHOINV_mc: float,
         GAMMA: float,
@@ -52,7 +50,6 @@ class optimizer_mppi_var_tf(template_optimizer):
             num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
-            predictor_specification=predictor_specification,
         )
         
         # MPPI parameters
@@ -61,12 +58,12 @@ class optimizer_mppi_var_tf(template_optimizer):
         self.R = R
         self.LBD = LBD_mc
         self.NU = NU_mc
-        self.SQRTRHODTINV = SQRTRHOINV_mc * (1 / np.math.sqrt(dt))
         self.GAMMA = GAMMA
         self.mppi_lr = LR
         self.stdev_min = STDEV_min
         self.stdev_max = STDEV_max
         self.max_grad_norm = max_grad_norm
+        self._SQRTRHOINV_mc = SQRTRHOINV_mc
 
         # Setup interpolation matrix
         if SAMPLING_TYPE == "interpolated":
@@ -89,10 +86,14 @@ class optimizer_mppi_var_tf(template_optimizer):
         # Set up nominal u
         self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
         # Set up vector of variances to be optimized
-        self.nuvec = np.math.sqrt(self.NU)*tf.ones([1, num_valid_vals, self.num_control_inputs])
+        self.nuvec = np.sqrt(self.NU)*tf.ones([1, num_valid_vals, self.num_control_inputs])
         self.nuvec = tf.Variable(self.nuvec)
 
         self.optimizer_reset()
+    
+    def configure(self, dt: float, ):
+        self.SQRTRHODTINV = self._SQRTRHOINV_mc * (1 / np.sqrt(dt))
+        del self._SQRTRHOINV_mc
     
     #mppi correction
     def mppi_correction_cost(self, u, delta_u, nuvec):
@@ -165,4 +166,4 @@ class optimizer_mppi_var_tf(template_optimizer):
     #reset to initial values
     def optimizer_reset(self):
         self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
-        self.nuvec.assign(np.math.sqrt(self.NU)*tf.ones([1, self.num_valid_vals, self.num_control_inputs]))
+        self.nuvec.assign(np.sqrt(self.NU)*tf.ones([1, self.num_valid_vals, self.num_control_inputs]))

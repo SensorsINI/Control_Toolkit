@@ -22,7 +22,6 @@ class template_optimizer:
             num_rollouts: int,
             mpc_horizon: int,
             computation_library: "type[ComputationLibrary]",
-            predictor_specification: str,
         ) -> None:
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
@@ -31,12 +30,6 @@ class template_optimizer:
         
         # Configure predictor
         self.predictor = predictor
-        self.predictor.configure(
-            batch_size=self.num_rollouts,
-            horizon=self.mpc_horizon,
-            computation_library=computation_library,
-            predictor_specification=predictor_specification
-        )
         
         self.num_states = num_states
         self.num_control_inputs = num_control_inputs
@@ -52,8 +45,12 @@ class template_optimizer:
         if computation_library not in self.supported_computation_libraries:
             raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
     
+    def configure(self, **kwargs):
+        """Pass any additional arguments from the controller to the optimizer."""
+        pass
+    
     def step(self, s: np.ndarray, time=None):
-        raise NotImplementedError()
+        raise NotImplementedError("Implement this function in a subclass.")
     
     def optimizer_reset(self):
-        raise NotImplementedError()
+        raise NotImplementedError("Implement this function in a subclass.")
