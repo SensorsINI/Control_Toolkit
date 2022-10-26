@@ -51,9 +51,8 @@ class EnvironmentBatched:
         """
         raise NotImplementedError()
     
-    @staticmethod
     def step_dynamics(
-        lib: "type[ComputationLibrary]",
+        self,
         state: TensorType,
         action: TensorType,
         dt: float,
