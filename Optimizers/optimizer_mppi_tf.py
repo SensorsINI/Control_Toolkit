@@ -73,7 +73,7 @@ class optimizer_mppi_tf(template_optimizer):
         del self._SQRTRHOINV
         
         self.predictor_single_trajectory.configure(
-            batch_size=1, horizon=self.mpc_horizon,  # TF requires constant batch size
+            batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
         )
         
