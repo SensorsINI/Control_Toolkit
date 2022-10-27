@@ -6,6 +6,7 @@ import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 logger = get_logger(__name__)
@@ -29,8 +30,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
-        SAMPLING_TYPE: str,
-        interpolation_step: int,
+        period_interpolation_inducing_points: int,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
@@ -60,8 +60,6 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         self.outer_its = outer_its
         self.sample_stdev = sample_stdev
         self.resamp_per = resamp_per
-        self.SAMPLING_TYPE = SAMPLING_TYPE
-        self.interpolation_step = interpolation_step
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
         self.opt_keep_k = opt_keep_k
@@ -73,35 +71,8 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         if self.do_warmup:
             self.first_iter_count = self.warmup_iterations
 
-        # if sampling type is "interpolated" setup linear interpolation as a matrix multiplication
-        if SAMPLING_TYPE == "interpolated":
-            step = interpolation_step
-            self.num_valid_vals = int(np.ceil(self.mpc_horizon / step) + 1)
-            self.interp_mat = np.zeros(
-                (
-                    (self.num_valid_vals - 1) * step,
-                    self.num_valid_vals,
-                    self.num_control_inputs,
-                ),
-                dtype=np.float32,
-            )
-            step_block = np.zeros((step, 2, self.num_control_inputs), dtype=np.float32)
-            for j in range(step):
-                step_block[j, 0, :] = (step - j) * np.ones(
-                    (self.num_control_inputs), dtype=np.float32
-                )
-                step_block[j, 1, :] = j * np.ones(
-                    (self.num_control_inputs), dtype=np.float32
-                )
-            for i in range(self.num_valid_vals - 1):
-                self.interp_mat[i * step : (i + 1) * step, i : i + 2, :] = step_block
-            self.interp_mat = self.interp_mat[: self.mpc_horizon, :, :] / step
-            self.interp_mat = tf.constant(
-                tf.transpose(self.interp_mat, perm=(1, 0, 2)), dtype=tf.float32
-            )
-        else:
-            self.interp_mat = None
-            self.num_valid_vals = self.mpc_horizon
+        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
+                                         self.num_control_inputs, self.lib)
 
         self.opt = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
@@ -115,20 +86,13 @@ class optimizer_rpgd_particle_tf(template_optimizer):
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         Qn = rng_gen.uniform(
-            [batch_size, self.num_valid_vals, self.num_control_inputs],
+            [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
             minval=self.action_low,
             maxval=self.action_high,
             dtype=tf.float32,
         )
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
-        if self.SAMPLING_TYPE == "interpolated":
-            Qn = tf.transpose(
-                tf.matmul(
-                    tf.transpose(Qn, perm=(2, 0, 1)),
-                    tf.transpose(self.interp_mat, perm=(2, 0, 1)),
-                ),
-                perm=(1, 2, 0),
-            )
+        Qn = self.Interpolator.interpolate(Qn)
         return Qn
 
     @CompileTF
