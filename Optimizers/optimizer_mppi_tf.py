@@ -68,7 +68,7 @@ class optimizer_mppi_tf(template_optimizer):
         
         self.optimizer_reset()
     
-    def configure(self, dt: float, predictor_specification: str):
+    def configure(self, dt: float, predictor_specification: str, **kwargs):
         self.SQRTRHODTINV = tf.convert_to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), dtype=tf.float32)
         del self._SQRTRHOINV
         

@@ -91,7 +91,7 @@ class optimizer_mppi_var_tf(template_optimizer):
 
         self.optimizer_reset()
     
-    def configure(self, dt: float, ):
+    def configure(self, dt: float, **kwargs):
         self.SQRTRHODTINV = self._SQRTRHOINV_mc * (1 / np.sqrt(dt))
         del self._SQRTRHOINV_mc
     

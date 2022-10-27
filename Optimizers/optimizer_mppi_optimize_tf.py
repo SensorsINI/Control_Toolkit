@@ -77,7 +77,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         
         self.optimizer_reset()
     
-    def configure(self, dt: float):
+    def configure(self, dt: float, **kwargs):
         self.SQRTRHODTINV = self._SQRTRHOINV * (1.0 / np.sqrt(dt))
         del self._SQRTRHOINV
         

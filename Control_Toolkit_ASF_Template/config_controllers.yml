@@ -10,7 +10,6 @@ mpc:
   computation_library: tensorflow  # One of "numpy", "tensorflow", "pytorch". Defaults to "numpy" if none given.
   controller_logging: true
 do-mpc-discrete:
-  dt: 0.02  # s
   mpc_horizon: 50                       # steps
   num_rollouts: 1
   # Initial positions
@@ -21,7 +20,6 @@ do-mpc-discrete:
   controller_logging: True
 do-mpc:
   seed: null                          # If null, random seed based on datetime is used
-  dt: 0.02                              # sec
   mpc_horizon: 50                       # steps
   num_rollouts: 1
   p_Q: 0.00  # Perturbation factors: Change of output from optimal
