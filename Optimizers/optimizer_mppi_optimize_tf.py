@@ -3,10 +3,10 @@ from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
@@ -31,13 +31,13 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         NU: float,
         SQRTRHOINV: float,
         GAMMA: float,
-        SAMPLING_TYPE: str,
         gradmax_clip: float,
         optim_steps: int,
         mppi_LR: float,
         adam_beta_1: float,
         adam_beta_2: float,
         adam_epsilon: float,
+        period_interpolation_inducing_points: int,
         optimizer_logging: bool,
     ):
         super().__init__(
@@ -62,7 +62,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         self.NU = NU
         self._SQRTRHOINV = SQRTRHOINV
         self.GAMMA = GAMMA
-        self.SAMPLING_TYPE = SAMPLING_TYPE
 
         # Optimization params
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)
@@ -74,6 +73,9 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         # Setup Adam optimizer
         mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
         self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2, epsilon=adam_epsilon)
+
+        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
+                                         self.num_control_inputs, self.lib)
         
         self.optimizer_reset()
     
@@ -106,20 +108,11 @@ class optimizer_mppi_optimize_tf(template_optimizer):
 
     #initialize pertubation
     def inizialize_pertubation(self, random_gen):
-        #if interpolation on, interpolate with method from tensor flow probability
         stdev = self.SQRTRHODTINV
-        sampling_type = self.SAMPLING_TYPE
-        if sampling_type == "interpolated":
-            step = 10
-            range_stop = int(tf.math.ceil(self.mpc_horizon / step) * step) + 1
-            t = tf.range(range_stop, delta = step)
-            t_interp = tf.cast(tf.range(range_stop), tf.float32)
-            delta_u = random_gen.normal([self.num_rollouts, t.shape[0], self.num_control_inputs], dtype=tf.float32) * stdev
-            interp = tfp.math.interp_regular_1d_grid(t_interp, t_interp[0], t_interp[-1], delta_u, axis=1)
-            delta_u = interp[:,:self.mpc_horizon,:]
-        else:
-            #otherwise i.i.d. generation
-            delta_u = random_gen.normal([self.num_rollouts, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32) * stdev
+        delta_u = random_gen.normal(
+            [self.num_rollouts, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+            dtype=tf.float32) * stdev
+        delta_u = self.Interpolator.interpolate(delta_u)
         return delta_u
 
     @CompileTF

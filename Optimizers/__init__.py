@@ -44,6 +44,8 @@ class template_optimizer:
         # Check if the computation_library passed is compatible with this optimizer
         if computation_library not in self.supported_computation_libraries:
             raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
+
+        self.lib = computation_library
     
     def configure(self, **kwargs):
         """Pass any additional arguments from the controller to the optimizer."""
