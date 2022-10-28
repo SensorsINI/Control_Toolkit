@@ -166,7 +166,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
 
         #optimize control sequence with gradient based optimization
         for _ in range(self.optim_steps):
-            Q_opt, traj_cost = self.grad_step(s, self.Q_opt, self.opt)
+            Q_opt, traj_cost = self.grad_step(s[:1, :], self.Q_opt, self.opt)
             self.Q_opt.assign(Q_opt)
 
         self.u = np.squeeze(self.Q_opt[0, 0, :].numpy())
