@@ -94,9 +94,9 @@ class optimizer_mppi_tf(template_optimizer):
 
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
-        stage_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev)
-        total_cost = stage_cost + self.mppi_correction_cost(u, delta_u)
-        return total_cost
+        total_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev)
+        total_mppi_cost = total_cost + self.mppi_correction_cost(u, delta_u)
+        return total_mppi_cost
 
     def reward_weighted_average(self, S, delta_u):
         rho = tf.math.reduce_min(S)
