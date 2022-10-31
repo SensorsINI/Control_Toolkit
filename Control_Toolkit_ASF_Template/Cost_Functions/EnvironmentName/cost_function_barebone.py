@@ -48,7 +48,7 @@ class cost_function_barebone(cost_function_base):
     def get_trajectory_cost(self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None):
         # TODO: Sum of stage costs + terminal cost already implemented in base class
         # but could be overwritten here, e.g. sum with exponentially decaying weights
-        # stage_cost = self.get_stage_cost(state_horizon[:, :-1, :], u, u_prev)
+        # stage_cost = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)
         # gamma = np.array([0.99 ** i for i in range(state_horizon.shape[1])])
         # total_cost = self.lib.sum(gamma*stage_cost, 1)
         # return total_cost

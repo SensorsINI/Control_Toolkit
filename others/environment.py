@@ -16,7 +16,12 @@ class EnvironmentBatched:
     action_space: Box
     observation_space: Box
     dt: float
+    num_states: int
+    num_actions: int
     _predictor = None
+    _actuator_noise: Union[np.ndarray, float]
+    _batch_size: int
+    environment_attributes = {}
     
     @property
     def predictor(self):
@@ -79,7 +84,10 @@ class EnvironmentBatched:
 
         self.rng = self.lib.create_rng(seed)
 
-    def is_done(self, state):
+    @staticmethod
+    def is_done(lib: "type[ComputationLibrary]", state: TensorType, *args, **kwargs):
+        # Static method that describes when the environment is done
+        # Each subclassed environment can specify any list of args and kwargs that may be needed
         raise NotImplementedError()
 
     def get_reward(self, state, action):
@@ -97,8 +105,8 @@ class EnvironmentBatched:
 
     def _expand_arrays(
         self,
-        state: Union[np.ndarray, tf.Tensor, torch.Tensor],
-        action: Union[np.ndarray, tf.Tensor, torch.Tensor],
+        state: TensorType,
+        action: TensorType,
     ):
         if self.lib.ndim(action) < 2:
             action = self.lib.reshape(
@@ -123,39 +131,3 @@ class EnvironmentBatched:
     
     def set_logs(self, logs: "dict[str, Any]"):
         self._logs = logs
-
-    # Overloading properties/methods for Bharadhwaj implementation
-    @property
-    def a_size(self):
-        return self.action_space.shape[0]
-
-    def reset_state(self, batch_size):
-        self.reset()
-
-    @property
-    def B(self):
-        return self._batch_size
-
-    def rollout(self, actions, return_traj=False):
-        # Uncoditional action sequence rollout
-        # actions: shape: TxBxA (time, batch, action)
-        assert actions.dim() == 3
-        assert actions.size(1) == self.B, "{}, {}".format(actions.size(1), self.B)
-        assert actions.size(2) == self.a_size
-        T = actions.size(0)
-        rs = []
-        ss = []
-
-        total_r = torch.zeros(self.B, requires_grad=True, device=actions.device)
-        for i in range(T):
-            # Reshape for step function: BxTxA
-            s, r, _, _ = self.step(actions[i])
-            rs.append(r)
-            ss.append(s)
-            total_r = total_r + r
-            # if(done):
-            #     break
-        if return_traj:
-            return rs, ss
-        else:
-            return total_r

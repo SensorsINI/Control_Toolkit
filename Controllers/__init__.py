@@ -30,6 +30,7 @@ class template_controller(ABC):
     
     def __init__(
         self,
+        dt: float,
         environment_name: str,
         num_states: int,
         num_control_inputs: int,
@@ -45,6 +46,7 @@ class template_controller(ABC):
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.
         self.config_controller = dict(config_controllers[self.controller_name])
+        self.config_controller["dt"] = dt
         
         # Set computation library
         computation_library_name = str(self.config_controller.get("computation_library", ""))

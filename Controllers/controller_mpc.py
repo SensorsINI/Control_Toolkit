@@ -12,7 +12,7 @@ from SI_Toolkit.computation_library import TensorType
 from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
 
-config_optimizer = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
+config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
 logger = get_logger(__name__)
 
@@ -20,10 +20,15 @@ logger = get_logger(__name__)
 class controller_mpc(template_controller):
     _has_optimizer = True
     
-    def configure(self, optimizer_name: Optional[str]=None):
+    def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
-            logger.info(f"Using default optimizer {optimizer_name} specified in config file")
+            logger.info(f"Using optimizer {optimizer_name} specified in controller config file")
+        if predictor_specification in {None, ""}:
+            predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
+            logger.info(f"Using predictor {predictor_specification} specified in controller config file")
+        
+        config_optimizer = config_optimizers[optimizer_name]
         
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
@@ -43,7 +48,18 @@ class controller_mpc(template_controller):
             control_limits=self.control_limits,
             optimizer_logging=self.controller_logging,
             computation_library=self.computation_library,
-            **config_optimizer[optimizer_name],
+            **config_optimizer,
+        )
+        # Some optimizers require additional controller parameters (e.g. predictor_specification or dt) to be fully configured.
+        # Do this here. If the optimizer does not require any additional parameters, it will ignore them.
+        self.optimizer.configure(dt=self.config_controller["dt"], predictor_specification=predictor_specification)
+        
+        self.predictor.configure(
+            batch_size=self.optimizer.num_rollouts,
+            horizon=self.optimizer.mpc_horizon,
+            dt=self.config_controller["dt"],
+            computation_library=self.computation_library,
+            predictor_specification=predictor_specification
         )
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
