@@ -109,9 +109,16 @@ class template_controller(ABC):
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-        Q = None  # This line is not obligatory. ;-) Just to indicate that Q must me defined and returned
+        ### Any computations in order to retrieve the current control. Such as:
+        ## If the environment's target positions etc. change, copy the new attributes over to this controller so the cost function knows about it:
+        # self.update_attributes(updated_attributes)
+        ## Use some sort of optimization procedure to get your control, e.g.
+        # u = self.optimizer.step(s, time)
+        ## Use the following call to populate the self.logs dictionary with savevars, such as:
+        # self.update_logs(self.optimizer.logging_values)
+        # return u  # e.g. a normed control input in the range [-1,1]
         pass
-        return Q  # normed control input in the range [-1,1]
+        return None
 
     # Optionally: A method called after an experiment.
     # May be used to print some statistics about controller performance (e.g. number of iter. to converge)
