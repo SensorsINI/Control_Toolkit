@@ -60,9 +60,9 @@ class optimizer_lqr_forces(template_optimizer):
         )
 
         #dynamically import jacobian module
-        cartpole_path, jacobian_method = jacobian_path.rsplit('.', 1)
-        self.cartpole_module = __import__(cartpole_path, fromlist=["cartpole_jacobian"])
-        self.jacobian = getattr(self.cartpole_module, jacobian_method)
+        module_path, jacobian_method = jacobian_path.rsplit('.', 1)
+        self.module = __import__(module_path, fromlist=["cartpole_jacobian"])
+        self.jacobian = getattr(self.module, jacobian_method)
 
         self.action_low = -action_max
         self.action_high = +action_max
@@ -71,12 +71,27 @@ class optimizer_lqr_forces(template_optimizer):
 
         self.optimizer_reset()
 
-        self.nx = 4
+
+
+        #lower and upper bounds
+        constrained_idx = [i for i,x in enumerate(state_max) if x!='inf']
+
+        xmax = np.array([state_max[i] for i in constrained_idx])
+        xmin = -xmax
+
+        umin = np.array([self.action_low])
+        umax = np.array([self.action_high])
+
+        ubidx = [1] + [i+2 for i in constrained_idx]
+        lbidx = ubidx
+
+        self.nxc = len(constrained_idx)
+        self.nx = len(state_max)
         self.nu = 1
 
         # Cost matrices for LQR controller
-        self.Q = np.diag([self.P]*self.nx)  # How much to punish x
-        self.R = np.diag([self.R]*self.nu)  # How much to punish u
+        self.Q = np.diag([self.P] * self.nx)  # How much to punish x
+        self.R = np.diag([self.R] * self.nu)  # How much to punish u
 
         # MPC setup
         N = self.mpc_horizon
@@ -84,11 +99,7 @@ class optimizer_lqr_forces(template_optimizer):
         R = self.R
         # terminal weight obtained from discrete-time Riccati equation
         P = Q
-        umin = np.array([self.action_low])
-        umax = np.array([self.action_high])
 
-        xmax = np.array([x if x!='inf' else float('inf') for x in state_max])
-        xmin = -xmax
 
         # FORCESPRO multistage form
         # assume variable ordering zi = [u{i-1}, x{i}] for i=1...N
@@ -97,6 +108,7 @@ class optimizer_lqr_forces(template_optimizer):
 
         # for readability
         stages = self.stages
+        nxc = self.nxc
         nx = self.nx
         nu = self.nu
 
@@ -105,8 +117,8 @@ class optimizer_lqr_forces(template_optimizer):
             # dimensions
             stages.dims[i]['n'] = nx + nu  # number of stage variables
             stages.dims[i]['r'] = nx  # number of equality constraints
-            stages.dims[i]['l'] = nx + nu  # number of lower bounds
-            stages.dims[i]['u'] = nx + nu  # number of upper bounds
+            stages.dims[i]['l'] = nxc + nu  # number of lower bounds
+            stages.dims[i]['u'] = nxc + nu  # number of upper bounds
 
             # cost
             if (i == N - 1):
@@ -118,11 +130,11 @@ class optimizer_lqr_forces(template_optimizer):
             stages.cost[i]['f'] = np.zeros((nx + nu, 1))
 
             # lower bounds
-            stages.ineq[i]['b']['lbidx'] = list(range(1, nu + nx + 1))  # lower bound acts on these indices
+            stages.ineq[i]['b']['lbidx'] = lbidx # lower bound acts on these indices
             stages.ineq[i]['b']['lb'] = np.concatenate((umin, xmin), 0)  # lower bound for this stage variable
 
             # upper bounds
-            stages.ineq[i]['b']['ubidx'] = list(range(1, nu + nx + 1))  # upper bound acts on these indices
+            stages.ineq[i]['b']['ubidx'] = ubidx  # upper bound acts on these indices
             stages.ineq[i]['b']['ub'] = np.concatenate((umax, xmax), 0)  # upper bound for this stage variable
 
         # solver settings
