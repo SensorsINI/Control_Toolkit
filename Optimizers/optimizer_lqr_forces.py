@@ -14,10 +14,7 @@ from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWra
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
-from importlib import import_module
 
-# from CartPoleSimulation.CartPole.cartpole_jacobian import cartpole_jacobian
-from CartPoleSimulation.CartPole.cartpole_model import s0
 from CartPoleSimulation.CartPole.state_utilities import (ANGLE_IDX, ANGLED_IDX, POSITION_IDX,
                                       POSITIOND_IDX)
 from Control_Toolkit.others.globals_and_utils import create_rng
@@ -41,9 +38,11 @@ class optimizer_lqr_forces(template_optimizer):
             computation_library: "type[ComputationLibrary]",
             seed: int,
             mpc_horizon: int,
+            num_rollouts: int,
             optimizer_logging: bool,
             jacobian_path: str,
             action_max: float,
+            state_max: list[float],
             P: float,
             R: float
     ):
@@ -60,8 +59,11 @@ class optimizer_lqr_forces(template_optimizer):
             computation_library=computation_library,
         )
 
-        # self.jacobian_path = jacobian_path
-        self.jacobian_module = import_module(jacobian_path)
+        #dynamically import jacobian module
+        cartpole_path, jacobian_method = jacobian_path.rsplit('.', 1)
+        self.cartpole_module = __import__(cartpole_path, fromlist=["cartpole_jacobian"])
+        self.jacobian = getattr(self.cartpole_module, jacobian_method)
+
         self.action_low = -action_max
         self.action_high = +action_max
         self.P = P
@@ -69,7 +71,7 @@ class optimizer_lqr_forces(template_optimizer):
 
         self.optimizer_reset()
 
-        self.nx = 2
+        self.nx = 4
         self.nu = 1
 
         # Cost matrices for LQR controller
@@ -84,11 +86,13 @@ class optimizer_lqr_forces(template_optimizer):
         P = Q
         umin = np.array([self.action_low])
         umax = np.array([self.action_high])
-        xmin = np.array([-100, -100])
-        xmax = np.array([-100, 100])
+
+        xmax = np.array([x if x!='inf' else float('inf') for x in state_max])
+        xmin = -xmax
 
         # FORCESPRO multistage form
         # assume variable ordering zi = [u{i-1}, x{i}] for i=1...N
+        # forcespro._set_forces_dir(forcespro.forces_dir)
         self.stages = forcespro.MultistageProblem(N)
 
         # for readability
@@ -129,11 +133,29 @@ class optimizer_lqr_forces(template_optimizer):
         stages.newOutput('u0', 1, list(range(1, nu + 1)))
 
 
+    def cartpole_order2jacobian_order(self, s: np.ndarray):
+        #Jacobian does not match the state order, permutation is needed
+        new_s = np.ndarray(4)
+        new_s[0] = s[POSITION_IDX]
+        new_s[1] = s[POSITIOND_IDX]
+        new_s[2] = s[ANGLE_IDX]
+        new_s[3] = s[ANGLED_IDX]
+        return new_s
 
+    def jacobian_order2cartpole_order(self, s: np.ndarray):
+        # Jacobian does not match the state order, permutation is needed
+        new_s = np.ndarray(6)
+        new_s[POSITION_IDX] = s[0]
+        new_s[POSITIOND_IDX] = s[1]
+        new_s[2] = np.cos(new_s[0])
+        new_s[3] = np.sin(new_s[0])
+        new_s[ANGLE_IDX] = s[2]
+        new_s[ANGLED_IDX] = s[3]
+        return new_s
 
     def step(self, s: np.ndarray, time=None):
-
-        jacobian = self.jacobian_module(s, 0.0) #linearize around u=0.0
+        s = self.cartpole_order2jacobian_order(s)
+        jacobian = self.jacobian(s, 0.0)  #linearize around u=0.0
         A = jacobian[:, :-1]
         B = np.reshape(jacobian[:, -1], newshape=(4, 1)) * self.action_high
 
@@ -161,7 +183,7 @@ class optimizer_lqr_forces(template_optimizer):
         self.A = A
 
         self.problem['minusA_times_x0'] = -np.dot(self.A, s)
-        [solverout, exitflag, info] = self.myMPC_FORCESPRO_py.myMPC_FORCESPRO_solve(self.problem)
+        [solverout, exitflag, info] = myMPC_FORCESPRO_py.myMPC_FORCESPRO_solve(self.problem)
         if (exitflag == 1):
             u = solverout['u0']
             print('Problem solved in %5.3f milliseconds (%d iterations).' % (1000.0 * info.solvetime, info.it))
@@ -171,7 +193,8 @@ class optimizer_lqr_forces(template_optimizer):
 
         return u
 
-
+    def optimizer_reset(self):
+        pass
         # state = np.array(
         #     [[s[POSITION_IDX] - self.env_mock.target_position], [s[POSITIOND_IDX]], [s[ANGLE_IDX]], [s[ANGLED_IDX]]])
         #
