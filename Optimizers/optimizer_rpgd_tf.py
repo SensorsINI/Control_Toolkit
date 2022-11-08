@@ -82,7 +82,6 @@ class optimizer_rpgd_tf(template_optimizer):
         
         self.optimizer_reset()
 
-    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         Qn = rng_gen.uniform(
             [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
@@ -93,7 +92,6 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
 
         Qn = self.Interpolator.interpolate(Qn)
-
 
         return Qn
 
