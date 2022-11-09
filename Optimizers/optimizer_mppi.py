@@ -10,7 +10,7 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
-class optimizer_mppi_tf(template_optimizer):
+class optimizer_mppi(template_optimizer):
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
     
     def __init__(
