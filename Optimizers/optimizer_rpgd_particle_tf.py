@@ -80,6 +80,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         )
         
         self.optimizer_reset()
+    
+    def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
+        # rollout trajectories and retrieve cost
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
+            rollout_trajectory, Q, self.u
+        )
+        return traj_cost, rollout_trajectory
 
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -100,10 +108,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
-            traj_cost = self.cost_function.get_trajectory_cost(
-                rollout_trajectory, Q, self.u
-            )
+            traj_cost, _ = self.predict_and_cost(s, Q)
         # retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
@@ -116,10 +121,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
     @CompileTF
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.cost_function.get_trajectory_cost(
-            rollout_trajectory, Q, self.u
-        )
+        traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
@@ -152,10 +154,10 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # )
         # # End of unnecessary part
 
-        # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(Q[sorted_cost[0], 0, :])
+        # Warmstart for next iteration
+        
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
-        return u, Qn, best_idx, traj_cost, rollout_trajectory
+        return Qn, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -190,13 +192,12 @@ class optimizer_rpgd_particle_tf(template_optimizer):
 
         # retrieve optimal input and prepare warmstart
         (
-            self.u,
             Qn,
-            best_Q,
+            best_idx,
             J,
             rollout_trajectory,
         ) = self.get_action(s, self.Q_tf)
-        
+        self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:
@@ -215,10 +216,10 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             Qres = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_Q)  # resorting according to costs
+            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
-                tf.gather(self.trajectory_ages, best_Q),
+                tf.gather(self.trajectory_ages, best_idx),
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
             # Updating the weights of adam:
@@ -226,14 +227,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], best_Q)[:, 1:, :],
+                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 wk2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], best_Q)[:, 1:, :],
+                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
