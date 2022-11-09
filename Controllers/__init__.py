@@ -105,7 +105,7 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), new_value)
+            self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
