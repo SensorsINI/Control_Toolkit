@@ -52,7 +52,6 @@ class optimizer_cem_gmm_tf(template_optimizer):
         
         self.optimizer_reset()
 
-    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
