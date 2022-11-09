@@ -1,18 +1,17 @@
 from typing import Tuple
-from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
+from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
 import numpy as np
-import tensorflow as tf
 
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF
+from Control_Toolkit.others.globals_and_utils import CompileAdaptive
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
-class optimizer_mppi_tf(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+class optimizer_mppi(template_optimizer):
+    supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
     
     def __init__(
         self,
@@ -53,9 +52,9 @@ class optimizer_mppi_tf(template_optimizer):
         
         # MPPI parameters
         self.cc_weight = cc_weight
-        self.R = tf.convert_to_tensor(R)
+        self.R = self.lib.to_tensor(R, self.lib.float32)
         self.LBD = LBD
-        self.NU = tf.convert_to_tensor(NU)
+        self.NU = self.lib.to_tensor(NU, self.lib.float32)
         self._SQRTRHOINV = SQRTRHOINV
         self.GAMMA = GAMMA
 
@@ -67,11 +66,14 @@ class optimizer_mppi_tf(template_optimizer):
             self.mppi_output = self.return_restricted
 
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
-        
+
+        self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
+        self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
+
         self.optimizer_reset()
     
     def configure(self, dt: float, predictor_specification: str, **kwargs):
-        self.SQRTRHODTINV = tf.convert_to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), dtype=tf.float32)
+        self.SQRTRHODTINV = self.lib.to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), self.lib.float32)
         del self._SQRTRHOINV
         
         self.predictor_single_trajectory.configure(
@@ -87,13 +89,13 @@ class optimizer_mppi_tf(template_optimizer):
 
     def check_dimensions_s(self, s):
         # Make sure the input is at least 2d
-        if tf.rank(s) == 1:
-            s = s[tf.newaxis, :]
+        if self.lib.ndim(s) == 1:
+            s = s[self.lib.newaxis, :]
         return s
 
     #mppi correction
     def mppi_correction_cost(self, u, delta_u):
-        return tf.math.reduce_sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), axis=[1, 2])
+        return self.lib.sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), (1, 2))
 
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
@@ -102,10 +104,10 @@ class optimizer_mppi_tf(template_optimizer):
         return total_mppi_cost
 
     def reward_weighted_average(self, S, delta_u):
-        rho = tf.math.reduce_min(S)
-        exp_s = tf.exp(-1.0/self.LBD * (S-rho))
-        a = tf.math.reduce_sum(exp_s)
-        b = tf.math.reduce_sum(exp_s[:, tf.newaxis, tf.newaxis]*delta_u, axis=0)/a
+        rho = self.lib.reduce_min(S, 0)
+        exp_s = self.lib.exp(-1.0/self.LBD * (S-rho))
+        a = self.lib.sum(exp_s, 0)
+        b = self.lib.sum(exp_s[:, self.lib.newaxis, self.lib.newaxis]*delta_u, 0)/a
         return b
 
     def inizialize_pertubation(self, random_gen):
@@ -113,33 +115,31 @@ class optimizer_mppi_tf(template_optimizer):
 
         delta_u = random_gen.normal(
             [self.num_rollouts, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-            dtype=tf.float32) * stdev
+            dtype=self.lib.float32) * stdev
 
         delta_u = self.Interpolator.interpolate(delta_u)
 
         return delta_u
 
-    @CompileTF
-    def predict_and_cost(self, s, u_nom, random_gen, u_old):
-        s = tf.tile(s, tf.constant([self.num_rollouts, 1]))
+    def _predict_and_cost(self, s, u_nom, random_gen, u_old):
+        s = self.lib.tile(s, (self.num_rollouts, 1))
         # generate random input sequence and clip to control limits
-        u_nom = tf.concat([u_nom[:, 1:, :], u_nom[:, -1:, :]], axis=1)
+        u_nom = self.lib.concat([u_nom[:, 1:, :], u_nom[:, -1:, :]], 1)
         delta_u = self.inizialize_pertubation(random_gen)
-        u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1])+delta_u
-        u_run = tf.clip_by_value(u_run, self.action_low, self.action_high)
+        u_run = self.lib.tile(u_nom, (self.num_rollouts, 1, 1))+delta_u
+        u_run = self.lib.clip(u_run, self.action_low, self.action_high)
         rollout_trajectory = self.predictor.predict_tf(s, u_run)
         traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
-        u_nom = tf.clip_by_value(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
+        u_nom = self.lib.clip(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
         u = u_nom[0, 0, :]
         self.update_internal_state(s, u_nom)
         return self.mppi_output(u, u_nom, rollout_trajectory, traj_cost, u_run)
 
     def update_internal_state_of_RNN(self, s, u_nom):
-        u_tiled = tf.tile(u_nom[:, :1, :], tf.constant([self.num_rollouts, 1, 1]))
+        u_tiled = self.lib.tile(u_nom[:, :1, :], (self.num_rollouts, 1, 1))
         self.predictor.update(s=s, Q0=u_tiled)
 
-    @CompileTF
-    def predict_optimal_trajectory(self, s, u_nom):
+    def _predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
@@ -148,25 +148,25 @@ class optimizer_mppi_tf(template_optimizer):
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
-        s = tf.convert_to_tensor(s, dtype=tf.float32)
+        s = self.lib.to_tensor(s, self.lib.float32)
         s = self.check_dimensions_s(s)
 
         self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
-        self.u = tf.squeeze(self.u).numpy()
+        self.u = self.lib.to_numpy(self.lib.squeeze(self.u))
         
         if self.optimizer_logging:
-            self.logging_values["Q_logged"] = u_run.numpy()
-            self.logging_values["J_logged"] = traj_cost.numpy()
-            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.logging_values["Q_logged"] = self.lib.to_numpy(u_run)
+            self.logging_values["J_logged"] = self.lib.to_numpy(traj_cost)
+            self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(rollout_trajectory)
             self.logging_values["u_logged"] = self.u
 
         if False:
-            self.optimal_trajectory = self.predict_optimal_trajectory(s, self.u_nom).numpy()
+            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
         return self.u
 
     def optimizer_reset(self):
         self.u_nom = (
-            0.5 * (self.action_low + self.action_high)
-            * tf.ones([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
+            0.5 * self.lib.to_tensor(self.action_low + self.action_high, self.lib.float32)
+            * self.lib.ones([1, self.mpc_horizon, self.num_control_inputs])
         )

@@ -23,6 +23,13 @@ class template_optimizer:
             mpc_horizon: int,
             computation_library: "type[ComputationLibrary]",
         ) -> None:
+
+        # Check if the computation_library passed is compatible with this optimizer
+        if computation_library not in self.supported_computation_libraries:
+            raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
+
+        self.lib = computation_library
+
         self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         self.cost_function = cost_function
@@ -34,18 +41,14 @@ class template_optimizer:
         self.num_states = num_states
         self.num_control_inputs = num_control_inputs
         self.action_low, self.action_high = control_limits
+        self.action_low = self.lib.to_tensor(self.action_low, self.lib.float32)
+        self.action_high = self.lib.to_tensor(self.action_high, self.lib.float32)
         
         # Initialize random sampler
-        self.rng = create_rng(self.__class__.__name__, seed, use_tf=True)
+        self.rng = create_rng(self.__class__.__name__, seed, computation_library=computation_library)
         
         self.logging_values = {}  # Can store trajectories and other things we want to log
         self.optimizer_logging = optimizer_logging
-        
-        # Check if the computation_library passed is compatible with this optimizer
-        if computation_library not in self.supported_computation_libraries:
-            raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
-
-        self.lib = computation_library
     
     def configure(self, **kwargs):
         """Pass any additional arguments from the controller to the optimizer."""
@@ -56,3 +59,11 @@ class template_optimizer:
     
     def optimizer_reset(self):
         raise NotImplementedError("Implement this function in a subclass.")
+
+    @property
+    def optimizer_name(self):
+        name = self.__class__.__name__
+        if name != "template_optimizer":
+            return name.replace("optimizer_", "").replace("_", "-").lower()
+        else:
+            raise AttributeError()

@@ -105,7 +105,7 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), new_value)
+            self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
@@ -123,7 +123,8 @@ class template_controller(ABC):
     # Optionally: A method called after an experiment.
     # May be used to print some statistics about controller performance (e.g. number of iter. to converge)
     def controller_report(self):
-        raise NotImplementedError
+        logger.info("No controller report implemented for this controller. Stopping without report.")
+        pass
 
     # Optionally: reset the controller after an experiment
     # May be useful for stateful controllers, like these containing RNN,
