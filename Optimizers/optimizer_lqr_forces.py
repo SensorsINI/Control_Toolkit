@@ -16,14 +16,16 @@ from Control_Toolkit.others.globals_and_utils import CompileTF
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 from CartPoleSimulation.CartPole.state_utilities import (ANGLE_IDX, ANGLED_IDX, POSITION_IDX,
-                                      POSITIOND_IDX)
+                                                         POSITIOND_IDX)
 from Control_Toolkit.others.globals_and_utils import create_rng
 
-
-#Forces
+# Forces
 from forces import forcespro
+import forcespro.nlp
 import numpy as np
 from forces import get_userid
+import casadi
+
 
 class optimizer_lqr_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -43,8 +45,8 @@ class optimizer_lqr_forces(template_optimizer):
             jacobian_path: str,
             action_max: float,
             state_max: list[float],
-            P: float,
-            R: float
+            q: float,
+            r: float
     ):
         super().__init__(
             predictor=predictor,
@@ -59,94 +61,105 @@ class optimizer_lqr_forces(template_optimizer):
             computation_library=computation_library,
         )
 
-        #dynamically import jacobian module
+        # dynamically import jacobian module
         module_path, jacobian_method = jacobian_path.rsplit('.', 1)
         self.module = __import__(module_path, fromlist=["cartpole_jacobian"])
         self.jacobian = getattr(self.module, jacobian_method)
 
         self.action_low = -action_max
         self.action_high = +action_max
-        self.P = P
-        self.R = R
+        self.q = q
+        self.r = r
 
         self.optimizer_reset()
 
-
-
-        #lower and upper bounds
-        constrained_idx = [i for i,x in enumerate(state_max) if x!='inf']
-
-        xmax = np.array([state_max[i] for i in constrained_idx])
+        # lower and upper bounds
+        # constrained_idx = [i for i, x in enumerate(state_max) if x != 'inf']
+        #
+        # xmax = np.array([state_max[i] for i in constrained_idx])
+        xmax = np.array([s if s != 'inf' else np.inf for s in state_max])
         xmin = -xmax
 
         umin = np.array([self.action_low])
         umax = np.array([self.action_high])
 
-        ubidx = [1] + [i+2 for i in constrained_idx]
-        lbidx = ubidx
+        # ubidx = [1] + [i + 2 for i in constrained_idx]
+        # lbidx = ubidx
 
-        self.nxc = len(constrained_idx)
+        self.nxc = len(state_max)
         self.nx = len(state_max)
         self.nu = 1
 
-        # Cost matrices for LQR controller
-        self.Q = np.diag([self.P] * self.nx)  # How much to punish x
-        self.R = np.diag([self.R] * self.nu)  # How much to punish u
-
-        # MPC setup
-        N = self.mpc_horizon
-        Q = self.Q
-        R = self.R
-        # terminal weight obtained from discrete-time Riccati equation
-        P = Q
-
-
-        # FORCESPRO multistage form
-        # assume variable ordering zi = [u{i-1}, x{i}] for i=1...N
-        # forcespro._set_forces_dir(forcespro.forces_dir)
-        self.stages = forcespro.MultistageProblem(N)
+        # # Cost matrices for LQR controller
+        # self.Q = np.diag([self.P] * self.nx).astype(np.float32)  # How much to punish x
+        # self.R = np.diag([self.R] * self.nu).astype(np.float32)  # How much to punish u
 
         # for readability
-        stages = self.stages
+        N = self.mpc_horizon
         nxc = self.nxc
         nx = self.nx
         nu = self.nu
+        # terminal weight obtained from discrete-time Riccati equation
 
-        for i in range(N):
+        # Model Definition
+        # ----------------
 
-            # dimensions
-            stages.dims[i]['n'] = nx + nu  # number of stage variables
-            stages.dims[i]['r'] = nx  # number of equality constraints
-            stages.dims[i]['l'] = nxc + nu  # number of lower bounds
-            stages.dims[i]['u'] = nxc + nu  # number of upper bounds
+        # Problem dimensions
+        self.model = forcespro.nlp.SymbolicModel(N)  # horizon length
+        model = self.model
+        model.nvar = nu + nx  # number of variables
+        model.neq = nx  # number of equality constraints
+        model.nh = 0  # number of inequality constraint functions
+        model.npar = 1  # number of runtime parameters
 
-            # cost
-            if (i == N - 1):
-                stages.cost[i]['H'] = np.vstack(
-                    (np.hstack((R, np.zeros((nu, nx)))), np.hstack((np.zeros((nx, nu)), P))))
-            else:
-                stages.cost[i]['H'] = np.vstack(
-                    (np.hstack((R, np.zeros((nu, nx)))), np.hstack((np.zeros((nx, nu)), Q))))
-            stages.cost[i]['f'] = np.zeros((nx + nu, 1))
+        Tf = 2  # final time
 
-            # lower bounds
-            stages.ineq[i]['b']['lbidx'] = lbidx # lower bound acts on these indices
-            stages.ineq[i]['b']['lb'] = np.concatenate((umin, xmin), 0)  # lower bound for this stage variable
+        Q = np.diag([q] * self.nx)
+        R = np.diag([r] * self.nu)
+        # model.objective = lambda z, p: casadi.dot(z[:nu].T, R, z[:nu].T) + casadi.dot(z[nu:].T, Q, z[nu:].T)
 
-            # upper bounds
-            stages.ineq[i]['b']['ubidx'] = ubidx  # upper bound acts on these indices
-            stages.ineq[i]['b']['ub'] = np.concatenate((umax, xmax), 0)  # upper bound for this stage variable
+        sqrt_weights = [np.sqrt(p) for p in [r] * nu + [q] * nx]
+        model.LSobjective = lambda z, p: np.array(sqrt_weights)*z
+        model.continuous_dynamics = self.linear_dynamics
+        # model.LSobjective = self.LSobjective
+        # # model.LSobjective = lambda x, u, p: casadi.vertcat([np.sqrt(r)*u[i] for i in range(nu)] + [np.sqrt(q)*x[i] for i in range(nx)])
 
-        # solver settings
-        stages.codeoptions['name'] = 'myMPC_FORCESPRO'
-        stages.codeoptions['printlevel'] = 0
+        # We use an explicit RK4 integrator here to discretize continuous dynamics
+        integrator_stepsize = Tf / (model.N - 1)
 
-        # define output of the solver
-        stages.newOutput('u0', 1, list(range(1, nu + 1)))
+        # Indices on LHS of dynamical constraint - for efficiency reasons, make
+        # sure the matrix E has structure [0 I] where I is the identity matrix.
+        model.E = np.concatenate([np.zeros((nx, nu)), np.identity(nx)], axis=1)
 
+        # Inequality constraints
+        # upper/lower variable bounds lb <= x <= ub
+        model.lb = np.concatenate((umin, xmin), 0)
+        model.ub = np.concatenate((umax, xmax), 0)
+
+        model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
+
+        # Generate solver
+        # ---------------
+
+        # Define solver options
+        codeoptions = forcespro.CodeOptions()
+        codeoptions.maxit = 200  # Maximum number of iterations
+        codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.optlevel = 3  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
+        codeoptions.nlp.integrator.Ts = integrator_stepsize
+        codeoptions.nlp.integrator.nodes = 5
+        codeoptions.nlp.integrator.type = 'ERK4'
+        codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.sqp_nlp.rti = 1
+        codeoptions.sqp_nlp.maxSQPit = 1
+        codeoptions.nlp.hessian_approximation = 'gauss-newton'
+        # codeoptions.nlp.hessian_approximation = 'bfgs'
+        codeoptions.forcenonconvex = 1
+        # Generate FORCESPRO solver
+        self.solver = model.generate_solver(codeoptions)
 
     def cartpole_order2jacobian_order(self, s: np.ndarray):
-        #Jacobian does not match the state order, permutation is needed
+        # Jacobian does not match the state order, permutation is needed
         new_s = np.ndarray(4)
         new_s[0] = s[POSITION_IDX]
         new_s[1] = s[POSITIOND_IDX]
@@ -165,45 +178,25 @@ class optimizer_lqr_forces(template_optimizer):
         new_s[ANGLED_IDX] = s[3]
         return new_s
 
-    def step(self, s: np.ndarray, time=None):
-        s = self.cartpole_order2jacobian_order(s)
-        jacobian = self.jacobian(s, 0.0)  #linearize around u=0.0
+    def LSobjective(self, z, p):
+        sqrt_weights = [np.sqrt(p) for p in [self.r] * self.nu + [self.q] * self.nx]
+        return casadi.vertcat([sqrt_weights[i] * z[i] for i in range(len(sqrt_weights))])
+
+    def linear_dynamics(self, s, u):
+        # calculate dx/dt evaluating f(x,u) = A(x,u)*x + B(x,u)*u
+        jacobian = self.jacobian(s, 0.0)  # linearize around u=0.0
         A = jacobian[:, :-1]
         B = np.reshape(jacobian[:, -1], newshape=(4, 1)) * self.action_high
+        return A@s + B@u
 
-        #for readability
-        stages = self.stages
-        nx = self.nx
-        nu = self.nu
-        N = self.mpc_horizon
+    def step(self, s: np.ndarray, time=None):
+        s = self.cartpole_order2jacobian_order(s).astype(np.float32)
+        problem = {"x0": s}
+        problem["all_parameters"] = np.ones((self.model.N, 1))
+        output, exitflag, info = self.solver.solve(problem)
+        u = output["x01"][0:self.nu]
 
-        for i in range(N):
-            # equality constraints
-            if (i < N - 1):
-                stages.eq[i]['C'] = np.hstack((np.zeros((nx, nu)), A))
-            if (i > 0):
-                stages.eq[i]['c'] = np.zeros((nx, 1))
-            stages.eq[i]['D'] = np.hstack((B, -np.eye(nx)))
-
-        stages.newParam('minusA_times_x0', [1], 'eq.c')  # RHS of first eq. constr. is a parameter: z1=-A*x0
-
-        # generate code
-        stages.generateCode(get_userid.userid)
-
-        import myMPC_FORCESPRO_py
-        self.problem = myMPC_FORCESPRO_py.myMPC_FORCESPRO_params
-        self.A = A
-
-        self.problem['minusA_times_x0'] = -np.dot(self.A, s)
-        [solverout, exitflag, info] = myMPC_FORCESPRO_py.myMPC_FORCESPRO_solve(self.problem)
-        if (exitflag == 1):
-            u = solverout['u0']
-            print('Problem solved in %5.3f milliseconds (%d iterations).' % (1000.0 * info.solvetime, info.it))
-        else:
-            print(info)
-            raise RuntimeError('Some problem in solver')
-
-        return u
+        return u.astype(np.float32)
 
     def optimizer_reset(self):
         pass
