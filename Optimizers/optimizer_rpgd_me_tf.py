@@ -36,6 +36,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         sample_stdev: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
+        SAMPLING_DISTRIBUTION: str,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
@@ -72,6 +73,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         self.rtol = rtol
         self.maximum_entropy_alpha = maximum_entropy_alpha
         self.gaussian = tfp.distributions.Normal(loc=0., scale=1.)
+        self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
 
         # Warmup setup
         self.first_iter_count = self.outer_its
@@ -90,33 +92,49 @@ class optimizer_rpgd_me_tf(template_optimizer):
         
         # Theta bound has dimension (num_actions, num_params_per_action)
         # Example: Environment with 3 control inputs and U[a,b] sampling => (3, 2)
-        # self.theta_min, self.theta_max = tf.constant([[[float(self.action_low), 0.01]]]), tf.constant([[[float(self.action_high), 10.0]]])
-        # self.theta_min, self.theta_max = tf.constant([[[float(self.action_low), float(self.action_low)]]]), tf.constant([[[float(self.action_high), float(self.action_high)]]])
-        self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
-        self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            self.theta_min = tf.stack([
+                self.action_low, tf.zeros_like(self.action_low)
+            ], axis=0)
+            self.theta_max = tf.stack([
+                self.action_high, 1.e2 * tf.ones_like(self.action_high)
+            ], axis=0)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
+            self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
+        else:
+            raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
+        
         
         self.optimizer_reset()
     
     def zeta(self, theta: tf.Variable, epsilon: tf.Tensor):
         """Corresponds to N(mu, stdev) with each sample independent."""
-        # mu, stdev = (tf.expand_dims(v, -1) for v in tf.unstack(theta, 2, -1))
-        # Q = mu + stdev * epsilon
-        # Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
-        # return Q_clipped
-    
-        l, r = tf.unstack(theta, 2, -1)
-        Q = (r - l) * self.gaussian.cdf(epsilon) + l
-        Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            mu, stdev = (tf.expand_dims(v, -1) for v in tf.unstack(theta, 2, -1))
+            Q = mu + stdev * epsilon
+            Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            l, r = tf.unstack(theta, 2, -1)
+            Q = (r - l) * self.gaussian.cdf(epsilon) + l
+            Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Q_clipped
-        
 
     def entropy(self, theta):
-        """Computes the Shannon entropy of a univariate Gaussian N(mu, sigma). theta = [mu, sigma].
-        See https://gregorygundersen.com/blog/2020/09/01/gaussian-entropy/"""
-        # stdev = theta[..., 1:]
-        # return 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
-        l, r = tf.unstack(theta, 2, -1)
-        return tf.math.log(tf.maximum(r - l, 1e-8))
+        """
+        Computes the Shannon entropy of either one of:
+        - a univariate Gaussian N(mu, sigma). theta = [mu, sigma]
+            - See https://gregorygundersen.com/blog/2020/09/01/gaussian-entropy/
+        - a uniform Distribution U[l, r]. theta = [l, r]
+        """
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            stdev = theta[..., 1:]
+            return 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            l, r = tf.unstack(theta, 2, -1)
+            return tf.math.log(tf.maximum(r - l, 1e-8))
+        else:
+            raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -304,11 +322,17 @@ class optimizer_rpgd_me_tf(template_optimizer):
         return self.u
 
     def optimizer_reset(self):
-        # Adaptive sampling distribution (1, mpc_horizon, dim_theta)
+        # Adaptive sampling distribution (1, mpc_horizon, dim_theta)        
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            # A) Gaussian distribution
+            initial_theta = tf.stack([
+                0.5 * (self.action_low + self.action_high), self.sample_stdev * tf.ones_like(self.action_low)
+            ], 1)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            # B) Uniform distribution
+            initial_theta = tf.stack([self.action_low, self.action_high], 1)
+            
         # Theta has shape (1, mpc_horizon, num_actions, num_params_per_action)
-        # initial_theta = np.array([[0.5 * float(self.action_low + self.action_high), float(self.sample_stdev)]])
-        # initial_theta = np.array([[float(self.action_low), float(self.action_high)]])
-        initial_theta = tf.stack([self.action_low, self.action_high], 1)
         initial_theta = np.tile(initial_theta, (self.mpc_horizon, 1, 1))[np.newaxis]
         if hasattr(self, "theta"):
             self.theta.assign(initial_theta)

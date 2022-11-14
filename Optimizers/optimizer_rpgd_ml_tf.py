@@ -136,8 +136,12 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         
 
     def entropy(self, theta):
-        """Computes the Shannon entropy of a univariate Gaussian N(mu, sigma). theta = [mu, sigma].
-        See https://gregorygundersen.com/blog/2020/09/01/gaussian-entropy/"""
+        """
+        Computes the Shannon entropy of either one of:
+        - a univariate Gaussian N(mu, sigma). theta = [mu, sigma]
+            - See https://gregorygundersen.com/blog/2020/09/01/gaussian-entropy/
+        - a uniform Distribution U[l, r]. theta = [l, r]
+        """
         if self.SAMPLING_DISTRIBUTION == "normal":
             stdev = theta[..., 1:]
             h = 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
