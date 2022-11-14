@@ -119,6 +119,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
             Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Q_clipped
 
+    @CompileTF
     def ML_estimation(self, epsilon: tf.Tensor, Q: tf.Variable):
         ep = tf.transpose(epsilon, [1, 2, 0])
         Y = tf.convert_to_tensor(Q)
@@ -146,6 +147,14 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         else:
             raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
         return h
+    
+    def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
+        # rollout trajectories and retrieve cost
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
+            rollout_trajectory, Q, self.u
+        )
+        return traj_cost, rollout_trajectory
         
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -161,10 +170,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
-            traj_cost = self.cost_function.get_trajectory_cost(
-                rollout_trajectory, Q, self.u
-            )
+            traj_cost, _ = self.predict_and_cost(s, Q)
             # entropy_cost = tf.reduce_sum(self.entropy(theta))  # Taking sum here is optional for gradient. If no reduce_sum, then tf gradient is the same
             traj_cost_mc_estimate = tf.reduce_mean(traj_cost)  # - self.alpha * entropy_cost
         # retrieve gradient of cost w.r.t. input sequence
@@ -180,10 +186,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
     def get_action(self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable):
         Q = self.zeta(theta, epsilon)
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.cost_function.get_trajectory_cost(
-            rollout_trajectory, Q, self.u
-        )
+        traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
@@ -216,11 +219,10 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         # )
         # # End of unnecessary part
 
-        # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(Q[sorted_cost[0], 0, :])
+        # Warmstart for next iteration
         epsilon_shifted = tf.concat([epsilon[:, 1:, :], epsilon[:, -1:, :]], axis=1)
         theta_shifted = tf.concat([theta[:, 1:, :, :], theta[:, -1:, :, :]], axis=1)
-        return u, epsilon_shifted, theta_shifted, best_idx, traj_cost, rollout_trajectory
+        return epsilon_shifted, theta_shifted, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -260,7 +262,6 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         
         # retrieve optimal input and prepare warmstart
         (
-            self.u,
             epsilon_shifted,
             theta_shifted,
             best_idx,
@@ -269,7 +270,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         ) = self.get_action(s, self.epsilon, self.theta)
         self.epsilon = epsilon_shifted
         self.theta.assign(theta_shifted)
-        
+        self.u = tf.squeeze(self.Q[best_idx[0], 0, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:

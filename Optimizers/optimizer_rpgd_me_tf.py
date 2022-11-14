@@ -117,6 +117,14 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # return 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
         l, r = tf.unstack(theta, 2, -1)
         return tf.math.log(tf.maximum(r - l, 1e-8))
+
+    def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
+        # rollout trajectories and retrieve cost
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
+            rollout_trajectory, Q, self.u
+        )
+        return traj_cost, rollout_trajectory
         
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
@@ -134,10 +142,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
             # theta = tf.tile(tf.expand_dims(theta, 0), (self.num_rollouts, 1))
             tape.watch(theta)
             Q = self.zeta(theta, epsilon)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
-            traj_cost = self.cost_function.get_trajectory_cost(
-                rollout_trajectory, Q, self.u
-            )
+            traj_cost, _ = self.predict_and_cost(s, Q)
             traj_cost_mc_estimate = tf.reduce_mean(traj_cost) - self.alpha * self.entropy(theta)
         # retrieve gradient of cost w.r.t. input sequence
         dc_dT = tape.gradient(traj_cost_mc_estimate, theta)
@@ -152,10 +157,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
     def get_action(self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable):
         Q = self.zeta(theta, epsilon)
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.cost_function.get_trajectory_cost(
-            rollout_trajectory, Q, self.u
-        )
+        traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
@@ -188,11 +190,10 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # )
         # # End of unnecessary part
 
-        # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(Q[sorted_cost[0], 0, :])
+        # Warmstart for next iteration
         epsilon_new = tf.concat([epsilon[:, 1:, :], epsilon[:, -1:, :]], axis=1)
         theta_new = tf.concat([theta[:, 1:, :, :], theta[:, -1:, :, :]], axis=1)
-        return u, epsilon_new, theta_new, best_idx, traj_cost, rollout_trajectory
+        return epsilon_new, theta_new, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -227,7 +228,6 @@ class optimizer_rpgd_me_tf(template_optimizer):
 
         # retrieve optimal input and prepare warmstart
         (
-            self.u,
             epsilon_new,
             theta_new,
             best_idx,
@@ -237,6 +237,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         self.epsilon = epsilon_new
         self.theta.assign(theta_new)
         
+        self.u = tf.squeeze(self.zeta(self.theta, self.epsilon)[best_idx[0], 0, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:
