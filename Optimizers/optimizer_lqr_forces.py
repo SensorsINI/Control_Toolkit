@@ -25,6 +25,8 @@ import forcespro.nlp
 import numpy as np
 from forces import get_userid
 import casadi
+import os
+import pickle
 
 
 class optimizer_lqr_forces(template_optimizer):
@@ -116,13 +118,12 @@ class optimizer_lqr_forces(template_optimizer):
 
         Q = np.diag([q] * self.nx)
         R = np.diag([r] * self.nu)
-        # model.objective = lambda z, p: casadi.dot(z[:nu].T, R, z[:nu].T) + casadi.dot(z[nu:].T, Q, z[nu:].T)
-
         sqrt_weights = [np.sqrt(p) for p in [r] * nu + [q] * nx]
-        model.LSobjective = lambda z, p: np.array(sqrt_weights)*z
+
+        # model.objective = lambda z, p: (sqrt_weights*z).T @ z
+
+        model.LSobjective = lambda z, p: np.array(sqrt_weights) * z
         model.continuous_dynamics = self.linear_dynamics
-        # model.LSobjective = self.LSobjective
-        # # model.LSobjective = lambda x, u, p: casadi.vertcat([np.sqrt(r)*u[i] for i in range(nu)] + [np.sqrt(q)*x[i] for i in range(nx)])
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
         integrator_stepsize = Tf / (model.N - 1)
@@ -150,13 +151,31 @@ class optimizer_lqr_forces(template_optimizer):
         codeoptions.nlp.integrator.nodes = 5
         codeoptions.nlp.integrator.type = 'ERK4'
         codeoptions.solvemethod = 'SQP_NLP'
+        # codeoptions.solvemethod = 'ADMM'
         codeoptions.sqp_nlp.rti = 1
         codeoptions.sqp_nlp.maxSQPit = 1
+        codeoptions.sqp_nlp.reg_hessian = 5e-9
         codeoptions.nlp.hessian_approximation = 'gauss-newton'
         # codeoptions.nlp.hessian_approximation = 'bfgs'
         codeoptions.forcenonconvex = 1
-        # Generate FORCESPRO solver
-        self.solver = model.generate_solver(codeoptions)
+
+        # try:
+        #     with open('model.pickle', 'rb') as handle:
+        #         saved_codeoptions = pickle.load(handle)
+        # except Exception:
+        #     saved_codeoptions = None
+
+        generate_new_code = True
+        if generate_new_code:
+            # Generate FORCESPRO solver
+            self.solver = model.generate_solver(codeoptions)
+            # with open('model.pickle', 'wb') as handle:
+            #     pickle.dump(codeoptions, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            # Read already generated solver
+            gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
+            self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
+            pass
 
     def cartpole_order2jacobian_order(self, s: np.ndarray):
         # Jacobian does not match the state order, permutation is needed
@@ -187,11 +206,13 @@ class optimizer_lqr_forces(template_optimizer):
         jacobian = self.jacobian(s, 0.0)  # linearize around u=0.0
         A = jacobian[:, :-1]
         B = np.reshape(jacobian[:, -1], newshape=(4, 1)) * self.action_high
-        return A@s + B@u
+        return A @ s + B @ u
 
     def step(self, s: np.ndarray, time=None):
         s = self.cartpole_order2jacobian_order(s).astype(np.float32)
-        problem = {"x0": s}
+        s = np.hstack((s, np.zeros((1,))))
+        x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
+        problem = {"x0": x0}
         problem["all_parameters"] = np.ones((self.model.N, 1))
         output, exitflag, info = self.solver.solve(problem)
         u = output["x01"][0:self.nu]
@@ -200,20 +221,4 @@ class optimizer_lqr_forces(template_optimizer):
 
     def optimizer_reset(self):
         pass
-        # state = np.array(
-        #     [[s[POSITION_IDX] - self.env_mock.target_position], [s[POSITIOND_IDX]], [s[ANGLE_IDX]], [s[ANGLED_IDX]]])
-        #
-        # Q = np.dot(-self.K, state).item()
-        #
-        # Q = np.float32(Q * (1 + self.p_Q * self.rng_lqr.uniform(self.action_low, self.action_high)))
-        # # Q = self.rng_lqr.uniform(-1.0, 1.0)
-        #
-        # # Clip Q
-        # if Q > 1.0:
-        #     Q = 1.0
-        # elif Q < -1.0:
-        #     Q = -1.0
-        # else:
-        #     pass
 
-        # return Q
