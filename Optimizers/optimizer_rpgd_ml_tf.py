@@ -94,11 +94,11 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         # Example: Environment with 3 control inputs and U[a,b] sampling => (3, 2)
         if self.SAMPLING_DISTRIBUTION == "normal":
             self.theta_min = tf.stack([
-                self.action_low, tf.zeros_like(self.action_low)
-            ], axis=0)
+                self.action_low, 0.01 * tf.ones_like(self.action_low)
+            ], axis=1)
             self.theta_max = tf.stack([
                 self.action_high, 1.e2 * tf.ones_like(self.action_high)
-            ], axis=0)
+            ], axis=1)
         elif self.SAMPLING_DISTRIBUTION == "uniform":
             self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
             self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
@@ -143,7 +143,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         - a uniform Distribution U[l, r]. theta = [l, r]
         """
         if self.SAMPLING_DISTRIBUTION == "normal":
-            stdev = theta[..., 1:]
+            _, stdev = tf.unstack(theta, 2, -1)
             h = 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
         elif self.SAMPLING_DISTRIBUTION == "uniform":
             l, r = tf.unstack(theta, 2, -1)
