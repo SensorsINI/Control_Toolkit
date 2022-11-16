@@ -15,9 +15,6 @@ from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
-from CartPoleSimulation.CartPole.state_utilities import (ANGLE_IDX, ANGLED_IDX, POSITION_IDX,
-                                                         POSITIOND_IDX)
-from Control_Toolkit.others.globals_and_utils import create_rng
 
 # Forces
 from forces import forcespro
@@ -27,9 +24,9 @@ from forces import get_userid
 import casadi
 import os
 import pickle
+import Control_Toolkit.others.dynamics_forces_interface
 
-
-class optimizer_lqr_forces(template_optimizer):
+class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
 
     def __init__(
@@ -44,9 +41,10 @@ class optimizer_lqr_forces(template_optimizer):
             mpc_horizon: int,
             num_rollouts: int,
             optimizer_logging: bool,
-            jacobian_path: str,
-            action_max: float,
+            dynamics: str,
+            action_max: list[float],
             state_max: list[float],
+            optimize_over: list[int],
             q: float,
             r: float
     ):
@@ -63,13 +61,13 @@ class optimizer_lqr_forces(template_optimizer):
             computation_library=computation_library,
         )
 
-        # dynamically import jacobian module
-        module_path, jacobian_method = jacobian_path.rsplit('.', 1)
-        self.module = __import__(module_path, fromlist=["cartpole_jacobian"])
-        self.jacobian = getattr(self.module, jacobian_method)
+        # dynamically import dynamics of the model
+        self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, dynamics)
 
-        self.action_low = -action_max
-        self.action_high = +action_max
+        self.optimize_over = optimize_over
+
+        self.action_low = -np.array(action_max)
+        self.action_high = -self.action_low
         self.q = q
         self.r = r
 
@@ -82,15 +80,14 @@ class optimizer_lqr_forces(template_optimizer):
         xmax = np.array([s if s != 'inf' else np.inf for s in state_max])
         xmin = -xmax
 
-        umin = np.array([self.action_low])
-        umax = np.array([self.action_high])
+        umin = self.action_low
+        umax = self.action_high
 
         # ubidx = [1] + [i + 2 for i in constrained_idx]
         # lbidx = ubidx
 
-        self.nxc = len(state_max)
-        self.nx = len(state_max)
-        self.nu = 1
+        self.nx = len(optimize_over)
+        self.nu = len(action_max)
 
         # # Cost matrices for LQR controller
         # self.Q = np.diag([self.P] * self.nx).astype(np.float32)  # How much to punish x
@@ -98,7 +95,7 @@ class optimizer_lqr_forces(template_optimizer):
 
         # for readability
         N = self.mpc_horizon
-        nxc = self.nxc
+
         nx = self.nx
         nu = self.nu
         # terminal weight obtained from discrete-time Riccati equation
@@ -123,7 +120,7 @@ class optimizer_lqr_forces(template_optimizer):
         # model.objective = lambda z, p: (sqrt_weights*z).T @ z
 
         model.LSobjective = lambda z, p: np.array(sqrt_weights) * z
-        model.continuous_dynamics = self.linear_dynamics
+        model.continuous_dynamics = self.dynamics
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
         integrator_stepsize = Tf / (model.N - 1)
@@ -177,39 +174,8 @@ class optimizer_lqr_forces(template_optimizer):
             self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
             pass
 
-    def cartpole_order2jacobian_order(self, s: np.ndarray):
-        # Jacobian does not match the state order, permutation is needed
-        new_s = np.ndarray(4)
-        new_s[0] = s[POSITION_IDX]
-        new_s[1] = s[POSITIOND_IDX]
-        new_s[2] = s[ANGLE_IDX]
-        new_s[3] = s[ANGLED_IDX]
-        return new_s
-
-    def jacobian_order2cartpole_order(self, s: np.ndarray):
-        # Jacobian does not match the state order, permutation is needed
-        new_s = np.ndarray(6)
-        new_s[POSITION_IDX] = s[0]
-        new_s[POSITIOND_IDX] = s[1]
-        new_s[2] = np.cos(new_s[0])
-        new_s[3] = np.sin(new_s[0])
-        new_s[ANGLE_IDX] = s[2]
-        new_s[ANGLED_IDX] = s[3]
-        return new_s
-
-    def LSobjective(self, z, p):
-        sqrt_weights = [np.sqrt(p) for p in [self.r] * self.nu + [self.q] * self.nx]
-        return casadi.vertcat([sqrt_weights[i] * z[i] for i in range(len(sqrt_weights))])
-
-    def linear_dynamics(self, s, u):
-        # calculate dx/dt evaluating f(x,u) = A(x,u)*x + B(x,u)*u
-        jacobian = self.jacobian(s, 0.0)  # linearize around u=0.0
-        A = jacobian[:, :-1]
-        B = np.reshape(jacobian[:, -1], newshape=(4, 1)) * self.action_high
-        return A @ s + B @ u
-
     def step(self, s: np.ndarray, time=None):
-        s = self.cartpole_order2jacobian_order(s).astype(np.float32)
+        s = s[self.optimize_over]
         s = np.hstack((s, np.zeros((1,))))
         x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
         problem = {"x0": x0}
