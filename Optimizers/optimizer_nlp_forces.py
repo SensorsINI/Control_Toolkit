@@ -73,6 +73,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         self.optimizer_reset()
 
+        self.rsnorms = []
+        self.res_eqs = []
+
         # lower and upper bounds
         # constrained_idx = [i for i, x in enumerate(state_max) if x != 'inf']
         #
@@ -120,7 +123,7 @@ class optimizer_nlp_forces(template_optimizer):
         # model.objective = lambda z, p: (sqrt_weights*z).T @ z
 
         model.LSobjective = lambda z, p: np.array(sqrt_weights) * z
-        model.continuous_dynamics = self.dynamics
+        model.continuous_dynamics = self.dynamics       #continuous_dynamics : (s, u) --> ds/dx
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
         integrator_stepsize = Tf / (model.N - 1)
@@ -141,20 +144,30 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Define solver options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 200  # Maximum number of iterations
-        codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
-        codeoptions.optlevel = 3  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
+        codeoptions.maxit = 200                                 # Maximum number of iterations
+        codeoptions.printlevel = 2                              # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.optlevel = 3                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.nlp.integrator.Ts = integrator_stepsize
         codeoptions.nlp.integrator.nodes = 5
         codeoptions.nlp.integrator.type = 'ERK4'
         codeoptions.solvemethod = 'SQP_NLP'
+        # codeoptions.solvemethod = 'PDIP'
         # codeoptions.solvemethod = 'ADMM'
+
         codeoptions.sqp_nlp.rti = 1
         codeoptions.sqp_nlp.maxSQPit = 1
         codeoptions.sqp_nlp.reg_hessian = 5e-9
         codeoptions.nlp.hessian_approximation = 'gauss-newton'
         # codeoptions.nlp.hessian_approximation = 'bfgs'
         codeoptions.forcenonconvex = 1
+        # codeoptions.floattype = 'float'
+        # codeoptions.threadSafeStorage = True;
+        codeoptions.overwrite = 1
+        # codeoptions.nlp.TolStat = 1E-3                          # inf norm tol.on stationarity
+        # codeoptions.nlp.TolEq = 1E-3                            # tol. on equality constraints
+        # codeoptions.nlp.TolIneq = 1E-3                          # tol.on inequality constraints
+        # codeoptions.nlp.TolComp = 1E-3                          # tol.on complementarity
+
 
         # try:
         #     with open('model.pickle', 'rb') as handle:
@@ -174,16 +187,40 @@ class optimizer_nlp_forces(template_optimizer):
             self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
             pass
 
+
+
     def step(self, s: np.ndarray, time=None):
-        s = s[self.optimize_over]
-        s = np.hstack((s, np.zeros((1,))))
+        s = s[self.optimize_over].astype(np.float32)
+        u0 = 0.1
+        s = np.hstack((np.ones((1,))*u0, s))                              # add initial guess for input 0
         x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
         problem = {"x0": x0}
-        problem["all_parameters"] = np.ones((self.model.N, 1))
+        problem["all_parameters"] = np.ones((self.model.N, 1))*0.7
+        # problem["xinit"] = s
+        self.test_solver(problem)
         output, exitflag, info = self.solver.solve(problem)
         u = output["x01"][0:self.nu]
-
+        # sD = self.model.continuous_dynamics(s, u)
+        self.rsnorms.append(info.rsnorm)
+        self.res_eqs.append(info.res_eq)
         return u.astype(np.float32)
+
+    def test_solver(self, problem):
+        x0 = problem['x0']
+        pars = problem['all_parameters']
+        for ss in range(self.model.N-1):
+            z = x0[ss*self.model.nvar:(ss+1)*self.model.nvar]
+            p = pars[ss]
+            c, jacc = self.solver.dynamics(z, p, stage=ss)
+            ineq, jacineq = self.solver.ineq(z, p, stage=ss)
+            obj, gradobj = self.solver.objective(z, p, stage=ss)
+            assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
+            assert not (np.any(np.isnan(np.sum(jacc))) or np.any(np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
+            assert not (np.any(np.isnan(ineq)) or np.any(np.isinf(ineq))), 'Encountered NaN in ineq at stage ' + str(ss)
+            assert not (np.any(np.isnan(jacineq)) or np.any(np.isinf(jacineq))), 'Encountered NaN in jacineq at stage ' + str(ss)
+            assert not (np.any(np.isnan(obj)) or np.any(np.isinf(obj))), 'Encountered NaN in obj at stage ' + str(ss)
+            assert not (np.any(np.isnan(gradobj)) or np.any(np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
+        print('Did not encounter NaNs')
 
     def optimizer_reset(self):
         pass
