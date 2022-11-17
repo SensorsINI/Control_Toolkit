@@ -81,7 +81,7 @@ class template_controller(ABC):
         
         # Set properties like target positions on this controller
         for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
+            setattr(self, property, new_value)
                 
         # Initialize control variable
         self.u = 0.0
@@ -105,7 +105,10 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
+            if hasattr(new_value, "dtype"):
+                self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
+            else:
+                setattr(self, property, new_value)
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
