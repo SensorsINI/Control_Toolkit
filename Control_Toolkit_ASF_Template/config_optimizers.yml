@@ -87,7 +87,7 @@ dist-adam-resamp2-tf:
   gradmax_clip: 5
   rtol: 1.0e-3
   num_rollouts: 32
-  opt_keep_k: 8
+  opt_keep_k_ratio: 0.25
   outer_its: 2
   resamp_per: 10
   sample_stdev: 0.5
@@ -105,7 +105,7 @@ rpgd-tf:
   gradmax_clip: 5
   rtol: 1.0e-3
   num_rollouts: 32
-  opt_keep_k: 8
+  opt_keep_k_ratio: 0.25
   outer_its: 2
   resamp_per: 10
   sample_stdev: 0.5
@@ -124,7 +124,7 @@ rpgd-me-tf:
   gradmax_clip: 10
   rtol: 1.0e-3
   num_rollouts: 32
-  opt_keep_k: 0
+  opt_keep_k_ratio: 0.25
   outer_its: 25
   resamp_per: 1
   sample_stdev: 0.5
@@ -143,7 +143,7 @@ rpgd-ml-tf:
   gradmax_clip: 10
   rtol: 1.0e-3
   num_rollouts: 32
-  opt_keep_k: 8
+  opt_keep_k_ratio: 0.25
   outer_its: 5
   resamp_per: 1
   sample_stdev: 0.5
@@ -160,7 +160,7 @@ rpgd-particle-tf:
   gradmax_clip: 10
   rtol: 1.0e-3
   num_rollouts: 32
-  opt_keep_k: 8
+  opt_keep_k_ratio: 0.25
   outer_its: 5
   resamp_per: 1
   sample_stdev: 0.5
