@@ -30,6 +30,7 @@ class optimizer_rpgd_tf(template_optimizer):
         sample_stdev: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
+        SAMPLING_DISTRIBUTION: str,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
@@ -64,6 +65,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.opt_keep_k = opt_keep_k
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
+        self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
 
         # Warmup setup
         self.first_iter_count = self.outer_its
@@ -83,12 +85,22 @@ class optimizer_rpgd_tf(template_optimizer):
         self.optimizer_reset()
 
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
-        Qn = rng_gen.uniform(
-            [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-            minval=self.action_low,
-            maxval=self.action_high,
-            dtype=tf.float32,
-        )
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            Qn = rng_gen.normal(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                mean=0.0,
+                stddev=self.sample_stdev,
+                dtype=tf.float32,
+            )
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            Qn = rng_gen.uniform(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                minval=self.action_low,
+                maxval=self.action_high,
+                dtype=tf.float32,
+            )
+        else:
+            raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
 
         Qn = self.Interpolator.interpolate(Qn)
