@@ -106,7 +106,7 @@ class template_controller(ABC):
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
             if hasattr(new_value, "dtype"):
-                self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
+                self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, new_value.dtype))
             else:
                 setattr(self, property, new_value)
     

@@ -129,5 +129,9 @@ class EnvironmentBatched:
         except KeyError as error:
             log.exception(error)
     
+    @property
+    def logs(self):
+        return getattr(self, "_logs", dict())
+    
     def set_logs(self, logs: "dict[str, Any]"):
         self._logs = logs
