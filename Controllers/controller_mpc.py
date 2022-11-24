@@ -13,6 +13,8 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
+from Control_Toolkit.Controllers.TargetPositionGenerator import TargetPositionGenerator
+
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
@@ -64,6 +66,9 @@ class controller_mpc(template_controller):
             predictor_specification=predictor_specification
         )
 
+        self.TargetPositionGeneratorInstance = TargetPositionGenerator(lib=self.computation_library, horizon=self.optimizer.mpc_horizon)
+        setattr(self, "target_positions_vector", self.computation_library.to_variable(self.computation_library.zeros((self.optimizer.mpc_horizon,)), self.computation_library.float32))
+
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
         else:
@@ -71,6 +76,9 @@ class controller_mpc(template_controller):
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+
+        target_positions_vector = self.TargetPositionGeneratorInstance.step(time)
+        updated_attributes['target_positions_vector'] = target_positions_vector
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
         self.update_logs(self.optimizer.logging_values)
