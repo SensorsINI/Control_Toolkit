@@ -97,14 +97,13 @@ class optimizer_rpgd_me_tf(template_optimizer):
                 self.action_low, 0.01 * tf.ones_like(self.action_low)
             ], axis=1)
             self.theta_max = tf.stack([
-                self.action_high, 1.e2 * tf.ones_like(self.action_high)
+                self.action_high, 1.0e2 * tf.ones_like(self.action_high)
             ], axis=1)
         elif self.SAMPLING_DISTRIBUTION == "uniform":
             self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
             self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
         else:
             raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
-        
         
         self.optimizer_reset()
     
@@ -118,6 +117,9 @@ class optimizer_rpgd_me_tf(template_optimizer):
             l, r = tf.unstack(theta, 2, -1)
             Q = (r - l) * self.gaussian.cdf(epsilon) + l
             Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
+        
+        # If sampling interpolation active, compute interpolated inputs here
+        Q_clipped = self.Interpolator.interpolate(Q_clipped)
         return Q_clipped
 
     def entropy(self, theta):
@@ -147,8 +149,9 @@ class optimizer_rpgd_me_tf(template_optimizer):
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         # Reparametrization trick
+        # Generate epsilon only at inducing points
+        # Sampling interpolation is done after converting epsilons to actual samples u through this function
         epsilon = rng_gen.normal([batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32)
-        epsilon = self.Interpolator.interpolate(epsilon)
         return epsilon
 
     @CompileTF
@@ -332,8 +335,8 @@ class optimizer_rpgd_me_tf(template_optimizer):
             # B) Uniform distribution
             initial_theta = tf.stack([self.action_low, self.action_high], 1)
             
-        # Theta has shape (1, mpc_horizon, num_actions, num_params_per_action)
-        initial_theta = np.tile(initial_theta, (self.mpc_horizon, 1, 1))[np.newaxis]
+        # Theta has shape (1, number_of_inducing_points, num_actions, num_params_per_action)
+        initial_theta = np.tile(initial_theta, (self.Interpolator.number_of_interpolation_inducing_points, 1, 1))[np.newaxis]
         if hasattr(self, "theta"):
             self.theta.assign(initial_theta)
         else:
