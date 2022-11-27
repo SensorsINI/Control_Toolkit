@@ -37,7 +37,7 @@ class cost_function_barebone(cost_function_base):
         # return terminal_cost
         pass
 
-    # all stage costs together
+    # all stage costs together. A 'stage' is one timestep of a rollout.
     def get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType):
         # Shape of states: [batch_size, mpc_horizon, num_states]
         # TODO: Compute stage cost

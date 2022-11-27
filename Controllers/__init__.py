@@ -109,6 +109,14 @@ class template_controller(ABC):
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+        """
+        Execute one timestep of control.
+        @param s: the state array, dimensions are TODO add dimension to help users
+        @param time: the time in seconds
+        @param updated_attributes: dict of updated states
+        @return: the next control action u e.g. a normed control input in the range [-1,1] TODO is this correct?
+
+        """
         ### Any computations in order to retrieve the current control. Such as:
         ## If the environment's target positions etc. change, copy the new attributes over to this controller so the cost function knows about it:
         # self.update_attributes(updated_attributes)

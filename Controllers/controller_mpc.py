@@ -13,7 +13,7 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
-from Control_Toolkit.Controllers.TargetPositionGenerator import TargetPositionGenerator
+from Control_Toolkit.Controllers.TrajectoryGenerator import TrajectoryGenerator
 
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 
 
 class controller_mpc(template_controller):
+
     _has_optimizer = True
     
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
@@ -66,8 +67,10 @@ class controller_mpc(template_controller):
             predictor_specification=predictor_specification
         )
 
-        self.TargetPositionGeneratorInstance = TargetPositionGenerator(lib=self.computation_library, horizon=self.optimizer.mpc_horizon)
-        setattr(self, "target_positions_vector", self.computation_library.to_variable(self.computation_library.zeros((self.optimizer.mpc_horizon,)), self.computation_library.float32))
+        self.TrajectoryGeneratorInstance = TrajectoryGenerator(lib=self.computation_library, horizon=self.optimizer.mpc_horizon)
+        setattr(self, "target_positions_vector",
+                self.computation_library.to_variable(self.computation_library.zeros((self.optimizer.mpc_horizon,)),
+                                                     self.computation_library.float32))
 
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
@@ -77,7 +80,7 @@ class controller_mpc(template_controller):
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
 
-        target_positions_vector = self.TargetPositionGeneratorInstance.step(time)
+        target_positions_vector = self.TrajectoryGeneratorInstance.step(time)
         updated_attributes['target_positions_vector'] = target_positions_vector
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
