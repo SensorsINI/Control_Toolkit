@@ -9,9 +9,19 @@ class cost_function_base:
     # Default: Class supports all libs to compute costs
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
     
-    def __init__(self, controller: template_controller, ComputationLib: "type[ComputationLibrary]") -> None:
+    def __init__(self, controller: template_controller, ComputationLib: "type[ComputationLibrary]", config:dict=None) -> None:
+        """ makes a new cost function
+
+        :param controller: the controller
+        :param ComputationLib: the library, e.g. python, tensorflow
+        :param config: the dict of configuration for this cost function.  The caller can modify the config to change behavior during runtime.
+
+         """
+
         self.controller = controller
+        self.config=config
         self.set_computation_library(ComputationLib)
+        logger.info(f'constructed {self} with controller {controller} computation library {ComputationLib} and config {config}')
     
     def get_terminal_cost(self, terminal_states: TensorType) -> TensorType:
         """Compute a batch of terminal costs for a batch of terminal states.

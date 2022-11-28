@@ -5,9 +5,9 @@ import numpy as np
 
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileAdaptive
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+from SI_Toolkit.Functions.TF.Compile import CompileAdaptive
 
 
 class optimizer_mppi(template_optimizer):
@@ -121,7 +121,14 @@ class optimizer_mppi(template_optimizer):
 
         return delta_u
 
-    def _predict_and_cost(self, s, u_nom, random_gen, u_old):
+    def _predict_and_cost(self, s, u_nom, random_gen, u_old, **config):
+        """ Predict dynamics and compute costs of trajectories
+        TODO add params and return
+
+        :param ??
+
+        :returns: ??
+        """
         s = self.lib.tile(s, (self.num_rollouts, 1))
         # generate random input sequence and clip to control limits
         u_nom = self.lib.concat([u_nom[:, 1:, :], u_nom[:, -1:, :]], 1)

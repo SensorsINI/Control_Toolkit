@@ -9,7 +9,7 @@ from Control_Toolkit.Cost_Functions import cost_function_base
 
 
 # TODO: Load constants from the cost config file, like this:
-config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"), Loader=yaml.FullLoader)
+config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"), "r"), Loader=yaml.FullLoader)
 
 # TODO: Rename parent folder from EnvironmentName to the actual name of you environment
 # TODO: Load constants like this:

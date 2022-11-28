@@ -1,5 +1,7 @@
 from importlib import import_module
 import os
+
+from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.computation_library import TensorType
 import yaml
 from copy import deepcopy as dcp
@@ -7,12 +9,12 @@ from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
+from others.globals_and_utils import load_or_reload_config_if_modified
+
+log=get_logger(__name__)
 
 # cost_function config
-cost_function_config = yaml.load(
-    open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"),
-    Loader=yaml.FullLoader,
-)
+(cost_function_config,_) = load_or_reload_config_if_modified(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"))
 
 
 class CostFunctionWrapper:
@@ -21,12 +23,22 @@ class CostFunctionWrapper:
         self.cost_function_name_default: str = cost_function_config[
             "cost_function_name_default"
         ]
+        log.info(f'default cost function name is {self.cost_function_name_default}')
 
     def configure(
         self,
         controller: template_controller,
         cost_function_specification=None,
+        config:dict=None
     ):
+        """
+        Configures the cost function. TODO This lazy constructor is needed why?
+
+        :param controller: the controller that uses this cost function
+        :param cost_function_specification: the string name of the cost function class, to construct the class
+        :param config: the config dict() that holds all the configuration values
+
+        """
         environment_name = controller.environment_name
         computation_library = controller.computation_library  # Use library dictated by controller
         
@@ -41,6 +53,7 @@ class CostFunctionWrapper:
         self.cost_function: cost_function_base = getattr(
             cost_function_module, self.cost_function_name
         )(controller, computation_library)
+        log.info(f'configured controller {controller.__class__} with cost function {self.cost_function.__class__}')
 
     def update_cost_function_name_from_specification(
         self, environment_name: str, cost_function_specification: str = None
@@ -63,7 +76,7 @@ class CostFunctionWrapper:
         return self.cost_function.get_stage_cost(states, inputs, previous_input)
 
     def get_trajectory_cost(
-        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None, config:dict=None
     ):
         """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
         return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
