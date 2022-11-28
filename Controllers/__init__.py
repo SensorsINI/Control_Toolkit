@@ -1,6 +1,6 @@
 import os
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Union
 
 import numpy as np
 import yaml
@@ -9,12 +9,12 @@ from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 logger = get_logger(__name__)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
-1. Be in Controller folder
+1. Be in Controllers folder
 2. Have a name starting with "controller_"
 3. The name of the controller class must be the same as the name of the file.
 4. It must have __init__ and step methods
@@ -104,17 +104,27 @@ class template_controller(ABC):
         pass
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
+        """ Update scalar float32 attributes in compiled code (tensorflow JIT) that have changed, i.e. copy them to the compiled/GPU instance.
+
+        After this call, such attribute values are available to the TF function as self.key, where key is the key used in dict.
+
+        Used in various controllers in Control_Toolkit/Control_Toolkit_ASF_Template/Controllers.
+
+        :param updated_attributes: a dict with string keys and TensorType (i.e. float32) value attributes to copy
+        """
         for property, new_value in updated_attributes.items():
             self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
     
     @abstractmethod
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, Union[TensorType,float]]" = dict()):
         """
         Execute one timestep of control.
-        @param s: the state array, dimensions are TODO add dimension to help users
-        @param time: the time in seconds
-        @param updated_attributes: dict of updated states
-        @return: the next control action u e.g. a normed control input in the range [-1,1] TODO is this correct?
+
+        :param s: the state array, dimensions are TODO add dimension to help users
+        :param time: the time in seconds
+        :param updated_attributes: dict of updated attributes
+
+        :returns: the next control action u e.g. a normed control input in the range [-1,1] TODO is this correct?
 
         """
         ### Any computations in order to retrieve the current control. Such as:
