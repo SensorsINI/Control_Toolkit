@@ -14,11 +14,11 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 from torch import inference_mode
 
 from Control_Toolkit.Controllers.TrajectoryGenerator import TrajectoryGenerator
-
+from others.globals_and_utils import load_or_reload_config_if_modified
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
-logger = get_logger(__name__)
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
+log = get_logger(__name__)
 
 
 class controller_mpc(template_controller):
@@ -28,13 +28,13 @@ class controller_mpc(template_controller):
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
-            logger.info(f"Using optimizer {optimizer_name} specified in controller config file")
+            log.info(f"Using optimizer {optimizer_name} specified in controller config file")
         if predictor_specification in {None, ""}:
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
-            logger.info(f"Using predictor {predictor_specification} specified in controller config file")
+            log.info(f"Using predictor {predictor_specification} specified in controller config file")
         
         config_optimizer = config_optimizers[optimizer_name]
-        
+
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
         self.cost_function = CostFunctionWrapper()
@@ -67,7 +67,9 @@ class controller_mpc(template_controller):
             predictor_specification=predictor_specification
         )
 
+        # make a target position trajectory generator
         self.TrajectoryGeneratorInstance = TrajectoryGenerator(lib=self.computation_library, horizon=self.optimizer.mpc_horizon)
+        # set self.target_positions_vector to the correct vector tensor type for TF or whatever is doing the stepping
         setattr(self, "target_positions_vector",
                 self.computation_library.to_variable(self.computation_library.zeros((self.optimizer.mpc_horizon,)),
                                                      self.computation_library.float32))
@@ -79,10 +81,22 @@ class controller_mpc(template_controller):
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-
+        log.debug(f'step time={time:.3f}s')
+        # following is hack to get a target trajectory passed to tensorflow. The trajectory is passed in
+        # as updated_attributes, and is transferred to tensorflow by the update_attributes call
         target_positions_vector = self.TrajectoryGeneratorInstance.step(time)
         updated_attributes['target_positions_vector'] = target_positions_vector
         self.update_attributes(updated_attributes)
+        for c in ('config_controllers.yml','config_cost_functions.yml', 'config_optimizers.yml'):
+            (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',c))
+            # process changes to configs using new returned change list
+            if not changes is None:
+                for k,v in changes:
+                    if isinstance(v, (int, float)):
+                        updated_attributes[k]=v
+                self.update_attributes(updated_attributes)
+                log.info(f'updated config {c} with scalar updated_attributes {updated_attributes}')
+
         u = self.optimizer.step(s, time)
         self.update_logs(self.optimizer.logging_values)
         return u
