@@ -280,12 +280,12 @@ class optimizer_rpgd_me_tf(template_optimizer):
             epsilon_keep = tf.gather(self.epsilon, best_idx, axis=0)  # resorting according to costs
             self.epsilon = tf.concat([epsilon_res, epsilon_keep], axis=0)
             self.trajectory_ages = tf.concat([
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx, axis=0),
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
             # Updating the weights of adam:
-            # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
+                # For the trajectories which are kept, the weights are shifted for a warmstart
                 w1 = tf.concat(
                     [
                         adam_weights[1][:, 1:, :, :],

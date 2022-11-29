@@ -294,8 +294,8 @@ class optimizer_rpgd_ml_tf(template_optimizer):
             epsilon_retained = tf.gather(self.epsilon, best_idx, axis=0)  # resorting according to costs
             self.epsilon = tf.concat([epsilon_resampled, epsilon_retained], axis=0)
             self.trajectory_ages = tf.concat([
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx, axis=0),
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
         
         # Updating the weights of Adam:
