@@ -13,8 +13,8 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 logger = get_logger(__name__)
 
 
-class optimizer_rpgd_me_tf(template_optimizer):
-    """Maximum Entropy RPGD optimizer.
+class optimizer_rpgd_me_param_tf(template_optimizer):
+    """Maximum Entropy RPGD optimizer with a parametric sampling distribution.
 
     :param template_optimizer: A base optimizer with the required interface
     :type template_optimizer: abc.ABCMeta
@@ -83,13 +83,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
                                          self.num_control_inputs, self.lib)
 
-        self.opt_theta = tf.keras.optimizers.Adam(
-            learning_rate=learning_rate,
-            beta_1=adam_beta_1,
-            beta_2=adam_beta_2,
-            epsilon=adam_epsilon,
-        )
-        self.opt_epsilon = tf.keras.optimizers.Adam(
+        self.opt = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
@@ -113,7 +107,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         
         self.optimizer_reset()
     
-    def zeta(self, theta: tf.Variable, epsilon: tf.Variable):
+    def zeta(self, theta: tf.Variable, epsilon: tf.Tensor):
         """Corresponds to N(mu, stdev) with each sample independent."""
         if self.SAMPLING_DISTRIBUTION == "normal":
             mu, stdev = tf.unstack(theta, 2, -1)
@@ -157,11 +151,34 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # Reparametrization trick
         # Generate epsilon only at inducing points
         # Sampling interpolation is done after converting epsilons to actual samples u through this function
-        return rng_gen.normal([batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32)
+        epsilon = rng_gen.normal([batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32)
+        return epsilon
+
+    # @CompileTF
+    # def grad_step(
+    #     self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable, opt: tf.keras.optimizers.Optimizer
+    # ):
+    #     # rollout trajectories and retrieve cost
+    #     with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape:
+    #         # theta = tf.tile(tf.expand_dims(theta, 0), (self.num_rollouts, 1))
+    #         tape.watch(theta)
+    #         Q = self.zeta(theta, epsilon)
+    #         traj_cost, _ = self.predict_and_cost(s, Q)
+    #         entropy_cost = - self.alpha * self.entropy(theta)[..., tf.newaxis]
+    #         traj_cost_mc_estimate = tf.reduce_mean(traj_cost[:, tf.newaxis, tf.newaxis, tf.newaxis], keepdims=True)
+    #         traj_cost_total = traj_cost_mc_estimate + entropy_cost
+    #     # retrieve gradient of cost w.r.t. input sequence
+    #     dc_dT = tape.gradient(traj_cost_total, theta)
+    #     dc_dT_prc = tf.clip_by_norm(dc_dT, self.gradmax_clip, axes=-1)
+    #     # use optimizer to apply gradients and retrieve next set of input sequences
+    #     opt.apply_gradients(zip([dc_dT_prc], [theta]))
+    #     # clip
+    #     theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
+    #     return theta, traj_cost
     
     @CompileTF
     def grad_step(
-        self, s: tf.Tensor, epsilon: tf.Variable, theta: tf.Variable, opt_epsilon: tf.keras.optimizers.Optimizer, opt_theta: tf.keras.optimizers.Optimizer
+        self, s: tf.Tensor, epsilon: tf.Variable, theta: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape:
@@ -174,25 +191,50 @@ class optimizer_rpgd_me_tf(template_optimizer):
             traj_cost_mc_estimate = tf.reduce_mean(traj_cost[:, tf.newaxis, tf.newaxis, tf.newaxis], keepdims=True)
             traj_cost_total = traj_cost_mc_estimate + entropy_cost
         # retrieve gradient of cost w.r.t. input sequence
-        dc_de = tape.gradient(traj_cost, epsilon)  # Update single samples to minimze their cost
-        dc_de = tf.clip_by_norm(dc_de, self.gradmax_clip, axes=-1)
-        dc_dt = tape.gradient(traj_cost_total, theta)  # Update sampling distribution to minimize maximum entropy cost
-        dc_dt = tf.clip_by_norm(dc_dt, self.gradmax_clip, axes=-1)
+        dc_dT = tape.gradient(traj_cost_total, theta)
+        dc_dT_prc = tf.clip_by_norm(dc_dT, self.gradmax_clip, axes=-1)
         # use optimizer to apply gradients and retrieve next set of input sequences
-        opt_epsilon.apply_gradients(zip([dc_de], [epsilon]))
-        opt_theta.apply_gradients(zip([dc_dt], [theta]))
+        opt.apply_gradients(zip([dc_dT_prc], [theta]))
         # clip
         theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
-        return theta
+        return theta, traj_cost
 
     @CompileTF
-    def get_action(self, s: tf.Tensor, epsilon: tf.Variable, theta: tf.Variable):
+    def get_action(self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable):
         Q = self.zeta(theta, epsilon)
         # Rollout trajectories and retrieve cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
+
+        # # Unnecessary Part
+        # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
+        # elite_Q = tf.gather(Q, best_idx, axis=0)
+        # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
+        # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
+
+        # dist_mue = tf.concat(
+        #     [
+        #         dist_mue[:, 1:, :],
+        #         (self.action_low + self.action_high)
+        #         * 0.5
+        #         * tf.ones([1, 1, self.num_control_inputs]),
+        #     ],
+        #     axis=1,
+        # )
+
+        # # after all inner loops, clip std min, so enough is explored and shove all the values down by one for next control input
+        # dist_std = tf.clip_by_value(dist_std, self.sample_stdev, 10.0)
+        # dist_std = tf.concat(
+        #     [
+        #         dist_std[:, 1:, :],
+        #         self.sample_stdev
+        #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
+        #     ],
+        #     axis=1,
+        # )
+        # # End of unnecessary part
 
         # Warmstart for next iteration
         epsilon_new = tf.concat([epsilon[:, 1:, :], epsilon[:, -1:, :]], axis=1)
@@ -216,7 +258,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
-            _theta = self.grad_step(s, self.epsilon, self.theta, self.opt_epsilon, self.opt_theta)
+            _theta, traj_cost = self.grad_step(s, self.epsilon, self.theta, self.opt)
             self.theta.assign(_theta)
 
             # check for convergence of optimization
@@ -238,7 +280,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
             J,
             rollout_trajectory,
         ) = self.get_action(s, self.epsilon, self.theta)
-        self.epsilon.assign(epsilon_new)
+        self.epsilon = epsilon_new
         self.theta.assign(theta_new)
         
         self.u = tf.squeeze(self.zeta(self.theta, self.epsilon)[best_idx[0], 0, :])
@@ -254,94 +296,55 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
         # The algorithm not only warmstrats the initial guess, but also the intial optimizer weights
-        adam_weights_epsilon = self.opt_epsilon.get_weights()
-        adam_weights_theta = self.opt_theta.get_weights()
-        
+        adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             epsilon_res = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
             epsilon_keep = tf.gather(self.epsilon, best_idx, axis=0)  # resorting according to costs
-            self.epsilon.assign(tf.concat([epsilon_res, epsilon_keep], axis=0))
+            self.epsilon = tf.concat([epsilon_res, epsilon_keep], axis=0)
             self.trajectory_ages = tf.concat([
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx, axis=0),
             ], axis=0)
             # Updating the weights of adam:
-            if len(adam_weights_epsilon) > 0:
-                # For the trajectories which are kept, the weights are shifted for a warmstart
-                wk1 = tf.concat(
-                    [
-                        tf.gather(adam_weights_epsilon[1], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                    ],
-                    axis=1,
-                )
-                wk2 = tf.concat(
-                    [
-                        tf.gather(adam_weights_epsilon[2], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
-                    ],
-                    axis=1,
-                )
-                # For the new trajectories they are reset to 0
-                w1 = tf.zeros(
-                    [
-                        self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
-                        self.num_control_inputs,
-                    ]
-                )
-                w2 = tf.zeros(
-                    [
-                        self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
-                        self.num_control_inputs,
-                    ]
-                )
-                w1 = tf.concat([w1, wk1], axis=0)
-                w2 = tf.concat([w2, wk2], axis=0)
-                # Set weights
-                self.opt_epsilon.set_weights([adam_weights_epsilon[0], w1, w2])
-        else:
-            if len(adam_weights_epsilon) > 0:
+            if len(adam_weights) > 0:
                 # For the trajectories which are kept, the weights are shifted for a warmstart
                 w1 = tf.concat(
                     [
-                        adam_weights_epsilon[1][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        adam_weights[1][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
                 w2 = tf.concat(
                     [
-                        adam_weights_epsilon[2][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        adam_weights[2][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
                 # Set weights
-                self.opt_epsilon.set_weights([adam_weights_epsilon[0], w1, w2])
-        
-        if len(adam_weights_theta) > 0:
-            # For the trajectories which are kept, the weights are shifted for a warmstart
-            w1 = tf.concat(
-                [
-                    adam_weights_theta[1][:, 1:, :, :],
-                    tf.zeros([1, 1, *self.theta.shape[-2:]]),
-                ],
-                axis=1,
-            )
-            w2 = tf.concat(
-                [
-                    adam_weights_theta[2][:, 1:, :, :],
-                    tf.zeros([1, 1, *self.theta.shape[-2:]]),
-                ],
-                axis=1,
-            )
-            # Set weights
-            self.opt_theta.set_weights([adam_weights_theta[0], w1, w2])
+                self.opt.set_weights([adam_weights[0], w1, w2])
+        else:
+            if len(adam_weights) > 0:
+                # if it is not time to reset, all optimizer weights are shifted for a warmstart
+                w1 = tf.concat(
+                    [
+                        adam_weights[1][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
+                    ],
+                    axis=1,
+                )
+                w2 = tf.concat(
+                    [
+                        adam_weights[2][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
+                    ],
+                    axis=1,
+                )
+                self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
         self.count += 1
         return self.u
@@ -366,16 +369,10 @@ class optimizer_rpgd_me_tf(template_optimizer):
         self.alpha = tf.constant(self.maximum_entropy_alpha, dtype=tf.float32)
             
         # Sample new initial guesses for trajectories
-        initial_epsilon = self.sample_actions(self.rng, self.num_rollouts)
-        if hasattr(self, "epsilon"):
-            self.epsilon.assign(initial_epsilon)
-        else:
-            self.epsilon = tf.Variable(initial_epsilon, dtype=tf.float32)
+        self.epsilon = self.sample_actions(self.rng, self.num_rollouts)
         self.count = 0
 
         # Reset optimizer
-        adam_weights_epsilon = self.opt_epsilon.get_weights()
-        self.opt_epsilon.set_weights([tf.zeros_like(el) for el in adam_weights_epsilon])
-        adam_weights_theta = self.opt_theta.get_weights()
-        self.opt_theta.set_weights([tf.zeros_like(el) for el in adam_weights_theta])
+        adam_weights = self.opt.get_weights()
+        self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
