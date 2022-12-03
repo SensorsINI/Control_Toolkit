@@ -183,7 +183,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
         opt_theta.apply_gradients(zip([dc_dt], [theta]))
         # clip
         theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
-        return theta
+        return theta, epsilon
 
     @CompileTF
     def get_action(self, s: tf.Tensor, epsilon: tf.Variable, theta: tf.Variable):
@@ -216,7 +216,8 @@ class optimizer_rpgd_me_tf(template_optimizer):
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
-            _theta = self.grad_step(s, self.epsilon, self.theta, self.opt_epsilon, self.opt_theta)
+            _theta, _epsilon = self.grad_step(s, self.epsilon, self.theta, self.opt_epsilon, self.opt_theta)
+            self.epsilon.assign(_epsilon)
             self.theta.assign(_theta)
 
             # check for convergence of optimization
