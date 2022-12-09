@@ -290,14 +290,14 @@ class optimizer_rpgd_me_tf(template_optimizer):
                 w1 = tf.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
+                        self.Interpolator.number_of_interpolation_inducing_points,
                         self.num_control_inputs,
                     ]
                 )
                 w2 = tf.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
+                        self.Interpolator.number_of_interpolation_inducing_points,
                         self.num_control_inputs,
                     ]
                 )
