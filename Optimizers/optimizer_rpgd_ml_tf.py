@@ -195,34 +195,6 @@ class optimizer_rpgd_ml_tf(template_optimizer):
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
 
-        # # Unnecessary Part
-        # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
-        # elite_Q = tf.gather(Q, best_idx, axis=0)
-        # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
-        # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
-
-        # dist_mue = tf.concat(
-        #     [
-        #         dist_mue[:, 1:, :],
-        #         (self.action_low + self.action_high)
-        #         * 0.5
-        #         * tf.ones([1, 1, self.num_control_inputs]),
-        #     ],
-        #     axis=1,
-        # )
-
-        # # after all inner loops, clip std min, so enough is explored and shove all the values down by one for next control input
-        # dist_std = tf.clip_by_value(dist_std, self.sample_stdev, 10.0)
-        # dist_std = tf.concat(
-        #     [
-        #         dist_std[:, 1:, :],
-        #         self.sample_stdev
-        #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
-        #     ],
-        #     axis=1,
-        # )
-        # # End of unnecessary part
-
         # Warmstart for next iteration
         epsilon_shifted = tf.concat([epsilon[:, 1:, :], epsilon[:, -1:, :]], axis=1)
         theta_shifted = tf.concat([theta[:, 1:, :, :], theta[:, -1:, :, :]], axis=1)
@@ -248,17 +220,6 @@ class optimizer_rpgd_ml_tf(template_optimizer):
             self.Q.assign(self.zeta(self.theta, self.epsilon))
             _Q, traj_cost = self.grad_step(s, self.Q, self.opt)
             self.Q.assign(_Q)
-
-            # check for convergence of optimization
-            # if bool(
-            #     tf.reduce_mean(
-            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
-            #     )
-            #     < self.rtol
-            # ):
-            #     # assume that we have converged sufficiently
-            #     break
-            # prev_cost = tf.identity(traj_cost)
 
         # Maximum likelihood estimation of theta
         _theta = self.ML_estimation(self.epsilon, self.Q)
@@ -297,25 +258,58 @@ class optimizer_rpgd_ml_tf(template_optimizer):
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx, axis=0),
             ], axis=0)
-        
-        # Updating the weights of Adam:
-        if len(adam_weights) > 0:
-            # For the trajectories which are kept, the weights are shifted for a warmstart
-            w1 = tf.concat(
-                [
-                    adam_weights[1][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            w2 = tf.concat(
-                [
-                    adam_weights[2][:, 1:, :],
-                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
-                ],
-                axis=1,
-            )
-            self.opt.set_weights([adam_weights[0], w1, w2])
+            
+            if len(adam_weights) > 0:
+                wk1 = tf.concat(
+                    [
+                        tf.gather(adam_weights[1], best_idx, axis=0)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                wk2 = tf.concat(
+                    [
+                        tf.gather(adam_weights[2], best_idx, axis=0)[:, 1:, :],
+                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                # For the new trajectories they are reset to 0
+                w1 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.mpc_horizon,
+                        self.num_control_inputs,
+                    ]
+                )
+                w2 = tf.zeros(
+                    [
+                        self.num_rollouts - self.opt_keep_k,
+                        self.mpc_horizon,
+                        self.num_control_inputs,
+                    ]
+                )
+                w1 = tf.concat([w1, wk1], axis=0)
+                w2 = tf.concat([w2, wk2], axis=0)
+                self.opt.set_weights([adam_weights[0], w1, w2])
+        else:
+            if len(adam_weights) > 0:
+                # For the trajectories which are kept, the weights are shifted for a warmstart
+                w1 = tf.concat(
+                    [
+                        adam_weights[1][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                w2 = tf.concat(
+                    [
+                        adam_weights[2][:, 1:, :],
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                    ],
+                    axis=1,
+                )
+                self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
         self.count += 1
         return self.u
