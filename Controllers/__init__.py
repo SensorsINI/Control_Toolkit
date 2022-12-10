@@ -80,8 +80,12 @@ class template_controller(ABC):
         self.action_low, self.action_high = self.control_limits
         
         # Set properties like target positions on this controller
-        for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, new_value)
+        for p, v in initial_environment_attributes.items():
+            if not hasattr(v, "assign"):
+                data_type = getattr(v, "dtype", self.lib.float32)
+                data_type = self.lib.int32 if data_type == int else self.lib.float32
+                v = self.lib.to_variable(v, data_type)
+            setattr(self, p, v)
                 
         # Initialize control variable
         self.u = 0.0
@@ -105,9 +109,11 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            if hasattr(new_value, "dtype"):
-                self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, new_value.dtype))
-            else:
+            try:
+                # Assume the variable is an attribute type and assign
+                attr = getattr(self, property)
+                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            except:
                 setattr(self, property, new_value)
     
     @abstractmethod

@@ -42,7 +42,7 @@ class EnvironmentBatched:
         Union[np.ndarray, bool],
         dict,
     ]:
-        """Step function with new OpenAI Gym API (gym>=0.26)
+        """Step function with new OpenAI Gym API (gymnasium>=0.26)
 
         :param action: control input to system
         :type action: TensorType
@@ -64,7 +64,7 @@ class EnvironmentBatched:
         seed: "Optional[int]" = None,
         options: "Optional[dict]" = None,
     ) -> "Tuple[np.ndarray, dict]":
-        """Reset function with new OpenAI Gym API (gym>=0.26)
+        """Reset function with new OpenAI Gym API (gymnasium>=0.26)
 
         :param state: State to set environment to, set random if default (None) is specified
         :type state: np.ndarray, optional
