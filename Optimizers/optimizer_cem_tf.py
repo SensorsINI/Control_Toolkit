@@ -25,7 +25,7 @@ class optimizer_cem_tf(template_optimizer):
         mpc_horizon: int,
         cem_outer_it: int,
         cem_initial_action_stdev: float,
-        num_rollouts: int,
+        batch_size: int,
         cem_stdev_min: float,
         cem_best_k: int,
         warmup: bool,
@@ -40,7 +40,7 @@ class optimizer_cem_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -65,13 +65,13 @@ class optimizer_cem_tf(template_optimizer):
     @CompileTF
     def update_distribution(self, s: tf.Tensor, Q: tf.Tensor, traj_cost: tf.Tensor, rollout_trajectory: tf.Tensor, dist_mue: tf.Tensor, stdev: tf.Tensor, rng: tf.random.Generator):
         #generate random input sequence and clip to control limits
-        Q = tf.tile(dist_mue,(self.num_rollouts,1,1)) + tf.multiply(rng.normal(
-            shape=(self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32), stdev)
+        Q = tf.tile(dist_mue, (self.batch_size, 1, 1)) + tf.multiply(rng.normal(
+            shape=(self.batch_size, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32), stdev)
         Q = tf.clip_by_value(Q, self.action_low, self.action_high)
 
         #rollout the trajectories and get cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.mpc_horizon+1, self.num_states])
+        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.batch_size, self.mpc_horizon + 1, self.num_states])
 
         #sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
@@ -87,11 +87,11 @@ class optimizer_cem_tf(template_optimizer):
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
-        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
+        s = np.tile(s, tf.constant([self.batch_size, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
-        Q = tf.zeros((self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
-        rollout_trajectory = tf.zeros((self.num_rollouts, self.mpc_horizon+1, self.num_states), dtype=tf.float32)
-        traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
+        Q = tf.zeros((self.batch_size, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
+        rollout_trajectory = tf.zeros((self.batch_size, self.mpc_horizon + 1, self.num_states), dtype=tf.float32)
+        traj_cost = tf.zeros((self.batch_size), dtype=tf.float32)
 
         iterations = self.warmup_iterations if self.warmup and self.count == 0 else self.cem_outer_it
         for _ in range(0, iterations):

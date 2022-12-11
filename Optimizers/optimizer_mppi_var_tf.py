@@ -28,7 +28,7 @@ class optimizer_mppi_var_tf(template_optimizer):
         R: float,
         LBD_mc: float,
         mpc_horizon: int,
-        num_rollouts: int,
+        batch_size: int,
         NU_mc: float,
         SQRTRHOINV_mc: float,
         GAMMA: float,
@@ -47,7 +47,7 @@ class optimizer_mppi_var_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -94,7 +94,7 @@ class optimizer_mppi_var_tf(template_optimizer):
 
     #initialize the pertubations
     def inizialize_pertubation(self, random_gen, nuvec):
-        delta_u = random_gen.normal([self.num_rollouts, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32) * nuvec * self.SQRTRHODTINV
+        delta_u = random_gen.normal([self.batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32) * nuvec * self.SQRTRHODTINV
         delta_u = self.Interpolator.interpolate(delta_u)
         return delta_u
 
@@ -105,7 +105,7 @@ class optimizer_mppi_var_tf(template_optimizer):
             tape.watch(nuvec) #watch variances on tape
             delta_u = self.inizialize_pertubation(random_gen, nuvec) #initialize pertubations
             #build real input and clip, preserving gradient
-            u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1]) + delta_u
+            u_run = tf.tile(u_nom, [self.batch_size, 1, 1]) + delta_u
             u_run = tfp.math.clip_by_value_preserve_gradient(u_run, self.action_low, self.action_high)
             #rollout and cost
             rollout_trajectory = self.predictor.predict_tf(s, u_run)
@@ -131,7 +131,7 @@ class optimizer_mppi_var_tf(template_optimizer):
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
-        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
+        s = np.tile(s, tf.constant([self.batch_size, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         self.u, self.u_nom, new_nuvec, u_run, traj_cost = self.do_step(s, self.u_nom, self.rng, self.u, self.nuvec)
         

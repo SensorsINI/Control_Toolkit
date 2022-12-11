@@ -1,4 +1,6 @@
 from typing import Tuple
+
+from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
 import numpy as np
@@ -9,6 +11,7 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 from SI_Toolkit.Functions.TF.Compile import CompileAdaptive
 
+log = get_logger(__name__)
 
 class optimizer_mppi(template_optimizer):
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
@@ -26,7 +29,7 @@ class optimizer_mppi(template_optimizer):
         R: float,
         LBD: float,
         mpc_horizon: int,
-        num_rollouts: int,
+        batch_size: int,
         NU: float,
         SQRTRHOINV: float,
         GAMMA: float,
@@ -41,7 +44,7 @@ class optimizer_mppi(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -51,12 +54,12 @@ class optimizer_mppi(template_optimizer):
         
         
         # MPPI parameters
-        self.cc_weight = cc_weight
-        self.R = self.lib.to_tensor(R, self.lib.float32)
-        self.LBD = LBD
-        self.NU = self.lib.to_tensor(NU, self.lib.float32)
+        self.cc_weight = self.lib.to_variable(cc_weight, self.lib.float32)
+        self.R = self.lib.to_variable(R, self.lib.float32)
+        self.LBD = self.lib.to_variable(LBD, self.lib.float32)
+        self.NU = self.lib.to_variable(NU, self.lib.float32)
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
+        self.GAMMA = self.lib.to_variable(GAMMA, self.lib.float32)
 
         self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
@@ -66,6 +69,9 @@ class optimizer_mppi(template_optimizer):
             self.mppi_output = self.return_restricted
 
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
+
+        # here the predictor, cost computer, and optimizer are compiled to native instrutions by tensorflow graphs and XLA JIT
+        # before this, we copy all the required configuration to these objects so that they can be later updated during runtime.
 
         self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
@@ -100,7 +106,8 @@ class optimizer_mppi(template_optimizer):
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
         total_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev)
-        total_mppi_cost = total_cost + self.mppi_correction_cost(u, delta_u)
+        mppi_correction_cost =self.mppi_correction_cost(u, delta_u)
+        total_mppi_cost = total_cost +mppi_correction_cost
         return total_mppi_cost
 
     def reward_weighted_average(self, S, delta_u):
@@ -114,14 +121,14 @@ class optimizer_mppi(template_optimizer):
         stdev = self.SQRTRHODTINV
 
         delta_u = random_gen.normal(
-            [self.num_rollouts, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+            [self.batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
             dtype=self.lib.float32) * stdev
 
         delta_u = self.Interpolator.interpolate(delta_u)
 
         return delta_u
 
-    def _predict_and_cost(self, s, u_nom, random_gen, u_old, **config):
+    def _predict_and_cost(self, s, u_nom, random_gen, u_old):
         """ Predict dynamics and compute costs of trajectories
         TODO add params and return
 
@@ -129,11 +136,11 @@ class optimizer_mppi(template_optimizer):
 
         :returns: ??
         """
-        s = self.lib.tile(s, (self.num_rollouts, 1))
+        s = self.lib.tile(s, (self.batch_size, 1))
         # generate random input sequence and clip to control limits
         u_nom = self.lib.concat([u_nom[:, 1:, :], u_nom[:, -1:, :]], 1)
         delta_u = self.inizialize_pertubation(random_gen)
-        u_run = self.lib.tile(u_nom, (self.num_rollouts, 1, 1))+delta_u
+        u_run = self.lib.tile(u_nom, (self.batch_size, 1, 1)) + delta_u
         u_run = self.lib.clip(u_run, self.action_low, self.action_high)
         rollout_trajectory = self.predictor.predict_tf(s, u_run)
         traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
@@ -143,7 +150,7 @@ class optimizer_mppi(template_optimizer):
         return self.mppi_output(u, u_nom, rollout_trajectory, traj_cost, u_run)
 
     def update_internal_state_of_RNN(self, s, u_nom):
-        u_tiled = self.lib.tile(u_nom[:, :1, :], (self.num_rollouts, 1, 1))
+        u_tiled = self.lib.tile(u_nom[:, :1, :], (self.batch_size, 1, 1))
         self.predictor.update(s=s, Q0=u_tiled)
 
     def _predict_optimal_trajectory(self, s, u_nom):
@@ -160,7 +167,10 @@ class optimizer_mppi(template_optimizer):
 
         self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
         self.u = self.lib.to_numpy(self.lib.squeeze(self.u))
-        
+
+        # print(f'mean traj cost={np.mean(traj_cost.numpy()):.2f}') # todo debug
+
+
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.lib.to_numpy(u_run)
             self.logging_values["J_logged"] = self.lib.to_numpy(traj_cost)

@@ -5,6 +5,7 @@ import numpy as np
 
 from Control_Toolkit.Controllers import template_controller
 from SI_Toolkit.load_and_normalize import normalize_numpy_array
+from others.globals_and_utils import update_attributes
 
 try:
     from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
@@ -45,7 +46,7 @@ class controller_neural_imitator_pytorch(template_controller):
         self.net.eval()
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-        self.update_attributes(updated_attributes)
+        update_attributes(updated_attributes,self)
 
         net_input = s[
             ..., [STATE_INDICES.get(key) for key in self.net_info.inputs[:-1]]

@@ -13,11 +13,10 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
-from Control_Toolkit.Controllers.TrajectoryGenerator import TrajectoryGenerator
-from others.globals_and_utils import load_or_reload_config_if_modified
+from Control_Toolkit.Controllers.cartpole_trajectory_generator import cartpole_trajectory_generator
+from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 log = get_logger(__name__)
 
 
@@ -37,17 +36,17 @@ class controller_mpc(template_controller):
 
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
-        self.cost_function = CostFunctionWrapper()
-        self.cost_function.configure(self, cost_function_specification=cost_function_specification)
+        self.cost_function_wrapper = CostFunctionWrapper()
+        self.cost_function_wrapper.configure(self, cost_function_specification=cost_function_specification)
         
         # Create predictor
-        self.predictor = PredictorWrapper()
+        self.predictor_wrapper = PredictorWrapper()
         
         # MPC Controller always has an optimizer
         Optimizer = import_optimizer_by_name(optimizer_name)
         self.optimizer: template_optimizer = Optimizer(
-            predictor=self.predictor,
-            cost_function=self.cost_function,
+            predictor=self.predictor_wrapper,
+            cost_function=self.cost_function_wrapper,
             num_states=self.num_states,
             num_control_inputs=self.num_control_inputs,
             control_limits=self.control_limits,
@@ -59,8 +58,8 @@ class controller_mpc(template_controller):
         # Do this here. If the optimizer does not require any additional parameters, it will ignore them.
         self.optimizer.configure(dt=self.config_controller["dt"], predictor_specification=predictor_specification)
         
-        self.predictor.configure(
-            batch_size=self.optimizer.num_rollouts,
+        self.predictor_wrapper.configure(
+            batch_size=self.optimizer.batch_size,
             horizon=self.optimizer.mpc_horizon,
             dt=self.config_controller["dt"],
             computation_library=self.computation_library,
@@ -68,11 +67,7 @@ class controller_mpc(template_controller):
         )
 
         # make a target position trajectory generator
-        self.TrajectoryGeneratorInstance = TrajectoryGenerator(lib=self.computation_library, horizon=self.optimizer.mpc_horizon)
-        # set self.target_positions_vector to the correct vector tensor type for TF or whatever is doing the stepping
-        setattr(self, "target_positions_vector",
-                self.computation_library.to_variable(self.computation_library.zeros((self.optimizer.mpc_horizon,)),
-                                                     self.computation_library.float32))
+        self.target_trajectory_generator = cartpole_trajectory_generator(lib=self.computation_library, controller=self)
 
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
@@ -81,22 +76,30 @@ class controller_mpc(template_controller):
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-        log.debug(f'step time={time:.3f}s')
+        # log.debug(f'step time={time:.3f}s')
+
         # following is hack to get a target trajectory passed to tensorflow. The trajectory is passed in
         # as updated_attributes, and is transferred to tensorflow by the update_attributes call
-        target_positions_vector = self.TrajectoryGeneratorInstance.step(time)
-        updated_attributes['target_positions_vector'] = target_positions_vector
-        self.update_attributes(updated_attributes)
-        for c in ('config_controllers.yml','config_cost_functions.yml', 'config_optimizers.yml'):
-            (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',c))
+        new_target_trajectory = self.target_trajectory_generator.step(time=time, horizon=self.optimizer.mpc_horizon)
+        updated_attributes['target_trajectory'] = new_target_trajectory
+        update_attributes(updated_attributes,self)
+
+        # now we fill this dict with config file changes if there are any and update attributes in the controller, the cost function, and the optimizer
+        updated_attributes.clear()
+        # detect any changes in config scalar values and pass to this controller or the cost function or optimizer
+        # note that the cost function that has its attributes updated is the enclosed cost function of the wrapper!
+        for (objs,config) in (((self,),'config_controllers.yml'), ((self.cost_function_wrapper.cost_function,), 'config_cost_functions.yml'), ((self.optimizer,self.predictor_wrapper.predictor), 'config_optimizers.yml')):
+            (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',config))
             # process changes to configs using new returned change list
             if not changes is None:
-                for k,v in changes:
+                for k,v in changes.items():
                     if isinstance(v, (int, float)):
                         updated_attributes[k]=v
-                self.update_attributes(updated_attributes)
-                log.info(f'updated config {c} with scalar updated_attributes {updated_attributes}')
+                        for o in objs: # for each object in objs, update its attributes
+                            update_attributes(updated_attributes,o)
+                log.debug(f'updated {objs} with scalar updated_attributes {updated_attributes}')
 
+        # log.info(f'targetposition={self.target_position}, equil={self.target_equilibrium}')
         u = self.optimizer.step(s, time)
         self.update_logs(self.optimizer.logging_values)
         return u

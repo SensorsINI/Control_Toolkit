@@ -9,35 +9,32 @@ from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
-from others.globals_and_utils import load_or_reload_config_if_modified
+from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
 log=get_logger(__name__)
-
-# cost_function config
-(cost_function_config,_) = load_or_reload_config_if_modified(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"))
-
 
 class CostFunctionWrapper:
     def __init__(self):
         self.cost_function = None
-        self.cost_function_name_default: str = cost_function_config[
-            "cost_function_name_default"
-        ]
+        # cost_function config
+        (self.cost_function_config, _) = load_or_reload_config_if_modified(
+            os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"))
+
+        self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
+        self.lib = None # filled by configure(), needed to update TF variables
+
         log.info(f'default cost function name is {self.cost_function_name_default}')
 
     def configure(
         self,
         controller: template_controller,
         cost_function_specification=None,
-        config:dict=None
     ):
         """
         Configures the cost function. TODO This lazy constructor is needed why?
 
         :param controller: the controller that uses this cost function
-        :param cost_function_specification: the string name of the cost function class, to construct the class
-        :param config: the config dict() that holds all the configuration values
-
+        :param cost_function_specification: the string name of the cost function class, to construct the class and find the config values in config_cost_functions.yml
         """
         environment_name = controller.environment_name
         computation_library = controller.computation_library  # Use library dictated by controller
@@ -53,6 +50,11 @@ class CostFunctionWrapper:
         self.cost_function: cost_function_base = getattr(
             cost_function_module, self.cost_function_name
         )(controller, computation_library)
+
+        self.lib=self.cost_function.lib
+
+        config=self.cost_function_config['CartPole'][self.cost_function_name] # todo hardcoded 'CartPole' has to go, not sure how to determine it, maybe from module folder?
+        update_attributes(config, self.cost_function)
         log.info(f'configured controller {controller.__class__} with cost function {self.cost_function.__class__}')
 
     def update_cost_function_name_from_specification(

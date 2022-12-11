@@ -9,7 +9,8 @@ import yaml
 import os
 
 from Control_Toolkit.Controllers import template_controller
-from others.globals_and_utils import create_rng
+from others.globals_and_utils import create_rng, update_attributes
+
 
 # TODO: You can load and access config files here, like this:
 # config = yaml.load(open("config.yml", "r"), Loader=yaml.FullLoader)
@@ -35,7 +36,7 @@ class controller_barebone(template_controller):
 
         # The controller has to adapt when environment-related attributes such as target positions change
         # Updated targets etc. are passed as a dictionary updated_attributes
-        self.update_attributes(updated_attributes)  # After this call, updated attributes are available as self.<<attribute_name>>
+        update_attributes(updated_attributes,self)  # After this call, updated attributes are available as self.<<attribute_name>>
         
         # TODO: Implement your controller here
         # Examples:

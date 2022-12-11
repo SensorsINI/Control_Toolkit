@@ -1,3 +1,5 @@
+from typing import Optional
+
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.others.globals_and_utils import get_logger
@@ -6,6 +8,8 @@ logger = get_logger(__name__)
 
 
 class cost_function_base:
+    """ Base cost function for all MPC systems
+    """
     # Default: Class supports all libs to compute costs
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
     
@@ -18,8 +22,9 @@ class cost_function_base:
 
          """
 
-        self.controller = controller
-        self.config=config
+        self.lib:Optional[ComputationLibrary] = None
+        self.controller:template_controller = controller
+        self.config:dict=config
         self.set_computation_library(ComputationLib)
         logger.info(f'constructed {self} with controller {controller} computation library {ComputationLib} and config {config}')
     
@@ -74,3 +79,4 @@ class cost_function_base:
         if not ComputationLib in self.supported_computation_libraries:
             raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
         self.lib = ComputationLib
+

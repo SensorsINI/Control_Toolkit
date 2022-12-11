@@ -11,7 +11,7 @@ import torch
 from numpy.random import SFC64, Generator
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
-LOGGING_LEVEL = logging.INFO
+LOGGING_LEVEL = logging.DEBUG # usually INFO is good
 class CustomFormatter(logging.Formatter):
     """Logging Formatter to add colors and count warning / errors"""
     # see https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output/7995762#7995762
