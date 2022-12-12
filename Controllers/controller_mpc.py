@@ -1,5 +1,7 @@
 import os
 from typing import Optional
+
+from GUI import gui_default_params
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
@@ -78,12 +80,6 @@ class controller_mpc(template_controller):
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         # log.debug(f'step time={time:.3f}s')
 
-        # following is hack to get a target trajectory passed to tensorflow. The trajectory is passed in
-        # as updated_attributes, and is transferred to tensorflow by the update_attributes call
-        new_target_trajectory = self.target_trajectory_generator.step(time=time, horizon=self.optimizer.mpc_horizon)
-        updated_attributes['target_trajectory'] = new_target_trajectory
-        update_attributes(updated_attributes,self)
-
         # now we fill this dict with config file changes if there are any and update attributes in the controller, the cost function, and the optimizer
         updated_attributes.clear()
         # detect any changes in config scalar values and pass to this controller or the cost function or optimizer
@@ -98,6 +94,12 @@ class controller_mpc(template_controller):
                         for o in objs: # for each object in objs, update its attributes
                             update_attributes(updated_attributes,o)
                 log.debug(f'updated {objs} with scalar updated_attributes {updated_attributes}')
+
+        # following gets target_position, target_equilibrium, and target_trajectory passed to tensorflow. The trajectory is passed in
+        # as updated_attributes, and is transferred to tensorflow by the update_attributes call
+        new_target_trajectory = self.target_trajectory_generator.step(time=time, horizon=self.optimizer.mpc_horizon, dt=gui_default_params.controller_update_interval)
+        updated_attributes['target_trajectory'] = new_target_trajectory
+        update_attributes(updated_attributes,self)
 
         # log.info(f'targetposition={self.target_position}, equil={self.target_equilibrium}')
         u = self.optimizer.step(s, time)
