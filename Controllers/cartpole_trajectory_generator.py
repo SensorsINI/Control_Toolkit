@@ -23,23 +23,24 @@ class cartpole_trajectory_generator:
         self.lib = lib
         self.controller:template_controller=controller
 
-    def step(self, time: float, horizon: int, dt:float) -> TensorType:
+    def step(self, time: float, horizon: int, dt:float, state:np.ndarray) -> TensorType:
         """ Computes the desired future state trajectory at this time.
 
         :param time: the scalar time in seconds
         :param horizon: the number of horizon steps
         :param dt: the timestep in seconds
+        :param state: the current state of the cartpole
 
         :returns: the target state trajectory of cartpole.
-        It should be a Tensor with NaN as at least first entries for don't care states, and otherwise the desired state values.
+        It should be a Tensor with NaN as at least first entries for don't care states, and otherwise the desired future state values.
 
         """
 
         traj=np.zeros((state_utilities.NUM_STATES, horizon)) # must be numpy here because tensor is immutable
         traj[:]=self.lib.nan # set all states undetermined
 
-        # cost_function=self.controller.cost_function_wrapper.cost_function # use cost_function to access attributes (fields) set in config_cost_functions.yml
-        # controller=self.controller # use controller to access attributes set in config_optimizers
+        cost_function=self.controller.cost_function_wrapper.cost_function # use cost_function to access attributes (fields) set in config_cost_functions.yml
+        controller=self.controller # use controller to access attributes set in config_optimizers
 
         policy=self.controller.cost_function_wrapper.cost_function.policy
         if policy is None:
@@ -52,8 +53,14 @@ class cartpole_trajectory_generator:
             traj[state_utilities.POSITION_IDX] = gui_target_position
             # traj[state_utilities.ANGLE_COS_IDX, :] = gui_target_equilibrium
             # traj[state_utilities.ANGLE_SIN_IDX, :] = 0
-            # traj[state_utilities.ANGLE_IDX, :] = self.lib.pi * gui_target_equilibrium
-            traj[state_utilities.ANGLED_IDX, :] = 1000*gui_target_equilibrium # 1000 rad/s is arbitrary, not sure if this is best target
+            endtime=horizon*dt
+            times=np.linspace(0,endtime,num=horizon)
+            s_per_rev_target=cost_function.spin_rev_period_sec
+            rad_per_s_target=2*np.pi/s_per_rev_target
+            rad_per_dt=rad_per_s_target*dt
+            current_angle=state[state_utilities.ANGLE_IDX]
+            traj[state_utilities.ANGLE_IDX, :] = current_angle+gui_target_equilibrium*times*rad_per_dt
+            # traj[state_utilities.ANGLED_IDX, :] = rad_per_s_target*gui_target_equilibrium # 1000 rad/s is arbitrary, not sure if this is best target
             # traj[state_utilities.POSITIOND_IDX, :] = 0
         elif policy == 'balance': # balance upright or down at desired cart position
             traj[state_utilities.POSITION_IDX] = gui_target_position

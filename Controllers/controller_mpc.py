@@ -96,7 +96,10 @@ class controller_mpc(template_controller):
 
         # following gets target_position, target_equilibrium, and target_trajectory passed to tensorflow. The trajectory is passed in
         # as updated_attributes, and is transferred to tensorflow by the update_attributes call
-        new_target_trajectory = self.target_trajectory_generator.step(time=time, horizon=self.optimizer.mpc_horizon, dt=gui_default_params.controller_update_interval)
+        new_target_trajectory = self.target_trajectory_generator.step(time=time,
+                                                                      horizon=self.optimizer.mpc_horizon,
+                                                                      dt=gui_default_params.controller_update_interval,
+                                                                      state=s)
         updated_attributes['target_trajectory'] = new_target_trajectory
         update_attributes(updated_attributes,self)
 
