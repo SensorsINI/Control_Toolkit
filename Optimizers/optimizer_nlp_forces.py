@@ -45,8 +45,8 @@ class optimizer_nlp_forces(template_optimizer):
             action_max: list[float],
             state_max: list[float],
             optimize_over: list[int],
-            q: float,
-            r: float
+            q: list[float],
+            r: list[float]
     ):
         super().__init__(
             predictor=predictor,
@@ -114,19 +114,18 @@ class optimizer_nlp_forces(template_optimizer):
         model.nh = 0  # number of inequality constraint functions
         model.npar = 1  # number of runtime parameters
 
-        Tf = 2  # final time
+        Tf = 2.0  # final time
 
-        Q = np.diag([q] * self.nx)
-        R = np.diag([r] * self.nu)
-        sqrt_weights = [np.sqrt(p) for p in [r] * nu + [q] * nx]
+        sqrt_weights = [np.sqrt(p) for p in r + q]
 
-        # model.objective = lambda z, p: (sqrt_weights*z).T @ z
+        # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
 
+        # model.LSobjective = lambda z, p: np.array(sqrt_weights) * casadi.fmin(2*np.pi -z,z)
         model.LSobjective = lambda z, p: np.array(sqrt_weights) * z
         model.continuous_dynamics = self.dynamics       #continuous_dynamics : (s, u) --> ds/dx
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
-        integrator_stepsize = Tf / (model.N - 1)
+        self.integrator_stepsize = Tf / (model.N - 1)
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -144,30 +143,36 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Define solver options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 200                                 # Maximum number of iterations
-        codeoptions.printlevel = 2                              # Use printlevel = 2 to print progress (but not for timings)
-        codeoptions.optlevel = 3                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
-        codeoptions.nlp.integrator.Ts = integrator_stepsize
+        codeoptions.maxit = 200                                  # Maximum number of iterations
+        codeoptions.printlevel = 1                              # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.optlevel = 2                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
+        codeoptions.nlp.integrator.Ts = self.integrator_stepsize
         codeoptions.nlp.integrator.nodes = 5
         codeoptions.nlp.integrator.type = 'ERK4'
-        codeoptions.solvemethod = 'SQP_NLP'
-        # codeoptions.solvemethod = 'PDIP'
+        # codeoptions.nlp.integrator.type = 'BackwardEuler'
+        # codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.solvemethod = 'PDIP_NLP'
         # codeoptions.solvemethod = 'ADMM'
 
-        codeoptions.sqp_nlp.rti = 1
-        codeoptions.sqp_nlp.maxSQPit = 1
-        codeoptions.sqp_nlp.reg_hessian = 5e-9
+        codeoptions.ADMMrho = 6
+        codeoptions.ADMMfactorize = 1
+        codeoptions.sqp_nlp.rti = 10
+        codeoptions.sqp_nlp.maxSQPit = 100
+        codeoptions.sqp_nlp.reg_hessian = 5e-2
+        codeoptions.sqp_nlp.qpinit = 0                             # 0 for cold start, 1 for centered start
+
         codeoptions.nlp.hessian_approximation = 'gauss-newton'
         # codeoptions.nlp.hessian_approximation = 'bfgs'
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
         codeoptions.overwrite = 1
-        # codeoptions.nlp.TolStat = 1E-3                          # inf norm tol.on stationarity
-        # codeoptions.nlp.TolEq = 1E-3                            # tol. on equality constraints
-        # codeoptions.nlp.TolIneq = 1E-3                          # tol.on inequality constraints
-        # codeoptions.nlp.TolComp = 1E-3                          # tol.on complementarity
-
+        codeoptions.nlp.TolStat = 1E-1                          # inf norm tol.on stationarity
+        codeoptions.nlp.TolEq = 1E-1                            # tol. on equality constraints
+        codeoptions.nlp.TolIneq = 1E-3                          # tol.on inequality constraints
+        codeoptions.nlp.TolComp = 1E-3                          # tol.on complementarity
+        codeoptions.mu0 = 10                                    #complementary slackness
+        codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
 
         # try:
         #     with open('model.pickle', 'rb') as handle:
@@ -187,22 +192,39 @@ class optimizer_nlp_forces(template_optimizer):
             self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
             pass
 
-
+    def rungekutta4(self, x, u, dt):
+        k1 = self.model.continuous_dynamics(x, u, 0)
+        k2 = self.model.continuous_dynamics(x + dt / 2 * k1, u, 0)
+        k3 = self.model.continuous_dynamics(x + dt / 2 * k2, u, 0)
+        k4 = self.model.continuous_dynamics(x + dt * k3, u, 0)
+        new_x = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        new_x = np.array([float(new_x[0]), float(new_x[1])])
+        return new_x
 
     def step(self, s: np.ndarray, time=None):
         s = s[self.optimize_over].astype(np.float32)
-        u0 = 0.1
-        s = np.hstack((np.ones((1,))*u0, s))                              # add initial guess for input 0
-        x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
+        nx = len(s)
+        u0 = 0.0
+        x0 = np.hstack((np.ones((1,))*u0, s))                              # add initial guess for input 0
+
+        dt = self.integrator_stepsize
+        for i in range(self.model.N-1):
+            new_x = self.rungekutta4(x0[-nx:], u0, dt)
+            x0 = np.hstack((x0, u0, new_x))
+
+
+
+        # x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
         problem = {"x0": x0}
         problem["all_parameters"] = np.ones((self.model.N, 1))*0.7
-        # problem["xinit"] = s
+        problem["xinit"] = s
         self.test_solver(problem)
         output, exitflag, info = self.solver.solve(problem)
         u = output["x01"][0:self.nu]
         # sD = self.model.continuous_dynamics(s, u)
         self.rsnorms.append(info.rsnorm)
         self.res_eqs.append(info.res_eq)
+        self.previous_exitflag = exitflag
         return u.astype(np.float32)
 
     def test_solver(self, problem):
