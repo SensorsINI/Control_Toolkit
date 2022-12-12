@@ -81,7 +81,6 @@ class controller_mpc(template_controller):
         # log.debug(f'step time={time:.3f}s')
 
         # now we fill this dict with config file changes if there are any and update attributes in the controller, the cost function, and the optimizer
-        updated_attributes.clear()
         # detect any changes in config scalar values and pass to this controller or the cost function or optimizer
         # note that the cost function that has its attributes updated is the enclosed cost function of the wrapper!
         for (objs,config) in (((self,),'config_controllers.yml'), ((self.cost_function_wrapper.cost_function,), 'config_cost_functions.yml'), ((self.optimizer,self.predictor_wrapper.predictor), 'config_optimizers.yml')):

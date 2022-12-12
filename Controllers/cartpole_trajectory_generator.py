@@ -38,42 +38,60 @@ class cartpole_trajectory_generator:
         traj=np.zeros((state_utilities.NUM_STATES, horizon)) # must be numpy here because tensor is immutable
         traj[:]=self.lib.nan # set all states undetermined
 
-        cost_function=self.controller.cost_function_wrapper.cost_function # use cost_function to access attributes (fields) set in config_cost_functions.yml
-        controller=self.controller # use controller to access attributes set in config_optimizers
+        # cost_function=self.controller.cost_function_wrapper.cost_function # use cost_function to access attributes (fields) set in config_cost_functions.yml
+        # controller=self.controller # use controller to access attributes set in config_optimizers
 
-        policy=cost_function.policy
+        policy=self.controller.cost_function_wrapper.cost_function.policy
         if policy is None:
-            raise RuntimeError(f'set policy in config_cost_functions.yml')
+            raise RuntimeError(f'set policy in config_self.controller.cost_function_wrapper.cost_functions.yml')
+
+        gui_target_position=self.controller.target_position # GUI slider position
+        gui_target_equilibrium=self.controller.target_equilibrium # GUI switch +1 or -1 to make pole target up or down position
 
         if policy == 'spin': # spin pole CW or CCW depending on target_equilibrium up or down
-            traj[state_utilities.POSITION_IDX] = controller.target_position
-            # traj[state_utilities.ANGLE_COS_IDX, :] = controller.target_equilibrium
+            traj[state_utilities.POSITION_IDX] = gui_target_position
+            # traj[state_utilities.ANGLE_COS_IDX, :] = gui_target_equilibrium
             # traj[state_utilities.ANGLE_SIN_IDX, :] = 0
-            # traj[state_utilities.ANGLE_IDX, :] = self.lib.pi * controller.target_equilibrium
-            traj[state_utilities.ANGLED_IDX, :] = 1000*controller.target_equilibrium # 1000 rad/s is arbitrary, not sure if this is best target
+            # traj[state_utilities.ANGLE_IDX, :] = self.lib.pi * gui_target_equilibrium
+            traj[state_utilities.ANGLED_IDX, :] = 1000*gui_target_equilibrium # 1000 rad/s is arbitrary, not sure if this is best target
             # traj[state_utilities.POSITIOND_IDX, :] = 0
         elif policy == 'balance': # balance upright or down at desired cart position
-            traj[state_utilities.POSITION_IDX] = controller.target_position
-            target_angle=self.lib.pi * (1-controller.target_equilibrium)/2 # either 0 for up and pi for down
+            traj[state_utilities.POSITION_IDX] = gui_target_position
+            target_angle=self.lib.pi * (1-gui_target_equilibrium)/2 # either 0 for up and pi for down
             traj[state_utilities.ANGLE_COS_IDX, :] = np.cos(target_angle)
             traj[state_utilities.ANGLE_SIN_IDX, :] = np.sin(target_angle)
             traj[state_utilities.ANGLE_IDX, :] = target_angle
             traj[state_utilities.ANGLED_IDX, :] = 0
             traj[state_utilities.POSITIOND_IDX, :] = 0
         elif policy == 'shimmy': # cart follows a desired cart position shimmy while keeping pole up or down
-            shimmy_period=cost_function.shimmy_period # seconds
-            shimmy_amp=cost_function.shimmy_amp # meters
+            per=self.controller.cost_function_wrapper.cost_function.shimmy_per # seconds
+            amp=self.controller.cost_function_wrapper.cost_function.shimmy_amp # meters
             endtime=time+horizon*dt
             times=np.linspace(time,endtime,num=horizon)
-            shimmy=shimmy_amp*np.sin((2*np.pi/shimmy_period)*times)
-            shimmyd=np.gradient(shimmy,dt)
-            traj[state_utilities.POSITION_IDX] = controller.target_position+shimmy
-            target_angle=self.lib.pi * (1-controller.target_equilibrium)/2 # either 0 for up and pi for down
+            cartpos=amp*np.sin((2*np.pi/per)*times)
+            cartvel=np.gradient(cartpos,dt)
+            traj[state_utilities.POSITION_IDX] = gui_target_position+cartpos
+            target_angle=self.lib.pi * (1-gui_target_equilibrium)/2 # either 0 for up and pi for down
             traj[state_utilities.ANGLE_COS_IDX, :] = np.cos(target_angle)
             traj[state_utilities.ANGLE_SIN_IDX, :] = np.sin(target_angle)
             traj[state_utilities.ANGLE_IDX, :] = target_angle
             # traj[state_utilities.ANGLED_IDX, :] = 0
-            traj[state_utilities.POSITIOND_IDX, :] = shimmyd
+            traj[state_utilities.POSITIOND_IDX, :] = cartvel
+        elif policy == 'cartonly': # cart follows the trajectory, pole ignored
+            per=self.controller.cost_function_wrapper.cost_function.cartonly_per # seconds
+            amp=self.controller.cost_function_wrapper.cost_function.cartonly_amp # meters
+            endtime=time+horizon*dt
+            times=np.linspace(time,endtime,num=horizon)
+            from scipy.signal import sawtooth
+            cartpos=amp*sawtooth((2*np.pi/per)*times, width=.5) # .5 makes triangle https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.sawtooth.html
+            cartvel=np.gradient(cartpos,dt)
+            traj[state_utilities.POSITION_IDX] = gui_target_position+cartpos
+            # target_angle=self.lib.pi * (1-gui_target_equilibrium)/2 # either 0 for up and pi for down
+            # traj[state_utilities.ANGLE_COS_IDX, :] = np.cos(target_angle)
+            # traj[state_utilities.ANGLE_SIN_IDX, :] = np.sin(target_angle)
+            # traj[state_utilities.ANGLE_IDX, :] = target_angle
+            # traj[state_utilities.ANGLED_IDX, :] = 0
+            traj[state_utilities.POSITIOND_IDX, :] = cartvel
         else:
             log.error(f'cost policy "{policy}" is unknown')
 
