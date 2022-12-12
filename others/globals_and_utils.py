@@ -24,13 +24,13 @@ class CustomFormatter(logging.Formatter):
     bold_red = "\x1b[31;1m"
     reset = "\x1b[0m"
     # File "{file}", line {max(line, 1)}'.replace("\\", "/")
-    format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s (File "%(pathname)s", line %(lineno)d, in %(funcName)s)'
+    format = '[%(levelname)s]: %(asctime)s - %(name)s - %(message)s (File "%(pathname)s", line %(lineno)d, in %(funcName)s)'
 
     FORMATS = {
         logging.DEBUG: grey + format + reset,
         logging.INFO: cyan + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
+        logging.WARNING: red + format + reset,
+        logging.ERROR: bold_red + format + reset,
         logging.CRITICAL: bold_red + format + reset
     }
 

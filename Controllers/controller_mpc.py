@@ -93,7 +93,7 @@ class controller_mpc(template_controller):
             # process changes to configs using new returned change list
             if not changes is None:
                 for k,v in changes.items():
-                    if isinstance(v, (int, float)):
+                    if isinstance(v, (int, float, str)):
                         updated_attributes[k]=v
                         for o in objs: # for each object in objs, update its attributes
                             update_attributes(updated_attributes,o)
