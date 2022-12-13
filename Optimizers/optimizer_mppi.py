@@ -29,10 +29,49 @@ class optimizer_mppi(template_optimizer):
         num_rollouts: int,
         NU: float,
         SQRTRHOINV: float,
-        GAMMA: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
     ):
+        """Instantiate MPPI optimizer, see
+        Williams et al. 2017, 'Model Predictive Path Integral Control: From Theory to Parallel Computation'
+
+        :param predictor: Predictor to compute trajectory rollouts with. Instance of a wrapper class, which at this time can have unspecified parameters.
+        :type predictor: PredictorWrapper
+        :param cost_function: Instance containing the objective functions to minimize.
+        :type cost_function: CostFunctionWrapper
+        :param num_states: Length of the system's state vector.
+        :type num_states: int
+        :param num_control_inputs: Length of the system's input vector.
+        :type num_control_inputs: int
+        :param control_limits: Bounds on the input, one array each for lower/upper.
+        :type control_limits: Tuple[np.ndarray, np.ndarray]
+        :param computation_library: The numerical package to use for optimization. One of our custom 'computation library' classes.
+        :type computation_library: type[ComputationLibrary]
+        :param seed: Random seed for reproducibility. Manage the seed lifecycle and (re-)use outside of this class.
+        :type seed: int
+        :param cc_weight: Positive scalar weight placed on the MPPI-specific quadratic control cost term.
+        :type cc_weight: float
+        :param R: Weight of quadratic cost term.
+        :type R: float
+        :param LBD: Positive parameter defining greediness of the optimizer in the weighted sum of rollouts. 
+        If lambda is strongly positive, all trajectories get roughly the same weight even if one has much lower cost than the other. 
+        As lambda approaches 0, the relative importance of the most low-cost trajectories when determining the weighted average increases.
+        :type LBD: float
+        :param mpc_horizon: Length of the MPC horizon in steps. dt is implicitly given by the predictor provided.
+        :type mpc_horizon: int
+        :param num_rollouts: Number of parallel rollouts. Generally, MPPI's control performance improves when this value increases. Typical range is 5e2-5e3.
+        :type num_rollouts: int
+        :param NU: Adjustment of exploration variance. Increase to increase input exploration.
+        :type NU: float
+        :param SQRTRHOINV: Positive scalar. Has an effect on the sampling variance. An increase results in wider sampling of inputs around the nominal plan.
+        :type SQRTRHOINV: float
+        :param period_interpolation_inducing_points: Positive distance in number of steps between two inducing points along the MPC horizon.
+        If set to 1, this means independent sampling of each input.
+        If larger than 1, inputs between inducing points are obtained by linear interpolation.
+        :type period_interpolation_inducing_points: int
+        :param optimizer_logging: Whether to store rollouts, evaluated trajectory costs, etc. in a 'logging_values' variable. Consumes extra memory if True.
+        :type optimizer_logging: bool
+        """
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
@@ -56,7 +95,6 @@ class optimizer_mppi(template_optimizer):
         self.LBD = LBD
         self.NU = self.lib.to_tensor(NU, self.lib.float32)
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
 
         self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
