@@ -29,7 +29,6 @@ class optimizer_mppi(template_optimizer):
         num_rollouts: int,
         NU: float,
         SQRTRHOINV: float,
-        GAMMA: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
     ):
@@ -56,7 +55,6 @@ class optimizer_mppi(template_optimizer):
         self.LBD = LBD
         self.NU = self.lib.to_tensor(NU, self.lib.float32)
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
 
         self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
