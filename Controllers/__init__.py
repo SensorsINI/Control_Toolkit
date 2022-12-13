@@ -81,7 +81,7 @@ class template_controller(ABC):
         
         # Set properties like target positions on this controller
         for p, v in initial_environment_attributes.items():
-            if not hasattr(v, "assign"):
+            if type(v) in {np.ndarray, float, int, bool}:
                 data_type = getattr(v, "dtype", self.lib.float32)
                 data_type = self.lib.int32 if data_type == int else self.lib.float32
                 v = self.lib.to_variable(v, data_type)
