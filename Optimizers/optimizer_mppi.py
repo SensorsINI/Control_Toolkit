@@ -14,6 +14,17 @@ from SI_Toolkit.Functions.TF.Compile import CompileAdaptive
 log = get_logger(__name__)
 
 class optimizer_mppi(template_optimizer):
+    """ Model Predictive Path Integral optimizer, based on
+
+    Drews, Paul, Grady Williams, Brian Goldfain, Evangelos A. Theodorou, and James M. Rehg. 2017. “Aggressive Deep Driving: Model Predictive Control with a CNN Cost Model.” arXiv [cs.RO]. arXiv. http://arxiv.org/abs/1707.05303.
+
+    Williams, G., P. Drews, B. Goldfain, J. M. Rehg, and E. A. Theodorou. 2016. “Aggressive Driving with Model Predictive Path Integral Control.” In 2016 IEEE International Conference on Robotics and Automation (ICRA), 1433–40. https://doi.org/10.1109/ICRA.2016.7487277.
+
+    Williams, Grady, Andrew Aldrich, and Evangelos A. Theodorou. 2017. “Model Predictive Path Integral Control: From Theory to Parallel Computation.” Journal of Guidance, Control, and Dynamics: A Publication of the American Institute of Aeronautics and Astronautics Devoted to the Technology of Dynamics and Control 40 (2): 344–57. https://doi.org/10.2514/1.G001921.
+
+    Williams, Grady, Eric Rombokas, and Tom Daniel. 2015. “GPU Based Path Integral Control with Learned Dynamics.” arXiv [cs.RO]. arXiv. http://arxiv.org/abs/1503.00330.
+
+    """
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
     
     def __init__(
