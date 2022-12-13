@@ -6,7 +6,7 @@ import torch
 
 from SI_Toolkit.computation_library import ComputationLibrary, TensorType
 from Control_Toolkit.others.globals_and_utils import get_logger
-from gym.spaces import Box
+from gymnasium.spaces import Box
 
 log = get_logger(__name__)
 
