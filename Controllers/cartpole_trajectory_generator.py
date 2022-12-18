@@ -66,8 +66,8 @@ class cartpole_trajectory_generator:
             traj[state_utilities.POSITION_IDX] = gui_target_position
             target_angle=self.lib.pi * (1-gui_target_equilibrium)/2 # either 0 for up and pi for down
             traj[state_utilities.ANGLE_COS_IDX, :] = np.cos(target_angle)
-            traj[state_utilities.ANGLE_SIN_IDX, :] = np.sin(target_angle)
-            traj[state_utilities.ANGLE_IDX, :] = target_angle
+            # traj[state_utilities.ANGLE_SIN_IDX, :] = np.sin(target_angle)
+            # traj[state_utilities.ANGLE_IDX, :] = target_angle
             traj[state_utilities.ANGLED_IDX, :] = 0
             traj[state_utilities.POSITIOND_IDX, :] = 0
         elif policy == 'shimmy': # cart follows a desired cart position shimmy while keeping pole up or down
@@ -90,7 +90,7 @@ class cartpole_trajectory_generator:
             endtime=time+horizon*dt
             times=np.linspace(time,endtime,num=horizon)
             from scipy.signal import sawtooth
-            cartpos=amp*sawtooth((2*np.pi/per)*times, width=.5) # .5 makes triangle https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.sawtooth.html
+            cartpos=amp*sawtooth((2*np.pi/per)*times, width=cost_function.cartonly_duty_cycle) # width=.5 makes triangle https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.sawtooth.html
             cartvel=np.gradient(cartpos,dt)
             traj[state_utilities.POSITION_IDX] = gui_target_position+cartpos
             # target_angle=self.lib.pi * (1-gui_target_equilibrium)/2 # either 0 for up and pi for down
