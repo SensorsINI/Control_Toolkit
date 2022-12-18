@@ -8,9 +8,8 @@ from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
-from others.globals_and_utils import load_or_reload_config_if_modified
+from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 logger = get_logger(__name__)
 
 """
@@ -126,7 +125,7 @@ class template_controller(ABC):
         """
         ### Any computations in order to retrieve the current control. Such as:
         ## If the environment's target positions etc. change, copy the new attributes over to this controller so the cost function knows about it:
-        # self.update_attributes(updated_attributes)
+        # update_attributes(updated_attributes,self)
         ## Use some sort of optimization procedure to get your control, e.g.
         # u = self.optimizer.step(s, time)
         ## Use the following call to populate the self.logs dictionary with savevars, such as:

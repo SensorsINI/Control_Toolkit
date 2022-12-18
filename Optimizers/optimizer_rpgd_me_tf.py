@@ -139,7 +139,7 @@ class optimizer_rpgd_me_tf(template_optimizer):
     ):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
-            # theta = tf.tile(tf.expand_dims(theta, 0), (self.num_rollouts, 1))
+            # theta = tf.tile(tf.expand_dims(theta, 0), (self.batch_size, 1))
             tape.watch(theta)
             Q = self.zeta(theta, epsilon)
             traj_cost, _ = self.predict_and_cost(s, Q)
