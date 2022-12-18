@@ -84,7 +84,7 @@ class controller_mpc(template_controller):
         # detect any changes in config scalar values and pass to this controller or the cost function or optimizer
         # note that the cost function that has its attributes updated is the enclosed cost function of the wrapper!
         for (objs,config) in (((self,),'config_controllers.yml'), ((self.cost_function_wrapper.cost_function,), 'config_cost_functions.yml'), ((self.optimizer,self.predictor_wrapper.predictor), 'config_optimizers.yml')):
-            (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',config))
+            (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',config)) # all the config files are currently assumed to be in Control_Toolkit_ASF folder
             # process changes to configs using new returned change list
             if not changes is None:
                 for k,v in changes.items():
