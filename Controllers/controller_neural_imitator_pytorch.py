@@ -45,10 +45,10 @@ class controller_neural_imitator_pytorch(template_controller):
         self.net.reset()
         self.net.eval()
 
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, state: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         update_attributes(updated_attributes,self)
 
-        net_input = s[
+        net_input = state[
             ..., [STATE_INDICES.get(key) for key in self.net_info.inputs[:-1]]
         ]  # -1 is a fix to exclude target position
         net_input = np.append(net_input, self.target_position)

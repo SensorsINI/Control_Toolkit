@@ -112,11 +112,11 @@ class template_controller(ABC):
         pass
     
     @abstractmethod
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, Union[TensorType,float]]" = dict()):
+    def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, Union[TensorType,float]]" = dict()):
         """
         Execute one timestep of control.
 
-        :param s: the state array, dimensions are TODO add dimension to help users
+        :param state: the state array, dimensions are TODO add dimension to help users
         :param time: the time in seconds
         :param updated_attributes: dict of updated attributes
 

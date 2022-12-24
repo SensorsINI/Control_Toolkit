@@ -78,10 +78,9 @@ class CostFunctionWrapper:
         return self.cost_function.get_stage_cost(states, inputs, previous_input)
 
     def get_trajectory_cost(
-        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None, config:dict=None
-    ):
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None, config:dict=None, time:float=None):
         """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
-        return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
+        return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input, time=time)
 
     def copy(self):
         """

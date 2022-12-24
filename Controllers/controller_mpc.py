@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+from Control_Toolkit_ASF.Cost_Functions.CartPole.cartpole_trajectory_generator import generate_cartpole_trajectory
 from GUI import gui_default_params
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
@@ -15,7 +16,6 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
-from Control_Toolkit.Controllers.cartpole_trajectory_generator import cartpole_trajectory_generator
 from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -68,21 +68,43 @@ class controller_mpc(template_controller):
             predictor_specification=predictor_specification
         )
 
-        # make a target position trajectory generator
-        self.target_trajectory_generator = cartpole_trajectory_generator(lib=self.computation_library, controller=self)
-
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
         else:
             self.step = self.step
 
         
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, TensorType]" = {}):
+        """ Compute one step of control.
+
+        :param state: the current state as 1d state vector
+        :param time: the current time in seconds
+        :param updated_attributes: a dict of values to update tensorflow assignment values in the cost function
+
+        :returns: the control vector (for cartpole, a scalar cart acceleration)
+
+        """
         # log.debug(f'step time={time:.3f}s')
+
+
+        # following gets target_position, target_equilibrium, and target_trajectory passed to tensorflow. The trajectory is passed in
+        # as updated_attributes, and is transferred to tensorflow by the update_attributes call
+        cost_function=self.cost_function_wrapper.cost_function
+        update_attributes(updated_attributes,cost_function) # update target_position and target_equilibrium in cost function to use
+        updated_attributes.clear()
+        target_trajectory = generate_cartpole_trajectory(time=time, state=state,controller=self, cost_function=self.cost_function_wrapper.cost_function)
+        updated_attributes['target_trajectory']=target_trajectory
+        update_attributes(updated_attributes,cost_function) # update
+        updated_attributes.clear()
 
         # now we fill this dict with config file changes if there are any and update attributes in the controller, the cost function, and the optimizer
         # detect any changes in config scalar values and pass to this controller or the cost function or optimizer
+
         # note that the cost function that has its attributes updated is the enclosed cost function of the wrapper!
+        # note the following mapping for config files
+        #   config_controller.yml -> self (i.e. controller_mpc)
+        #   config_cost_functions.yml -> self.cost_function_wrapper.cost_function
+        #   config_optimizers.yml -> self.optimizer AND self.predictor_wrapper.predictor
         for (objs,config) in (((self,),'config_controllers.yml'), ((self.cost_function_wrapper.cost_function,), 'config_cost_functions.yml'), ((self.optimizer,self.predictor_wrapper.predictor), 'config_optimizers.yml')):
             (config,changes)=load_or_reload_config_if_modified(os.path.join('Control_Toolkit_ASF',config)) # all the config files are currently assumed to be in Control_Toolkit_ASF folder
             # process changes to configs using new returned change list
@@ -94,17 +116,8 @@ class controller_mpc(template_controller):
                             update_attributes(updated_attributes,o)
                 log.debug(f'updated {objs} with scalar updated_attributes {updated_attributes}')
 
-        # following gets target_position, target_equilibrium, and target_trajectory passed to tensorflow. The trajectory is passed in
-        # as updated_attributes, and is transferred to tensorflow by the update_attributes call
-        new_target_trajectory = self.target_trajectory_generator.step(time=time,
-                                                                      horizon=self.optimizer.mpc_horizon,
-                                                                      dt=gui_default_params.controller_update_interval,
-                                                                      state=s)
-        updated_attributes['target_trajectory'] = new_target_trajectory
-        update_attributes(updated_attributes,self)
 
-        # log.info(f'targetposition={self.target_position}, equil={self.target_equilibrium}')
-        u = self.optimizer.step(s, time)
+        u = self.optimizer.step(state, time)
         self.update_logs(self.optimizer.logging_values)
         return u
 

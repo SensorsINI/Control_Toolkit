@@ -32,7 +32,7 @@ class controller_barebone(template_controller):
         # u = 0.0
         pass
 
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, state: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
 
         # The controller has to adapt when environment-related attributes such as target positions change
         # Updated targets etc. are passed as a dictionary updated_attributes

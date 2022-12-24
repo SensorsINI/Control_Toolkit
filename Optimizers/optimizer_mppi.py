@@ -1,7 +1,8 @@
 from typing import Tuple
 
 from Control_Toolkit.others.globals_and_utils import get_logger
-from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
+from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary, \
+    TensorType
 
 import numpy as np
 
@@ -86,7 +87,6 @@ class optimizer_mppi(template_optimizer):
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
 
         # here the predictor, cost computer, and optimizer are compiled to native instrutions by tensorflow graphs and XLA JIT
-        # before this, we copy all the required configuration to these objects so that they can be later updated during runtime.
 
         self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
@@ -115,13 +115,23 @@ class optimizer_mppi(template_optimizer):
         return s
 
     #mppi correction
-    def mppi_correction_cost(self, u, delta_u):
+    def mppi_correction_cost(self, u, delta_u, time=None):
         return self.lib.sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), (1, 2))
 
     #total cost of the trajectory
-    def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
-        total_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev)
-        mppi_correction_cost =self.mppi_correction_cost(u, delta_u)
+    def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u, time:float=None):
+        """ Compute the total trajectory costs for all the rollouts
+
+        :param state_horizon: the states as [rollouts,timesteps,states]
+        :param u: the control as ??? TODO
+        :param u_prev: the previous control input
+        :param delta_u: change in control input, TODO passed in for efficiency?
+        :param time: the time in seconds
+
+         :returns: the total mppi cost for each rollout, i.e. 1d-vector of costs per rollout
+         """
+        total_cost = self.cost_function.get_trajectory_cost(state_horizon,u, u_prev,time=time)
+        mppi_correction_cost =self.mppi_correction_cost(u, delta_u, time=time)
         total_mppi_cost = total_cost +mppi_correction_cost
         return total_mppi_cost
 
@@ -143,25 +153,28 @@ class optimizer_mppi(template_optimizer):
 
         return delta_u
 
-    def _predict_and_cost(self, s, u_nom, random_gen, u_old):
+    def _predict_and_cost(self, state:TensorType, u_nom:TensorType, random_gen, u_old:TensorType, time:float=None):
         """ Predict dynamics and compute costs of trajectories
-        TODO add params and return
 
-        :param ??
+        :param state: the current state of system, dimensions are [rollouts, timesteps, states]
+        :param u_nom: the nominal control input
+        :param random_gen: the random generator
+        :param u_old: previous control input
+        :param time: time in seconds
 
-        :returns: ??
+        :returns: u, u_nom: the new control input TODO what are u and u_nom?
         """
-        s = self.lib.tile(s, (self.batch_size, 1))
+        state = self.lib.tile(state, (self.batch_size, 1))
         # generate random input sequence and clip to control limits
         u_nom = self.lib.concat([u_nom[:, 1:, :], u_nom[:, -1:, :]], 1)
         delta_u = self.inizialize_pertubation(random_gen)
         u_run = self.lib.tile(u_nom, (self.batch_size, 1, 1)) + delta_u
         u_run = self.lib.clip(u_run, self.action_low, self.action_high)
-        rollout_trajectory = self.predictor.predict_tf(s, u_run)
-        traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
+        rollout_trajectory = self.predictor.predict_tf(state, u_run, time=time)
+        traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u, time=time)
         u_nom = self.lib.clip(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
         u = u_nom[0, 0, :]
-        self.update_internal_state(s, u_nom)
+        self.update_internal_state(state, u_nom)
         return self.mppi_output(u, u_nom, rollout_trajectory, traj_cost, u_run)
 
     def update_internal_state_of_RNN(self, s, u_nom):
@@ -174,13 +187,22 @@ class optimizer_mppi(template_optimizer):
         return optimal_trajectory
 
     #step function to find control
-    def step(self, s: np.ndarray, time=None):
-        if self.optimizer_logging:
-            self.logging_values = {"s_logged": s.copy()}
-        s = self.lib.to_tensor(s, self.lib.float32)
-        s = self.check_dimensions_s(s)
+    def step(self, state: np.ndarray, time=None):
+        """ Does one timestep of control
 
-        self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
+        :param state: the current state
+        :param time: the current time in seconds
+
+        :returns: u, the new control input to system
+        """
+        if self.optimizer_logging:
+            self.logging_values = {"s_logged": state.copy()}
+        state = self.lib.to_tensor(state, self.lib.float32)
+        state = self.check_dimensions_s(state)
+
+        tf_time=self.lib.to_tensor(time,self.lib.float32) # must pass scalar tensor for time to prevent recompiling tensorflow functions over and over
+
+        self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(state, self.u_nom, self.rng, self.u, time=tf_time)
         self.u = self.lib.to_numpy(self.lib.squeeze(self.u))
 
         # print(f'mean traj cost={np.mean(traj_cost.numpy()):.2f}') # todo debug
@@ -193,7 +215,7 @@ class optimizer_mppi(template_optimizer):
             self.logging_values["u_logged"] = self.u
 
         if False:
-            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
+            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(state, self.u_nom))
 
         return self.u
 
