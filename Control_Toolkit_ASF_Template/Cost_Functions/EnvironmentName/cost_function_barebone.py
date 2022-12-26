@@ -9,7 +9,7 @@ from Control_Toolkit.Cost_Functions import cost_function_base
 
 
 # TODO: Load constants from the cost config file, like this:
-config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"), Loader=yaml.FullLoader)
+config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"), "r"), Loader=yaml.FullLoader)
 
 # TODO: Rename parent folder from EnvironmentName to the actual name of you environment
 # TODO: Load constants like this:
@@ -37,7 +37,7 @@ class cost_function_barebone(cost_function_base):
         # return terminal_cost
         pass
 
-    # all stage costs together
+    # all stage costs together. A 'stage' is one timestep of a rollout.
     def get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType):
         # Shape of states: [batch_size, mpc_horizon, num_states]
         # TODO: Compute stage cost

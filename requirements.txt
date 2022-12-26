@@ -4,3 +4,5 @@ numpy
 torch
 torchvision
 gym
+dictdiffer
+ruamel.yaml

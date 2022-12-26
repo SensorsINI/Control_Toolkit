@@ -26,7 +26,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
         mpc_horizon: int,
         cem_outer_it: int,
         cem_initial_action_stdev: float,
-        num_rollouts: int,
+        batch_size: int,
         cem_stdev_min: float,
         cem_best_k: int,
         optimizer_logging: bool,
@@ -39,7 +39,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -61,12 +61,12 @@ class optimizer_cem_gmm_tf(template_optimizer):
     @CompileTF
     def update_distribution(self, s: tf.Tensor, Q: tf.Tensor, traj_cost: tf.Tensor, rollout_trajectory: tf.Tensor, sampling_dist: tfpd.Distribution, rng: tf.random.Generator):
         #generate random input sequence and clip to control limits
-        Q = sampling_dist.sample(sample_shape=[self.num_rollouts])
+        Q = sampling_dist.sample(sample_shape=[self.batch_size])
         Q = tf.clip_by_value(Q, self.action_low, self.action_high)
 
         #rollout the trajectories and get cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.mpc_horizon+1, self.num_states])
+        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.batch_size, self.mpc_horizon + 1, self.num_states])
 
         #sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
@@ -102,11 +102,11 @@ class optimizer_cem_gmm_tf(template_optimizer):
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
-        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
+        s = np.tile(s, tf.constant([self.batch_size, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
-        Q = tf.zeros((self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
-        rollout_trajectory = tf.zeros((self.num_rollouts, self.mpc_horizon+1, self.num_states), dtype=tf.float32)
-        traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
+        Q = tf.zeros((self.batch_size, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
+        rollout_trajectory = tf.zeros((self.batch_size, self.mpc_horizon + 1, self.num_states), dtype=tf.float32)
+        traj_cost = tf.zeros((self.batch_size), dtype=tf.float32)
 
         for _ in range(0, self.cem_outer_it):
             self.sampling_dist, Q, elite_Q, traj_cost, rollout_trajectory = self.update_distribution(s, Q, traj_cost, rollout_trajectory, self.sampling_dist, self.rng)

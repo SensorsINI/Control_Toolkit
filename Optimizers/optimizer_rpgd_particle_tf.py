@@ -25,7 +25,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         computation_library: "type[ComputationLibrary]",
         seed: int,
         mpc_horizon: int,
-        num_rollouts: int,
+        batch_size: int,
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
@@ -49,7 +49,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -164,7 +164,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             self.logging_values = {"s_logged": s.copy()}
             
         # tile inital state and convert inputs to tensorflow tensors
-        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
+        s = np.tile(s, tf.constant([self.batch_size, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         # warm start setup
@@ -214,13 +214,13 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
-                self.rng, self.num_rollouts - self.opt_keep_k
+                self.rng, self.batch_size - self.opt_keep_k
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
                 tf.gather(self.trajectory_ages, best_idx),
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
+                tf.zeros(self.batch_size - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
@@ -242,14 +242,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
                 # For the new trajectories they are reset to 0
                 w1 = tf.zeros(
                     [
-                        self.num_rollouts - self.opt_keep_k,
+                        self.batch_size - self.opt_keep_k,
                         self.mpc_horizon,
                         self.num_control_inputs,
                     ]
                 )
                 w2 = tf.zeros(
                     [
-                        self.num_rollouts - self.opt_keep_k,
+                        self.batch_size - self.opt_keep_k,
                         self.mpc_horizon,
                         self.num_control_inputs,
                     ]
@@ -264,14 +264,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
                 w1 = tf.concat(
                     [
                         adam_weights[1][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        tf.zeros([self.batch_size, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 w2 = tf.concat(
                     [
                         adam_weights[2][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        tf.zeros([self.batch_size, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
@@ -294,7 +294,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # # end of unnecessary part
 
         # sample new initial guesses for trajectories
-        Qn = self.sample_actions(self.rng, self.num_rollouts)
+        Qn = self.sample_actions(self.rng, self.batch_size)
         if hasattr(self, "Q_tf"):
             self.Q_tf.assign(Qn)
         else:
@@ -304,4 +304,4 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
+        self.trajectory_ages: tf.Tensor = tf.zeros((self.batch_size), dtype=tf.int32)
