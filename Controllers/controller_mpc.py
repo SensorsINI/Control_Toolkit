@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-from Control_Toolkit_ASF.Cost_Functions.CartPole.cartpole_trajectory_generator import generate_cartpole_trajectory
+from Control_Toolkit_ASF.Cost_Functions.CartPole.cartpole_trajectory_generator import cartpole_trajectory_generator
 from GUI import gui_default_params
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
@@ -25,7 +25,20 @@ log = get_logger(__name__)
 class controller_mpc(template_controller):
 
     _has_optimizer = True
-    
+
+    def __init__(
+            self,
+            dt: float,
+            environment_name: str,
+            num_states: int,
+            num_control_inputs: int,
+            control_limits: "Tuple[np.ndarray, np.ndarray]",
+            initial_environment_attributes: "dict[str, TensorType]",
+    ):
+        super().__init__(dt, environment_name, num_states, num_control_inputs, control_limits,
+                         initial_environment_attributes)
+        self.cartpole_trajectory_generator = cartpole_trajectory_generator()
+
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
@@ -92,7 +105,9 @@ class controller_mpc(template_controller):
         cost_function=self.cost_function_wrapper.cost_function
         update_attributes(updated_attributes,cost_function) # update target_position and target_equilibrium in cost function to use
         updated_attributes.clear()
-        target_trajectory = generate_cartpole_trajectory(time=time, state=state,controller=self, cost_function=self.cost_function_wrapper.cost_function)
+        target_trajectory = \
+            self.cartpole_trajectory_generator.\
+                generate_cartpole_trajectory(time=time, state=state, controller=self, cost_function=self.cost_function_wrapper.cost_function)
         updated_attributes['target_trajectory']=target_trajectory
         update_attributes(updated_attributes,cost_function) # update
         updated_attributes.clear()
