@@ -3,6 +3,7 @@ from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
@@ -12,7 +13,12 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 logger = get_logger(__name__)
 
 
-class optimizer_rpgd_tf(template_optimizer):
+class optimizer_rpgd_me_param_tf(template_optimizer):
+    """Maximum Entropy RPGD optimizer with a parametric sampling distribution.
+
+    :param template_optimizer: A base optimizer with the required interface
+    :type template_optimizer: abc.ABCMeta
+    """
     supported_computation_libraries = {TensorFlowLibrary}
     
     def __init__(
@@ -40,6 +46,7 @@ class optimizer_rpgd_tf(template_optimizer):
         adam_beta_1: float,
         adam_beta_2: float,
         adam_epsilon: float,
+        maximum_entropy_alpha: float,
         optimizer_logging: bool,
     ):
         super().__init__(
@@ -59,12 +66,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.outer_its = outer_its
         self.sample_stdev = sample_stdev
         self.resamp_per = resamp_per
-        self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
         self.opt_keep_k = int(max(int(num_rollouts * opt_keep_k_ratio), 1))
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
+        self.maximum_entropy_alpha = maximum_entropy_alpha
+        self.gaussian = tfp.distributions.Normal(loc=0., scale=1.)
         self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
 
         # Warmup setup
@@ -82,30 +90,53 @@ class optimizer_rpgd_tf(template_optimizer):
             epsilon=adam_epsilon,
         )
         
-        self.optimizer_reset()
-
-    def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
+        # Theta bound has dimension (num_actions, num_params_per_action)
+        # Example: Environment with 3 control inputs and U[a,b] sampling => (3, 2)
         if self.SAMPLING_DISTRIBUTION == "normal":
-            Qn = rng_gen.normal(
-                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-                mean=0.0,
-                stddev=self.sample_stdev,
-                dtype=tf.float32,
-            )
+            self.theta_min = tf.stack([
+                self.action_low, 0.01 * tf.ones_like(self.action_low)
+            ], axis=1)
+            self.theta_max = tf.stack([
+                self.action_high, 1.0e2 * tf.ones_like(self.action_high)
+            ], axis=1)
         elif self.SAMPLING_DISTRIBUTION == "uniform":
-            Qn = rng_gen.uniform(
-                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-                minval=self.action_low,
-                maxval=self.action_high,
-                dtype=tf.float32,
-            )
+            self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
+            self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
         else:
-            raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
-        Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
+            raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
+        
+        self.optimizer_reset()
+    
+    def zeta(self, theta: tf.Variable, epsilon: tf.Tensor):
+        """Corresponds to N(mu, stdev) with each sample independent."""
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            mu, stdev = tf.unstack(theta, 2, -1)
+            Q = mu + stdev * epsilon
+            Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            l, r = tf.unstack(theta, 2, -1)
+            Q = (r - l) * self.gaussian.cdf(epsilon) + l
+            Q_clipped = tf.clip_by_value(Q, self.action_low, self.action_high)
+        
+        # If sampling interpolation active, compute interpolated inputs here
+        Q_clipped = self.Interpolator.interpolate(Q_clipped)
+        return Q_clipped
 
-        Qn = self.Interpolator.interpolate(Qn)
-
-        return Qn
+    def entropy(self, theta):
+        """
+        Computes the Shannon entropy of either one of:
+        - a univariate Gaussian N(mu, sigma). theta = [mu, sigma]
+            - See https://gregorygundersen.com/blog/2020/09/01/gaussian-entropy/
+        - a uniform Distribution U[l, r]. theta = [l, r]
+        """
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            _, stdev = tf.unstack(theta, 2, -1)
+            return 0.5 * tf.math.log(2 * np.pi * stdev**2) + 0.5
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            l, r = tf.unstack(theta, 2, -1)
+            return tf.math.log(tf.maximum(r - l, 1e-8))
+        else:
+            raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -114,29 +145,65 @@ class optimizer_rpgd_tf(template_optimizer):
             rollout_trajectory, Q, self.u
         )
         return traj_cost, rollout_trajectory
+        
+    @CompileTF
+    def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
+        # Reparametrization trick
+        # Generate epsilon only at inducing points
+        # Sampling interpolation is done after converting epsilons to actual samples u through this function
+        epsilon = rng_gen.normal([batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs], dtype=tf.float32)
+        return epsilon
 
+    # @CompileTF
+    # def grad_step(
+    #     self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable, opt: tf.keras.optimizers.Optimizer
+    # ):
+    #     # rollout trajectories and retrieve cost
+    #     with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape:
+    #         # theta = tf.tile(tf.expand_dims(theta, 0), (self.num_rollouts, 1))
+    #         tape.watch(theta)
+    #         Q = self.zeta(theta, epsilon)
+    #         traj_cost, _ = self.predict_and_cost(s, Q)
+    #         entropy_cost = - self.alpha * self.entropy(theta)[..., tf.newaxis]
+    #         traj_cost_mc_estimate = tf.reduce_mean(traj_cost[:, tf.newaxis, tf.newaxis, tf.newaxis], keepdims=True)
+    #         traj_cost_total = traj_cost_mc_estimate + entropy_cost
+    #     # retrieve gradient of cost w.r.t. input sequence
+    #     dc_dT = tape.gradient(traj_cost_total, theta)
+    #     dc_dT_prc = tf.clip_by_norm(dc_dT, self.gradmax_clip, axes=-1)
+    #     # use optimizer to apply gradients and retrieve next set of input sequences
+    #     opt.apply_gradients(zip([dc_dT_prc], [theta]))
+    #     # clip
+    #     theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
+    #     return theta, traj_cost
+    
     @CompileTF
     def grad_step(
-        self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
+        self, s: tf.Tensor, epsilon: tf.Variable, theta: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
-            tape.watch(Q)
+        with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape:
+            # theta = tf.tile(tf.expand_dims(theta, 0), (self.num_rollouts, 1))
+            tape.watch(theta)
+            tape.watch(epsilon)
+            Q = self.zeta(theta, epsilon)
             traj_cost, _ = self.predict_and_cost(s, Q)
+            entropy_cost = - self.alpha * self.entropy(theta)[..., tf.newaxis]
+            traj_cost_mc_estimate = tf.reduce_mean(traj_cost[:, tf.newaxis, tf.newaxis, tf.newaxis], keepdims=True)
+            traj_cost_total = traj_cost_mc_estimate + entropy_cost
         # retrieve gradient of cost w.r.t. input sequence
-        dc_dQ = tape.gradient(traj_cost, Q)
-        dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
+        dc_dT = tape.gradient(traj_cost_total, theta)
+        dc_dT_prc = tf.clip_by_norm(dc_dT, self.gradmax_clip, axes=-1)
         # use optimizer to apply gradients and retrieve next set of input sequences
-        opt.apply_gradients(zip([dc_dQ_prc], [Q]))
+        opt.apply_gradients(zip([dc_dT_prc], [theta]))
         # clip
-        Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
-        return Qn, traj_cost
+        theta = tf.clip_by_value(theta, self.theta_min, self.theta_max)
+        return theta, traj_cost
 
     @CompileTF
-    def get_action(self, s: tf.Tensor, Q: tf.Variable):
+    def get_action(self, s: tf.Tensor, epsilon: tf.Tensor, theta: tf.Variable):
+        Q = self.zeta(theta, epsilon)
         # Rollout trajectories and retrieve cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
@@ -169,9 +236,10 @@ class optimizer_rpgd_tf(template_optimizer):
         # )
         # # End of unnecessary part
 
-        # Retrieve optimal input and warmstart for next iteration
-        Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
-        return Qn, best_idx, traj_cost, rollout_trajectory
+        # Warmstart for next iteration
+        epsilon_new = tf.concat([epsilon[:, 1:, :], epsilon[:, -1:, :]], axis=1)
+        theta_new = tf.concat([theta[:, 1:, :, :], theta[:, -1:, :, :]], axis=1)
+        return epsilon_new, theta_new, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -190,8 +258,8 @@ class optimizer_rpgd_tf(template_optimizer):
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
-            Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
-            self.Q_tf.assign(Qn)
+            _theta, traj_cost = self.grad_step(s, self.epsilon, self.theta, self.opt)
+            self.theta.assign(_theta)
 
             # check for convergence of optimization
             # if bool(
@@ -204,18 +272,22 @@ class optimizer_rpgd_tf(template_optimizer):
             #     break
             # prev_cost = tf.identity(traj_cost)
 
-        # Prepare warmstart
+        # retrieve optimal input and prepare warmstart
         (
-            Qn,
+            epsilon_new,
+            theta_new,
             best_idx,
             J,
             rollout_trajectory,
-        ) = self.get_action(s, self.Q_tf)
-        self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
+        ) = self.get_action(s, self.epsilon, self.theta)
+        self.epsilon = epsilon_new
+        self.theta.assign(theta_new)
+        
+        self.u = tf.squeeze(self.zeta(self.theta, self.epsilon)[best_idx[0], 0, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:
-            self.logging_values["Q_logged"] = self.Q_tf.numpy()
+            self.logging_values["Q_logged"] = self.zeta(self.theta, self.epsilon).numpy()
             self.logging_values["J_logged"] = J.numpy()
             self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
             self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
@@ -227,49 +299,32 @@ class optimizer_rpgd_tf(template_optimizer):
         adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
-            Qres = self.sample_actions(
+            epsilon_res = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
-            Qn = tf.concat([Qres, Q_keep], axis=0)
+            epsilon_keep = tf.gather(self.epsilon, best_idx, axis=0)  # resorting according to costs
+            self.epsilon = tf.concat([epsilon_res, epsilon_keep], axis=0)
             self.trajectory_ages = tf.concat([
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
-                tf.gather(self.trajectory_ages, best_idx),
+                tf.gather(self.trajectory_ages, best_idx, axis=0),
             ], axis=0)
             # Updating the weights of adam:
-            # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
-                wk1 = tf.concat(
+                # For the trajectories which are kept, the weights are shifted for a warmstart
+                w1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                        adam_weights[1][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
-                wk2 = tf.concat(
+                w2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                        adam_weights[2][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
-                # For the new trajectories they are reset to 0
-                w1 = tf.zeros(
-                    [
-                        self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
-                        self.num_control_inputs,
-                    ]
-                )
-                w2 = tf.zeros(
-                    [
-                        self.num_rollouts - self.opt_keep_k,
-                        self.mpc_horizon,
-                        self.num_control_inputs,
-                    ]
-                )
-                w1 = tf.concat([w1, wk1], axis=0)
-                w2 = tf.concat([w2, wk2], axis=0)
                 # Set weights
                 self.opt.set_weights([adam_weights[0], w1, w2])
         else:
@@ -277,45 +332,47 @@ class optimizer_rpgd_tf(template_optimizer):
                 # if it is not time to reset, all optimizer weights are shifted for a warmstart
                 w1 = tf.concat(
                     [
-                        adam_weights[1][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        adam_weights[1][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
                 w2 = tf.concat(
                     [
-                        adam_weights[2][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        adam_weights[2][:, 1:, :, :],
+                        tf.zeros([1, 1, *self.theta.shape[-2:]]),
                     ],
                     axis=1,
                 )
                 self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
-        self.Q_tf.assign(Qn)
         self.count += 1
         return self.u
 
     def optimizer_reset(self):
-        # # unnecessary part: Adaptive sampling distribution
-        # self.dist_mue = (
-        #     (self.action_low + self.action_high)
-        #     * 0.5
-        #     * tf.ones([1, self.mpc_horizon, self.num_control_inputs])
-        # )
-        # self.stdev = self.sample_stdev * tf.ones(
-        #     [1, self.mpc_horizon, self.num_control_inputs]
-        # )
-        # # end of unnecessary part
-
-        # sample new initial guesses for trajectories
-        Qn = self.sample_actions(self.rng, self.num_rollouts)
-        if hasattr(self, "Q_tf"):
-            self.Q_tf.assign(Qn)
+        # Adaptive sampling distribution (1, mpc_horizon, dim_theta)        
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            # A) Gaussian distribution
+            initial_theta = tf.stack([
+                0.5 * (self.action_low + self.action_high), self.sample_stdev * tf.ones_like(self.action_low)
+            ], 1)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            # B) Uniform distribution
+            initial_theta = tf.stack([self.action_low, self.action_high], 1)
+            
+        # Theta has shape (1, number_of_inducing_points, num_actions, num_params_per_action)
+        initial_theta = np.tile(initial_theta, (self.Interpolator.number_of_interpolation_inducing_points, 1, 1))[np.newaxis]
+        if hasattr(self, "theta"):
+            self.theta.assign(initial_theta)
         else:
-            self.Q_tf = tf.Variable(Qn)
+            self.theta = tf.Variable(initial_theta, dtype=tf.float32)
+        self.alpha = tf.constant(self.maximum_entropy_alpha, dtype=tf.float32)
+            
+        # Sample new initial guesses for trajectories
+        self.epsilon = self.sample_actions(self.rng, self.num_rollouts)
         self.count = 0
 
-        # reset optimizer
+        # Reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)

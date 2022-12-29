@@ -80,8 +80,12 @@ class template_controller(ABC):
         self.action_low, self.action_high = self.control_limits
         
         # Set properties like target positions on this controller
-        for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
+        for p, v in initial_environment_attributes.items():
+            if type(v) in {np.ndarray, float, int, bool}:
+                data_type = getattr(v, "dtype", self.lib.float32)
+                data_type = self.lib.int32 if data_type == int else self.lib.float32
+                v = self.lib.to_variable(v, data_type)
+            setattr(self, p, v)
                 
         # Initialize control variable
         self.u = 0.0
@@ -105,7 +109,12 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
+            try:
+                # Assume the variable is an attribute type and assign
+                attr = getattr(self, property)
+                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            except:
+                setattr(self, property, new_value)
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
