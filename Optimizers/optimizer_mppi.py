@@ -189,13 +189,13 @@ class optimizer_mppi(template_optimizer):
         s = self.lib.to_tensor(s, self.lib.float32)
         s = self.check_dimensions_s(s)
 
-        self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
+        self.u, self.u_nom, self.rollout_trajectories, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
         self.u = self.lib.to_numpy(self.lib.squeeze(self.u))
-        
+
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.lib.to_numpy(u_run)
             self.logging_values["J_logged"] = self.lib.to_numpy(traj_cost)
-            self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(rollout_trajectory)
+            self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
 
         if False:

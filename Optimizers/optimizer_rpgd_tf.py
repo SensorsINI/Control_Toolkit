@@ -209,7 +209,7 @@ class optimizer_rpgd_tf(template_optimizer):
             Qn,
             best_idx,
             J,
-            rollout_trajectory,
+            self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
         self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
         self.u = self.u.numpy()
@@ -217,7 +217,7 @@ class optimizer_rpgd_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
             self.logging_values["J_logged"] = J.numpy()
-            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.logging_values["rollout_trajectories_logged"] = self.rollout_trajectories.numpy()
             self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
             self.logging_values["u_logged"] = self.u
 
