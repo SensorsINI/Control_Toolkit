@@ -67,7 +67,7 @@ class cost_function_base:
         :rtype: TensorType
         """
         stage_costs = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)  # Select all but last state of the horizon
-        terminal_cost = self.get_terminal_cost(state_horizon[:, -1, :])
+        terminal_cost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
         total_cost = self.lib.mean(self.lib.concat([stage_costs, terminal_cost], 1), 1)  # Average across the MPC horizon dimension
         return total_cost
 
