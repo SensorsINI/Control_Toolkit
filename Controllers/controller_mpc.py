@@ -73,7 +73,7 @@ class controller_mpc(template_controller):
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
-        self.update_logs(self.optimizer.logging_values)
+        #self.update_logs(self.optimizer.logging_values)
         return u
 
     def controller_reset(self):
