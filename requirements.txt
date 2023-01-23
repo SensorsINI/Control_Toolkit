@@ -3,4 +3,4 @@ tensorflow_probability
 numpy
 torch
 torchvision
-gym
+gymnasium

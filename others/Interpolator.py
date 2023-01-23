@@ -121,7 +121,7 @@ if __name__ == '__main__':
 
             print('**********************************************************************')
             print(COMPUTATION_LIBRARY.lib)
-            print(algorithm)
+            print(ALGORITHM)
             LIB = COMPUTATION_LIBRARY
             I: Interpolator = Interpolator(HORIZON,
                                            PERIOD_INTERPOLATION_INDUCING_POINTS,

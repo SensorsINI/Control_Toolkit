@@ -70,6 +70,13 @@ This toolkit focuses on model-predictive control. Currently, only a `controller_
     optimizer.
 
 
+## Logging
+
+The toolkit provides a uniform interface to log values in the controller. These values could for example be rollout trajectories or intermediate optimization results.
+
+The `controller_mpc.step` method takes the `optimizer.logging_values` dictionary and copies it to its `controller_mpc.logs` dictionary in each step. The `template_controller` has two related attributes: `controller_logging` and `save_vars`. If the former is `true`, then the controller populates the fields of `save_vars` in the `template_controller.logs` dictionary with values if your controller calls `update_logs` within the `step` method.
+
+
 ## Examples of Application-Specific Controllers
 
 We refer to the [Control_Toolkit_ASF of our CartPoleSimulation Project](https://github.com/SensorsINI/CartPoleSimulation/tree/master/Control_Toolkit_ASF/Controllers).

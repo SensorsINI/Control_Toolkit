@@ -30,10 +30,11 @@ class optimizer_rpgd_tf(template_optimizer):
         sample_stdev: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
+        SAMPLING_DISTRIBUTION: str,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
-        opt_keep_k: int,
+        opt_keep_k_ratio: float,
         gradmax_clip: float,
         rtol: float,
         adam_beta_1: float,
@@ -61,9 +62,10 @@ class optimizer_rpgd_tf(template_optimizer):
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
-        self.opt_keep_k = opt_keep_k
+        self.opt_keep_k = int(max(int(num_rollouts * opt_keep_k_ratio), 1))
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
+        self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
 
         # Warmup setup
         self.first_iter_count = self.outer_its
@@ -82,20 +84,36 @@ class optimizer_rpgd_tf(template_optimizer):
         
         self.optimizer_reset()
 
-    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
-        Qn = rng_gen.uniform(
-            [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-            minval=self.action_low,
-            maxval=self.action_high,
-            dtype=tf.float32,
-        )
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            Qn = rng_gen.normal(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                mean=0.0,
+                stddev=self.sample_stdev,
+                dtype=tf.float32,
+            )
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            Qn = rng_gen.uniform(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                minval=self.action_low,
+                maxval=self.action_high,
+                dtype=tf.float32,
+            )
+        else:
+            raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
 
         Qn = self.Interpolator.interpolate(Qn)
 
-
         return Qn
+
+    def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
+        # rollout trajectories and retrieve cost
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
+            rollout_trajectory, Q, self.u
+        )
+        return traj_cost, rollout_trajectory
 
     @CompileTF
     def grad_step(
@@ -104,10 +122,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
-            traj_cost = self.cost_function.get_trajectory_cost(
-                rollout_trajectory, Q, self.u
-            )
+            traj_cost, _ = self.predict_and_cost(s, Q)
         # retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
@@ -120,10 +135,8 @@ class optimizer_rpgd_tf(template_optimizer):
     @CompileTF
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.cost_function.get_trajectory_cost(
-            rollout_trajectory, Q, self.u
-        )
+        traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
+        
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
@@ -157,9 +170,8 @@ class optimizer_rpgd_tf(template_optimizer):
         # # End of unnecessary part
 
         # Retrieve optimal input and warmstart for next iteration
-        u = tf.squeeze(Q[sorted_cost[0], 0, :])
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
-        return u, Qn, best_idx, traj_cost, rollout_trajectory
+        return Qn, best_idx, traj_cost, rollout_trajectory
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -192,21 +204,20 @@ class optimizer_rpgd_tf(template_optimizer):
             #     break
             # prev_cost = tf.identity(traj_cost)
 
-        # retrieve optimal input and prepare warmstart
+        # Prepare warmstart
         (
-            self.u,
             Qn,
-            best_Q,
+            best_idx,
             J,
-            rollout_trajectory,
+            self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
-        
+        self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
             self.logging_values["J_logged"] = J.numpy()
-            self.logging_values["rollout_trajectories_logged"] = rollout_trajectory.numpy()
+            self.logging_values["rollout_trajectories_logged"] = self.rollout_trajectories.numpy()
             self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
             self.logging_values["u_logged"] = self.u
 
@@ -219,25 +230,25 @@ class optimizer_rpgd_tf(template_optimizer):
             Qres = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_Q)  # resorting according to costs
+            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
-                tf.gather(self.trajectory_ages, best_Q),
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32)
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
+                tf.gather(self.trajectory_ages, best_idx),
             ], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], best_Q)[:, 1:, :],
+                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 wk2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], best_Q)[:, 1:, :],
+                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
