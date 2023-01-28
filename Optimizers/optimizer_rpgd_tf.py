@@ -1,11 +1,13 @@
 from typing import Tuple
+
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit.others.globals_and_utils import get_logger
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
