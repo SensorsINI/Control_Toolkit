@@ -12,7 +12,11 @@ class cost_function_base:
     """
     # Default: Class supports all libs to compute costs
     supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
-    
+    # Define default values used for cost normalization
+    MIN_COST = -1.0
+    MAX_COST = 0.0
+    COST_RANGE = MAX_COST - MIN_COST
+
     def __init__(self, controller: template_controller, ComputationLib: "type[ComputationLibrary]", config:dict=None) -> None:
         """ makes a new cost function
 
@@ -27,7 +31,7 @@ class cost_function_base:
         self.config:dict=config
         self.set_computation_library(ComputationLib)
         logger.info(f'constructed {self} with controller {controller} computation library {ComputationLib} and config {config}')
-    
+
     def get_terminal_cost(self, terminal_states: TensorType) -> TensorType:
         """Compute a batch of terminal costs for a batch of terminal states.
 
@@ -36,11 +40,13 @@ class cost_function_base:
         :return: The terminal costs. Has shape [batch_size]
         :rtype: TensorType
         """
-        raise NotImplementedError("To be implemented in subclass.")
+        # Default behavior: Return a zero cost scalar per sample of batch
+        return self.lib.zeros_like(terminal_states)[:,:1]  # Shape: (batch_size x 1)
 
     def get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType, time:float) -> TensorType:
         """Compute all stage costs of a batch of states and contol inputs.
         One "stage" is one step in the MPC horizon.
+        Stage costs are shifted so that they are <= 0. Reason: reward = -cost is then >= 0 and therefore easier to interpret.
 
         :param states: Has shape [batch_size, mpc_horizon, num_states]
         :type states: TensorType
@@ -51,6 +57,12 @@ class cost_function_base:
         :return: The stage costs. Has shape [batch_size, mpc_horizon]
         :rtype: TensorType
         """
+        stage_costs = self._get_stage_cost(states, inputs, previous_input)  # Select all but last state of the horizon
+        return stage_costs - self.MAX_COST
+        # Could also normalize to [-1, 0]:
+        # (stage_costs - self.MIN_COST) / self.COST_RANGE - 1
+
+    def _get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType) -> TensorType:
         raise NotImplementedError("To be implemented in subclass.")
 
     def get_trajectory_cost(self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None, time:float=None) -> TensorType:
@@ -70,9 +82,9 @@ class cost_function_base:
         :return: The summed cost of the trajectory. Has shape [batch_size].
         :rtype: TensorType
         """
-        stage_cost = self.get_stage_cost(states=state_horizon[:, :-1, :], inputs=inputs, previous_input=previous_input, time=time)  # Select all but last state of the horizon
-        total_cost = self.lib.sum(stage_cost, 1)  # Sum across the MPC horizon dimension
-        total_cost = total_cost + self.get_terminal_cost(state_horizon[:, -1, :])
+        stage_costs = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)  # Select all but last state of the horizon
+        terminal_cost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
+        total_cost = self.lib.mean(self.lib.concat([stage_costs, terminal_cost], 1), 1)  # Average across the MPC horizon dimension
         return total_cost
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):

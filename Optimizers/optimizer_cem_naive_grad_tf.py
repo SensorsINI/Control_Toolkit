@@ -62,8 +62,8 @@ class optimizer_cem_naive_grad_tf(template_optimizer):
     @CompileTF
     def predict_and_cost(self, s, rng, dist_mue, stdev):
         # generate random input sequence and clip to control limits
-        Q = tf.tile(dist_mue, [self.batch_size, 1, 1]) + rng.normal(
-            [self.batch_size, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32) * stdev
+        Q = tf.tile(dist_mue, [self.num_rollouts, 1, 1]) + rng.normal(
+            [self.num_rollouts, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32) * stdev
         Q = tf.clip_by_value(Q, self.action_low, self.action_high)
         # rollout the trajectories and record gradient
         with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -95,7 +95,7 @@ class optimizer_cem_naive_grad_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
         # tile s and convert inputs to tensor
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         #cem steps updating distribution

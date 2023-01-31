@@ -19,7 +19,7 @@ class template_optimizer:
             control_limits: "Tuple[np.ndarray, np.ndarray]",
             optimizer_logging: bool,
             seed: int,
-            batch_size: int,
+            num_rollouts: int,
             mpc_horizon: int,
             computation_library: "type[ComputationLibrary]",
         ) -> None:
@@ -30,7 +30,7 @@ class template_optimizer:
 
         self.lib = computation_library
 
-        self.batch_size = batch_size
+        self.num_rollouts = num_rollouts
         self.mpc_horizon = mpc_horizon
         self.cost_function = cost_function
         self.u = 0.0

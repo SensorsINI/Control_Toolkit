@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Union
 from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
 
 import numpy as np
@@ -25,15 +25,16 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         computation_library: "type[ComputationLibrary]",
         seed: int,
         mpc_horizon: int,
-        batch_size: int,
+        num_rollouts: int,
         outer_its: int,
         sample_stdev: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
+        SAMPLING_DISTRIBUTION: str,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
-        opt_keep_k: int,
+        opt_keep_k_ratio: float,
         gradmax_clip: float,
         rtol: float,
         adam_beta_1: float,
@@ -49,7 +50,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            batch_size=batch_size,
+            num_rollouts=num_rollouts,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -59,8 +60,9 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         self.sample_stdev = sample_stdev
         self.resamp_per = resamp_per
         self.do_warmup = warmup
+        self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
         self.warmup_iterations = warmup_iterations
-        self.opt_keep_k = opt_keep_k
+        self.opt_keep_k = int(max(int(num_rollouts * opt_keep_k_ratio), 1))
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
 
@@ -71,6 +73,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
 
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
                                          self.num_control_inputs, self.lib)
+        self.inducing_points_indices = tf.cast(tf.linspace(0, self.mpc_horizon - 1, self.Interpolator.number_of_interpolation_inducing_points), tf.int32)
 
         self.opt = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
@@ -79,6 +82,19 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             epsilon=adam_epsilon,
         )
         
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            self.theta_min = tf.stack([
+                self.action_low, 0.01 * tf.ones_like(self.action_low)
+            ], axis=1)
+            self.theta_max = tf.stack([
+                self.action_high, 1.e2 * tf.ones_like(self.action_high)
+            ], axis=1)
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            self.theta_min = tf.repeat(tf.expand_dims(self.action_low, 1), 2, 1)
+            self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
+        else:
+            raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
+
         self.optimizer_reset()
     
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
@@ -91,15 +107,33 @@ class optimizer_rpgd_particle_tf(template_optimizer):
 
     @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
-        Qn = rng_gen.uniform(
-            [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-            minval=self.action_low,
-            maxval=self.action_high,
-            dtype=tf.float32,
-        )
+        if self.SAMPLING_DISTRIBUTION == "normal":
+            Qn = rng_gen.normal(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                mean=0.0,
+                stddev=self.sample_stdev,
+                dtype=tf.float32,
+            )
+        elif self.SAMPLING_DISTRIBUTION == "uniform":
+            Qn = rng_gen.uniform(
+                [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+                minval=self.action_low,
+                maxval=self.action_high,
+                dtype=tf.float32,
+            )
+        else:
+            raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
         Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
         Qn = self.Interpolator.interpolate(Qn)
         return Qn
+
+    @CompileTF
+    def resample_actions(self, rng_gen: tf.random.Generator, input_plans: tf.Tensor):
+        input_plans_at_inducing_points = tf.gather(input_plans, self.inducing_points_indices, axis=1)
+        Q_resampled = input_plans_at_inducing_points + self.sample_stdev * rng_gen._standard_normal(tf.shape(input_plans_at_inducing_points), tf.float32)
+        Q_resampled = tf.clip_by_value(Q_resampled, self.action_low, self.action_high)
+        Q_resampled = self.Interpolator.interpolate(Q_resampled)
+        return Q_resampled
 
     @CompileTF
     def grad_step(
@@ -126,45 +160,55 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
 
-        # # Unnecessary Part
-        # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
-        # elite_Q = tf.gather(Q, best_idx, axis=0)
-        # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
-        # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
-
-        # dist_mue = tf.concat(
-        #     [
-        #         dist_mue[:, 1:, :],
-        #         (self.action_low + self.action_high)
-        #         * 0.5
-        #         * tf.ones([1, 1, self.num_control_inputs]),
-        #     ],
-        #     axis=1,
-        # )
-
-        # # after all inner loops, clip std min, so enough is explored and shove all the values down by one for next control input
-        # dist_std = tf.clip_by_value(dist_std, self.sample_stdev, 10.0)
-        # dist_std = tf.concat(
-        #     [
-        #         dist_std[:, 1:, :],
-        #         self.sample_stdev
-        #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
-        #     ],
-        #     axis=1,
-        # )
-        # # End of unnecessary part
-
         # Warmstart for next iteration
-        
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
+
+    def index_to_2d(n: int, c: Union[tf.Tensor, int]) -> Union[tf.Tensor, int]:
+        """Given an index c that continues through a 2D tensor of shape n x n in row-major order,
+        return the index pair (i, j). Input c can be a batch of indices
+        """
+        return tf.stack(
+            [tf.math.mod(c, n), tf.math.floormod(c, n)],
+            axis=1,
+        )
+
+
+
+    @CompileTF
+    def get_plans_to_resample(self, Qn: tf.Tensor, terminal_states: tf.Tensor, number_of_plans: int) -> tf.Tensor:
+        """Find out which of the terminal states are in the least dense region.
+        The input plans that produced them should be the mean for resampling
+
+        :param Qn: Has shape(batch_size x MPC_horizon x num_action_dims)
+        :type Qn: tf.Tensor
+        :param terminal_states: Has shape(batch_size x num_state_dims)
+        :type terminal_states: tf.Tensor
+        :param number_of_plans: How many plans to resample about
+        :type number_of_plans: int
+        :return: Tensor of actions which are to be resampled about
+        :rtype: tf.Tensor
+        """
+        # batch_size = Qn.shape[0]
+        # Collect terminal states' distances as a (batch_size x batch_size) matrix
+        distances = tf.reduce_sum((terminal_states[:, tf.newaxis, :] - terminal_states[tf.newaxis, :, :]) ** 2, axis=2)
+        distances += tf.cast(tf.abs(distances) < 1e-8, dtype=tf.float32) * 1.0e8
+        # Find which state has the largest minimum distance to any other
+        distances_min = tf.reduce_min(distances, axis=1)
+        # indices_of_min = tf.where(distances == tf.repeat(distances_min[:, tf.newaxis], batch_size, axis=1))
+        # Sanity check: Is np.all(tf.gather_nd(distances, indices_of_min) == distances_min) == True?
+
+        # Determine which of the plans to gather
+        gather_indices = tf.argsort(distances_min, direction="DESCENDING")[:number_of_plans]
+
+        return tf.gather(Qn, gather_indices, axis=0)
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
             
         # tile inital state and convert inputs to tensorflow tensors
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         # warm start setup
@@ -212,15 +256,16 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # The algorithm not only warmstrats the initial guess, but also the intial optimizer weights
         adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
+            plans_to_resample = self.get_plans_to_resample(Qn, rollout_trajectory[:, -1, :], self.num_rollouts - self.opt_keep_k)
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
-            Qres = self.sample_actions(
-                self.rng, self.batch_size - self.opt_keep_k
+            Qres = self.resample_actions(
+                self.rng, plans_to_resample
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
+                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx),
-                tf.zeros(self.batch_size - self.opt_keep_k, dtype=tf.int32)
             ], axis=0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
@@ -242,14 +287,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
                 # For the new trajectories they are reset to 0
                 w1 = tf.zeros(
                     [
-                        self.batch_size - self.opt_keep_k,
+                        self.num_rollouts - self.opt_keep_k,
                         self.mpc_horizon,
                         self.num_control_inputs,
                     ]
                 )
                 w2 = tf.zeros(
                     [
-                        self.batch_size - self.opt_keep_k,
+                        self.num_rollouts - self.opt_keep_k,
                         self.mpc_horizon,
                         self.num_control_inputs,
                     ]
@@ -264,14 +309,14 @@ class optimizer_rpgd_particle_tf(template_optimizer):
                 w1 = tf.concat(
                     [
                         adam_weights[1][:, 1:, :],
-                        tf.zeros([self.batch_size, 1, self.num_control_inputs]),
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 w2 = tf.concat(
                     [
                         adam_weights[2][:, 1:, :],
-                        tf.zeros([self.batch_size, 1, self.num_control_inputs]),
+                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
@@ -282,19 +327,8 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         return self.u
 
     def optimizer_reset(self):
-        # # unnecessary part: Adaptive sampling distribution
-        # self.dist_mue = (
-        #     (self.action_low + self.action_high)
-        #     * 0.5
-        #     * tf.ones([1, self.mpc_horizon, self.num_control_inputs])
-        # )
-        # self.stdev = self.sample_stdev * tf.ones(
-        #     [1, self.mpc_horizon, self.num_control_inputs]
-        # )
-        # # end of unnecessary part
-
         # sample new initial guesses for trajectories
-        Qn = self.sample_actions(self.rng, self.batch_size)
+        Qn = self.sample_actions(self.rng, self.num_rollouts)
         if hasattr(self, "Q_tf"):
             self.Q_tf.assign(Qn)
         else:
@@ -304,4 +338,4 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         # reset optimizer
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        self.trajectory_ages: tf.Tensor = tf.zeros((self.batch_size), dtype=tf.int32)
+        self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)

@@ -6,3 +6,4 @@ torchvision
 gym
 dictdiffer
 ruamel.yaml
+gymnasium

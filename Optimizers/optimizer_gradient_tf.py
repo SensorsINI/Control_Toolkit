@@ -105,7 +105,7 @@ class optimizer_gradient_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
         # Start all trajectories in current state
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         
         # warm start setup
@@ -143,7 +143,7 @@ class optimizer_gradient_tf(template_optimizer):
         # Shift Q, Adam weights by one time step
         self.count += 1
         Q_s = self.rng.uniform(
-            shape=[self.batch_size, 1, self.num_control_inputs],
+            shape=[self.num_rollouts, 1, self.num_control_inputs],
             minval=self.action_low,
             maxval=self.action_high,
             dtype=tf.float32,
@@ -157,14 +157,14 @@ class optimizer_gradient_tf(template_optimizer):
             w1 = tf.concat(
                 [
                     adam_weights[1][:, 1:, :],
-                    tf.zeros([self.batch_size, 1, self.num_control_inputs]),
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                 ],
                 axis=1,
             )
             w2 = tf.concat(
                 [
                     adam_weights[2][:, 1:, :],
-                    tf.zeros([self.batch_size, 1, self.num_control_inputs]),
+                    tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                 ],
                 axis=1,
             )
@@ -175,7 +175,7 @@ class optimizer_gradient_tf(template_optimizer):
     def optimizer_reset(self):
         # generate random input sequence and clip to control limits
         Q = self.rng.uniform(
-            [self.batch_size, self.mpc_horizon, self.num_control_inputs],
+            [self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
             self.action_low,
             self.action_high,
             dtype=tf.float32,

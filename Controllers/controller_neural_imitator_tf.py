@@ -6,6 +6,7 @@ import numpy as np
 from Control_Toolkit.Controllers import template_controller
 from SI_Toolkit.load_and_normalize import normalize_numpy_array
 from others.globals_and_utils import update_attributes
+from SI_Toolkit.load_and_normalize import normalize_numpy_array, denormalize_numpy_array
 
 try:
     from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
@@ -57,6 +58,8 @@ class controller_neural_imitator_tf(template_controller):
         net_input = self.lib.to_tensor(net_input, dtype=self.lib.float32)
 
         net_output = self.evaluate_net(net_input)
+
+        net_output = denormalize_numpy_array(net_output, self.net_info.outputs, self.normalization_info)
 
         Q = float(net_output)
 

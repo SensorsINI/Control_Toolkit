@@ -54,11 +54,11 @@ class optimizer_random_action_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
         # Start all trajectories in current state
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         
         Q = self.rng.uniform(
-            shape=[self.batch_size, self.mpc_horizon, self.num_control_inputs],
+            shape=[self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
             minval=self.action_low,
             maxval=self.action_high,
             dtype=tf.float32,
@@ -82,7 +82,7 @@ class optimizer_random_action_tf(template_optimizer):
     def optimizer_reset(self):
         # generate random input sequence and clip to control limits
         Q = self.rng.uniform(
-                shape=[self.batch_size, self.mpc_horizon, self.num_control_inputs],
+                shape=[self.num_rollouts, self.mpc_horizon, self.num_control_inputs],
                 minval=self.action_low,
                 maxval=self.action_high,
                 dtype=tf.float32,

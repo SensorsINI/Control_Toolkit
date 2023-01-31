@@ -14,6 +14,16 @@ from others.globals_and_utils import load_or_reload_config_if_modified, update_a
 log=get_logger(__name__)
 
 class CostFunctionWrapper:
+    """
+    Wrapper class for cost functions.
+    It allows the creation of an instance with deferred specification which specific class containing cost functions is to be used.
+
+    Usage:
+    1) Instantiate this wrapper in controller.
+    2) Call `configure` with a reference to the controller instance and the name of the cost function, once this is known to the controller.
+
+    You can do both steps
+    """
     def __init__(self):
         self.cost_function = None
         # cost_function config
@@ -28,13 +38,20 @@ class CostFunctionWrapper:
     def configure(
         self,
         controller: template_controller,
-        cost_function_specification=None,
+        cost_function_specification: str=None,
     ):
         """
         Configures the cost function. TODO This lazy constructor is needed why?
 
         :param controller: the controller that uses this cost function
         :param cost_function_specification: the string name of the cost function class, to construct the class and find the config values in config_cost_functions.yml
+        """
+        """Configure this wrapper as part of a controller.
+
+        :param controller: Reference to the controller instance this wrapper is used by
+        :type controller: template_controller
+        :param cost_function_specification: Name of cost function class within Control_Toolkit_ASF.Cost_Functions.<<Environment_Name>> package. If not specified, the 'default' one is used.
+        :type cost_function_specification: str, optional
         """
         environment_name = controller.environment_name
         computation_library = controller.computation_library  # Use library dictated by controller

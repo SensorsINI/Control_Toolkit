@@ -74,7 +74,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         
         # Initialization
         self.Q_tf = tf.Variable(
-            initial_value=tf.zeros([self.batch_size, self.mpc_horizon, self.num_control_inputs]),
+            initial_value=tf.zeros([self.num_rollouts, self.mpc_horizon, self.num_control_inputs]),
             trainable=True,
             dtype=tf.float32,
         )
@@ -82,7 +82,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
 
     @CompileTF
     def predict_and_cost(self, s, elite_Q, Q_tf: tf.Variable, opt, rng: tf.random.Generator):
-        Q_sampled = self._sample_actions(rng, self.batch_size - self.cem_best_k)
+        Q_sampled = self._sample_actions(rng, self.num_rollouts - self.cem_best_k)
         Q = tf.concat([elite_Q, Q_sampled], axis=0)
         Q = tf.clip_by_value(Q, self.action_low, self.action_high)
         Q_tf.assign(Q)
@@ -141,7 +141,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
         # tile s and convert inputs to tensor
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         # generate random input sequence and clip to control limits

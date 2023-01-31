@@ -74,7 +74,7 @@ class controller_mpc(template_controller):
         self.optimizer.configure(dt=self.config_controller["dt"], predictor_specification=predictor_specification)
         
         self.predictor_wrapper.configure(
-            batch_size=self.optimizer.batch_size,
+            batch_size=self.optimizer.num_rollouts,
             horizon=self.optimizer.mpc_horizon,
             dt=self.config_controller["dt"],
             computation_library=self.computation_library,

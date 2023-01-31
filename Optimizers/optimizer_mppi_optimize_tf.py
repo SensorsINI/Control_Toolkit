@@ -30,7 +30,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         batch_size: int,
         NU: float,
         SQRTRHOINV: float,
-        GAMMA: float,
         gradmax_clip: float,
         optim_steps: int,
         mppi_LR: float,
@@ -61,7 +60,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         # MPPI parameters
         self.NU = NU
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
 
         # Optimization params
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)
@@ -110,7 +108,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
     def inizialize_pertubation(self, random_gen):
         stdev = self.SQRTRHODTINV
         delta_u = random_gen.normal(
-            [self.batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
+            [self.num_rollouts, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
             dtype=tf.float32) * stdev
         delta_u = self.Interpolator.interpolate(delta_u)
         return delta_u
@@ -119,7 +117,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
     def mppi_prior(self, s, u_nom, random_gen, u_old):
         # generate random input sequence and clip to control limits
         delta_u = self.inizialize_pertubation(random_gen)
-        u_run = tf.tile(u_nom, [self.batch_size, 1, 1]) + delta_u
+        u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1]) + delta_u
         u_run = tf.clip_by_value(u_run, self.action_low, self.action_high)
         #predict trajectories
         rollout_trajectory = self.predictor.predict_tf(s, u_run)
@@ -157,7 +155,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
         # tile inital state and convert inputs to tensorflow tensors
-        s = np.tile(s, tf.constant([self.batch_size, 1]))
+        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
 
         #first retrieve suboptimal control sequence with mppi

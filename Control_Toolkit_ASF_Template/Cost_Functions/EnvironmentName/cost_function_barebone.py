@@ -22,6 +22,8 @@ config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functio
 
 class cost_function_barebone(cost_function_base):
     """This class can contain arbitrary helper functions to compute the cost of a trajectory or inputs."""
+    MAX_COST = 0.0  # Define maximum value the cost can take. Used for shifting
+
     # Example: Cost for difference from upright position
     # def _E_pot_cost(self, angle):
     #     """Compute penalty for not balancing pole upright (penalize large angles)"""
