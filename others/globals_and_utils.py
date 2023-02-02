@@ -42,6 +42,11 @@ class CustomFormatter(logging.Formatter):
 
 
 def get_logger(name):
+    """ Get instance of standard logger, giving it a name
+    :param name: your name, e.g. __name__
+    :returns: the logger
+
+    """
     # logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     logger = logging.getLogger(name)
     logger.setLevel(LOGGING_LEVEL)

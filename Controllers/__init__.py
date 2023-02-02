@@ -185,3 +185,4 @@ class template_controller(ABC):
                     self.logs[name].append(
                         var.numpy().copy() if hasattr(var, "numpy") else var.copy()
                     )
+
