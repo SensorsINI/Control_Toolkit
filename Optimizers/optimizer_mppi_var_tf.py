@@ -31,7 +31,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         num_rollouts: int,
         NU_mc: float,
         SQRTRHOINV_mc: float,
-        GAMMA: float,
         LR: float,
         max_grad_norm: float,
         STDEV_min: float,
@@ -57,7 +56,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         self.R = R
         self.LBD = LBD_mc
         self.NU = NU_mc
-        self.GAMMA = GAMMA
         self.mppi_lr = LR
         self.stdev_min = STDEV_min
         self.stdev_max = STDEV_max

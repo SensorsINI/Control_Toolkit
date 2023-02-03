@@ -1,5 +1,6 @@
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Tuple
 
 import numpy as np
@@ -38,10 +39,10 @@ class template_controller(ABC):
         initial_environment_attributes: "dict[str, TensorType]",
     ):
         # Load controller config and select the entry for the current controller
-        config_controllers = yaml.load(
-            open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
-            Loader=yaml.FullLoader
-        )
+        f=os.path.join("Control_Toolkit_ASF", "config_controllers.yml")
+        fp=Path(f)
+        logger.debug(f'loading controller config from "{fp.absolute()}"')
+        config_controllers = yaml.load(open(f), Loader=yaml.FullLoader)
         # self.controller_name is inferred from the class name, which is the class being instantiated
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.
