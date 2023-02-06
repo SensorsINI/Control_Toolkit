@@ -5,13 +5,14 @@ from typing import Tuple
 
 import numpy as np
 import yaml
-from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
 
+from get_logger import get_logger
+log = get_logger(__name__)
+
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
-logger = get_logger(__name__)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
@@ -41,7 +42,7 @@ class template_controller(ABC):
         # Load controller config and select the entry for the current controller
         f=os.path.join("Control_Toolkit_ASF", "config_controllers.yml")
         fp=Path(f)
-        logger.debug(f'loading controller config from "{fp.absolute()}"')
+        log.debug(f'loading controller config from "{fp.absolute()}"')
         config_controllers = yaml.load(open(f), Loader=yaml.FullLoader)
         # self.controller_name is inferred from the class name, which is the class being instantiated
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
@@ -54,7 +55,7 @@ class template_controller(ABC):
         
         if computation_library_name:
             # Assign computation library from config
-            logger.info(f"Found library {computation_library_name} for MPC controller.")
+            log.info(f"Found library {computation_library_name} for MPC controller.")
             if "tensorflow" in computation_library_name.lower():
                 self._computation_library = TensorFlowLibrary
             elif "pytorch" in computation_library_name.lower():
@@ -68,7 +69,7 @@ class template_controller(ABC):
             if not issubclass(self.computation_library, ComputationLibrary):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
-                logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
+                log.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
         self.lib = self.computation_library  # Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library
 
         # Environment-related parameters
@@ -124,7 +125,7 @@ class template_controller(ABC):
     # Optionally: A method called after an experiment.
     # May be used to print some statistics about controller performance (e.g. number of iter. to converge)
     def controller_report(self):
-        logger.info("No controller report implemented for this controller. Stopping without report.")
+        log.info("No controller report implemented for this controller. Stopping without report.")
         pass
 
     # Optionally: reset the controller after an experiment

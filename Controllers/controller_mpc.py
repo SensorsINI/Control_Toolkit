@@ -9,14 +9,17 @@ from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWra
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import TensorType
-from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
+from Control_Toolkit.others.globals_and_utils import import_optimizer_by_name
 
 from torch import inference_mode
 
 
+from get_logger import get_logger
+log = get_logger(__name__)
+
+
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
-logger = get_logger(__name__)
 
 
 class controller_mpc(template_controller):
@@ -25,16 +28,16 @@ class controller_mpc(template_controller):
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
-            logger.info(f'Using optimizer "{optimizer_name}" specified in controller config file')
+            log.info(f'Using optimizer "{optimizer_name}" specified in controller config file')
         if predictor_specification in {None, ""}:
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
-            logger.info(f'Using predictor_specification="{predictor_specification}" specified in controller config file')
+            log.info(f'Using predictor_specification="{predictor_specification}" specified in controller config file')
         
         config_optimizer = config_optimizers[optimizer_name]
         
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
-        logger.info(f'using cost_function_specification="{cost_function_specification}" in config {self.config_controller}')
+        log.info(f'using cost_function_specification="{cost_function_specification}" in config {self.config_controller}')
         self.cost_function = CostFunctionWrapper()
         self.cost_function.configure(self, cost_function_specification=cost_function_specification)
         
