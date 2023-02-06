@@ -1,7 +1,6 @@
-from CartPole.cartpole_model import _cartpole_ode
-from CartPole.state_utilities import (ANGLE_COS_IDX, ANGLE_IDX, ANGLE_SIN_IDX,
-                                      ANGLED_IDX, POSITION_IDX, POSITIOND_IDX,
-                                      cartpole_state_vector_to_jacobian_order)
+from CartPoleSimulation.CartPole.cartpole_model import _cartpole_ode
+from CartPoleSimulation.CartPole.state_utilities import (ANGLE_COS_IDX, ANGLE_IDX, ANGLE_SIN_IDX,
+                                      ANGLED_IDX, POSITION_IDX, POSITIOND_IDX)
 from CartPoleSimulation.CartPole.cartpole_jacobian import cartpole_jacobian
 from Environments.acrobot_batched import acrobot_batched
 import numpy as np
@@ -24,9 +23,9 @@ def cartpole_non_linear_dynamics(s, u, p: 0):
     ca, sa, angleD, positionD = np.cos(s[0]), np.sin(s[0]), s[1], s[3]
     angleDD, positionDD = _cartpole_ode(ca, sa, angleD, positionD, u)
     sD = casadi.SX.sym('sD', 4, 1)
-    sD[0] = s[3]
+    sD[0] = angleD
     sD[1] = angleDD
-    sD[2] = s[1]
+    sD[2] = positionD
     sD[3] = positionDD
     return sD
 
