@@ -80,8 +80,12 @@ class template_controller(ABC):
         self.action_low, self.action_high = self.control_limits
         
         # Set properties like target positions on this controller
-        for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
+        for p, v in initial_environment_attributes.items():
+            if type(v) in {np.ndarray, float, int, bool}:
+                data_type = getattr(v, "dtype", self.lib.float32)
+                data_type = self.lib.int32 if data_type == int else self.lib.float32
+                v = self.lib.to_variable(v, data_type)
+            setattr(self, p, v)
                 
         # Initialize control variable
         self.u = 0.0
@@ -105,18 +109,31 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), new_value)
+            try:
+                # Assume the variable is an attribute type and assign
+                attr = getattr(self, property)
+                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            except:
+                setattr(self, property, new_value)
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-        Q = None  # This line is not obligatory. ;-) Just to indicate that Q must me defined and returned
+        ### Any computations in order to retrieve the current control. Such as:
+        ## If the environment's target positions etc. change, copy the new attributes over to this controller so the cost function knows about it:
+        # self.update_attributes(updated_attributes)
+        ## Use some sort of optimization procedure to get your control, e.g.
+        # u = self.optimizer.step(s, time)
+        ## Use the following call to populate the self.logs dictionary with savevars, such as:
+        # self.update_logs(self.optimizer.logging_values)
+        # return u  # e.g. a normed control input in the range [-1,1]
         pass
-        return Q  # normed control input in the range [-1,1]
+        return None
 
     # Optionally: A method called after an experiment.
     # May be used to print some statistics about controller performance (e.g. number of iter. to converge)
     def controller_report(self):
-        raise NotImplementedError
+        logger.info("No controller report implemented for this controller. Stopping without report.")
+        pass
 
     # Optionally: reset the controller after an experiment
     # May be useful for stateful controllers, like these containing RNN,

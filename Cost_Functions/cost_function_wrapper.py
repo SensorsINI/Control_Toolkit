@@ -16,6 +16,16 @@ cost_function_config = yaml.load(
 
 
 class CostFunctionWrapper:
+    """
+    Wrapper class for cost functions.
+    It allows the creation of an instance with deferred specification which specific class containing cost functions is to be used.
+    
+    Usage:
+    1) Instantiate this wrapper in controller.
+    2) Call `configure` with a reference to the controller instance and the name of the cost function, once this is known to the controller.
+    
+    You can do both steps 
+    """
     def __init__(self):
         self.cost_function = None
         self.cost_function_name_default: str = cost_function_config[
@@ -25,8 +35,15 @@ class CostFunctionWrapper:
     def configure(
         self,
         controller: template_controller,
-        cost_function_specification=None,
+        cost_function_specification: str=None,
     ):
+        """Configure this wrapper as part of a controller.
+
+        :param controller: Reference to the controller instance this wrapper is used by
+        :type controller: template_controller
+        :param cost_function_specification: Name of cost function class within Control_Toolkit_ASF.Cost_Functions.<<Environment_Name>> package. If not specified, the 'default' one is used.
+        :type cost_function_specification: str, optional
+        """
         environment_name = controller.environment_name
         computation_library = controller.computation_library  # Use library dictated by controller
         

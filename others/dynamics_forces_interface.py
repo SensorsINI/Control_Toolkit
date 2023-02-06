@@ -3,6 +3,7 @@ from CartPole.state_utilities import (ANGLE_COS_IDX, ANGLE_IDX, ANGLE_SIN_IDX,
                                       ANGLED_IDX, POSITION_IDX, POSITIOND_IDX,
                                       cartpole_state_vector_to_jacobian_order)
 from CartPoleSimulation.CartPole.cartpole_jacobian import cartpole_jacobian
+from Environments.acrobot_batched import acrobot_batched
 import numpy as np
 import casadi
 """
@@ -37,4 +38,69 @@ def pendulum_dynamics(s, u, p):
     sD = casadi.SX.sym('sD', 2, 1)
     sD[0] = s[1]
     sD[1] = 3 * g / (2 * l) * np.sin(s[0]) + 3.0 / (m * l ** 2) * u
+    return sD
+
+def acrobot_dynamics(s, u, p):
+    LINK_LENGTH_1 = 1.0  # [m]
+    LINK_LENGTH_2 = 1.0  # [m]
+    LINK_MASS_1 = 1.0  #: [kg] mass of link 1
+    LINK_MASS_2 = 1.0  #: [kg] mass of link 2
+    LINK_COM_POS_1 = 0.5  #: [m] position of the center of mass of link 1
+    LINK_COM_POS_2 = 0.5  #: [m] position of the center of mass of link 2
+    LINK_MOI = 1.0  #: moments of inertia for both links
+
+    m1 = LINK_MASS_1
+    m2 = LINK_MASS_2
+    l1 = LINK_LENGTH_1
+    lc1 = LINK_COM_POS_1
+    lc2 = LINK_COM_POS_2
+    I1 = LINK_MOI
+    I2 = LINK_MOI
+    g = 9.8
+
+    theta1, theta2, dtheta1, dtheta2 = np.unstack(s, 4, 1)
+    a = u
+    d1 = (
+        m1 * lc1**2
+        + m2 * (l1**2 + lc2**2 + 2 * l1 * lc2 * casadi.cos(theta2))
+        + I1
+        + I2
+    )
+    d2 = m2 * (lc2**2 + l1 * lc2 * casadi.cos(theta2)) + I2
+    phi2 = m2 * lc2 * g * casadi.cos(theta1 + theta2 - casadi.pi / 2.0)
+    phi1 = (
+        -m2 * l1 * lc2 * dtheta2**2 * casadi.sin(theta2)
+        - 2 * m2 * l1 * lc2 * dtheta2 * dtheta1 * casadi.sin(theta2)
+        + (m1 * lc1 + m2 * l1) * g * casadi.cos(theta1 - casadi.pi / 2)
+        + phi2
+    )
+
+    # the following line is consistent with the java implementation and the
+    # book
+    ddtheta2 = (
+        a
+        + d2 / d1 * phi1
+        - m2 * l1 * lc2 * dtheta1**2 * casadi.sin(theta2)
+        - phi2
+    ) / (m2 * lc2**2 + I2 - d2**2 / d1)
+    ddtheta1 = -(d2 * ddtheta2 + phi1) / d1
+
+    sD = casadi.SX.sym('sD', 4, 1)
+    sD[0] = dtheta1
+    sD[1] = dtheta2
+    sD[2] = ddtheta1
+    sD[3] = ddtheta2
+
+    return sD
+
+def continuous_mountain_car(s,u,p):
+    power = 0.0015
+    force = u
+    min_position = -1.2
+
+    sD = casadi.SX.sym('sD', 2, 1)
+
+    sD[0] = s[1] * casadi.logic_not(casadi.logic_and((s[0] <= min_position), (s[1] < 0)))
+    sD[1] = force * power - 0.0025 * casadi.cos(3 * s[0])
+
     return sD

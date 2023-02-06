@@ -7,8 +7,10 @@ from importlib import import_module
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
 import tensorflow as tf
+import torch
 from numpy.random import SFC64, Generator
-from SI_Toolkit.Functions.TF.Compile import CompileTF
+from SI_Toolkit.Functions.TF.Compile import CompileTF, CompileAdaptive
+from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
 LOGGING_LEVEL = logging.INFO
 
@@ -53,17 +55,29 @@ def get_logger(name):
 log = get_logger(__name__)
 
 
-def create_rng(id: str, seed: int, use_tf: bool = False):
+class torch_gen_like_TF:
+
+    def __init__(self, seed):
+        self.rng = torch.Generator().manual_seed(seed)
+
+    def normal(self, shape, dtype):
+        return torch.normal(mean=0.0, std=1.0, size=shape, generator=self.rng, dtype=dtype)
+
+
+def create_rng(id: str, seed: int, computation_library: ComputationLibrary = NumpyLibrary):
     if seed == None:
         log.info(f"{id}: No random seed specified. Seeding with datetime.")
         seed = int(
             (datetime.now() - datetime(1970, 1, 1)).total_seconds() * 1000.0
         )  # Fully random
 
-    if use_tf:
-        return tf.random.Generator.from_seed(seed=seed)
-    else:
+    if computation_library == NumpyLibrary:
         return Generator(SFC64(seed=seed))
+    elif computation_library == TensorFlowLibrary:
+        return tf.random.Generator.from_seed(seed=seed)
+    elif computation_library == PyTorchLibrary:
+        return torch_gen_like_TF(seed)
+
 
 
 def find_optimizer_if_it_exists(optimizer_name: str) -> str:

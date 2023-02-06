@@ -30,7 +30,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         num_rollouts: int,
         NU: float,
         SQRTRHOINV: float,
-        GAMMA: float,
         gradmax_clip: float,
         optim_steps: int,
         mppi_LR: float,
@@ -61,7 +60,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         # MPPI parameters
         self.NU = NU
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
 
         # Optimization params
         self.gradmax_clip = tf.constant(gradmax_clip, dtype = tf.float32)

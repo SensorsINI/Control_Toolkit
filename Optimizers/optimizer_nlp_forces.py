@@ -64,6 +64,9 @@ class optimizer_nlp_forces(template_optimizer):
             computation_library=computation_library,
         )
 
+        # save cost function for debug purpose
+        self.cost_function = cost_function
+
         # dynamically import dynamics of the model
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, dynamics)
 
