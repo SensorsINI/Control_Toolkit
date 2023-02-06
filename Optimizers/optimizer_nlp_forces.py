@@ -17,6 +17,9 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 # Forces
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
 import forcespro.nlp
 import numpy as np
@@ -70,7 +73,6 @@ class optimizer_nlp_forces(template_optimizer):
         self.action_high = -self.action_low
         self.q = q
         self.r = r
-
         self.optimizer_reset()
 
         self.rsnorms = []
@@ -101,7 +103,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         nx = self.nx
         nu = self.nu
-        # terminal weight obtained from discrete-time Riccati equation
+
+        self.j = 0              #Global counter for debug
+        self.open_loop_solution = dict() #Global variable for debug
 
         # Model Definition
         # ----------------
@@ -112,20 +116,22 @@ class optimizer_nlp_forces(template_optimizer):
         model.nvar = nu + nx  # number of variables
         model.neq = nx  # number of equality constraints
         model.nh = 0  # number of inequality constraint functions
-        model.npar = 1  # number of runtime parameters
+        model.npar = nu + nx  # number of runtime parameters
 
-        Tf = 2.0  # final time
 
         sqrt_weights = [np.sqrt(p) for p in r + q]
 
         # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
 
         # model.LSobjective = lambda z, p: np.array(sqrt_weights) * casadi.fmin(2*np.pi -z,z)
-        model.LSobjective = lambda z, p: np.array(sqrt_weights) * z
+
+        self.target = np.zeros((nu + nx,))
+        model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
         model.continuous_dynamics = self.dynamics       #continuous_dynamics : (s, u) --> ds/dx
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
-        self.integrator_stepsize = Tf / (model.N - 1)
+
+        self.integrator_stepsize = 0.02
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -143,13 +149,13 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Define solver options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 200                                  # Maximum number of iterations
+        codeoptions.maxit = 40                                  # Maximum number of iterations
         codeoptions.printlevel = 1                              # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.nlp.integrator.Ts = self.integrator_stepsize
-        codeoptions.nlp.integrator.nodes = 5
-        codeoptions.nlp.integrator.type = 'ERK4'
-        # codeoptions.nlp.integrator.type = 'BackwardEuler'
+        codeoptions.nlp.integrator.nodes = 1
+        # codeoptions.nlp.integrator.type = 'ERK'
+        codeoptions.nlp.integrator.type = 'ForwardEuler'
         # codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.solvemethod = 'PDIP_NLP'
         # codeoptions.solvemethod = 'ADMM'
@@ -198,12 +204,13 @@ class optimizer_nlp_forces(template_optimizer):
         k3 = self.model.continuous_dynamics(x + dt / 2 * k2, u, 0)
         k4 = self.model.continuous_dynamics(x + dt * k3, u, 0)
         new_x = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-        new_x = np.array([float(new_x[0]), float(new_x[1])])
+        new_x = np.array([float(new_x[i]) for i in range(x.shape[0])])
         return new_x
 
     def step(self, s: np.ndarray, time=None):
         s = s[self.optimize_over].astype(np.float32)
         nx = len(s)
+        nu = self.nu
         u0 = 0.0
         x0 = np.hstack((np.ones((1,))*u0, s))                              # add initial guess for input 0
 
@@ -216,32 +223,73 @@ class optimizer_nlp_forces(template_optimizer):
 
         # x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
         problem = {"x0": x0}
-        problem["all_parameters"] = np.ones((self.model.N, 1))*0.7
+        self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
+        # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
+        problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
         problem["xinit"] = s
-        self.test_solver(problem)
+
+        initial_obj = self.test_initial_condition(problem)
         output, exitflag, info = self.solver.solve(problem)
-        u = output["x01"][0:self.nu]
+        solution_obj = self.test_open_loop_solution(problem, output)
+
+        open_loop = True
+        if open_loop:
+            if self.j == 0:
+                self.open_loop_solution = output.copy()
+            # u = x0[self.j * (nx + nu):self.j * (nx + nu) + nu]
+            u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
+            self.j += 1
+            if self.j == self.model.N - 1:
+                self.j = 0
+
+        else:
+            u = output["x01"][0:self.nu]
         # sD = self.model.continuous_dynamics(s, u)
         self.rsnorms.append(info.rsnorm)
         self.res_eqs.append(info.res_eq)
         self.previous_exitflag = exitflag
         return u.astype(np.float32)
 
-    def test_solver(self, problem):
+    def int_to_dict_key(self, n):
+        return 'x' + str(n+1).zfill(2)
+
+    def test_initial_condition(self, problem):
         x0 = problem['x0']
         pars = problem['all_parameters']
-        for ss in range(self.model.N-1):
-            z = x0[ss*self.model.nvar:(ss+1)*self.model.nvar]
-            p = pars[ss]
+        total_obj = 0
+        initial_trajectory = np.zeros((self.model.N, self.model.neq))
+        for ss in range(self.model.N - 1):
+            z = x0[ss * self.model.nvar:(ss + 1) * self.model.nvar]
+            p = pars[ss,:]
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
+            # self.cost_function.get_stage_cost(z[self.nu:self.nu+self.nx].astype(np.float32), z[0:self.nu].astype(np.float32),
+            #                                   z[0:self.nu].astype(np.float32))
             assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
             assert not (np.any(np.isnan(np.sum(jacc))) or np.any(np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
             assert not (np.any(np.isnan(ineq)) or np.any(np.isinf(ineq))), 'Encountered NaN in ineq at stage ' + str(ss)
             assert not (np.any(np.isnan(jacineq)) or np.any(np.isinf(jacineq))), 'Encountered NaN in jacineq at stage ' + str(ss)
             assert not (np.any(np.isnan(obj)) or np.any(np.isinf(obj))), 'Encountered NaN in obj at stage ' + str(ss)
             assert not (np.any(np.isnan(gradobj)) or np.any(np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
+            total_obj += obj
+            initial_trajectory[ss, :, np.newaxis] = c
+        return total_obj
+        print('Did not encounter NaNs')
+
+    def test_open_loop_solution(self, problem, output):
+        pars = problem['all_parameters']
+        total_obj = 0
+        initial_trajectory = np.zeros((self.model.N, self.model.neq))
+        for ss in range(self.model.N - 1):
+            z = output[("x0" if ss + 1 < 10 else "x") + str(ss + 1)]
+            p = pars[ss,:]
+            c, jacc = self.solver.dynamics(z, p, stage=ss)
+            ineq, jacineq = self.solver.ineq(z, p, stage=ss)
+            obj, gradobj = self.solver.objective(z, p, stage=ss)
+            total_obj += obj
+            initial_trajectory[ss, :, np.newaxis] = c
+        return total_obj
         print('Did not encounter NaNs')
 
     def optimizer_reset(self):
