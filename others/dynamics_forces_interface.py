@@ -20,8 +20,9 @@ def cartpole_linear_dynamics(s, u, p):
     return A @ s + B @ u
 
 def cartpole_non_linear_dynamics(s, u, p: 0):
+    u_max = 2.62
     ca, sa, angleD, positionD = np.cos(s[0]), np.sin(s[0]), s[1], s[3]
-    angleDD, positionDD = _cartpole_ode(ca, sa, angleD, positionD, u)
+    angleDD, positionDD = _cartpole_ode(ca, sa, angleD, positionD, u*u_max)
     sD = casadi.SX.sym('sD', 4, 1)
     sD[0] = angleD
     sD[1] = angleDD

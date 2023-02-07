@@ -48,8 +48,10 @@ class optimizer_nlp_forces(template_optimizer):
             action_max: list[float],
             state_max: list[float],
             optimize_over: list[int],
+            is_angle: list[int],
             q: list[float],
-            r: list[float]
+            r: list[float],
+            dt: float
     ):
         super().__init__(
             predictor=predictor,
@@ -71,7 +73,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, dynamics)
 
         self.optimize_over = optimize_over
-
+        self.is_angle = is_angle
+        self.dt = dt
         self.action_low = -np.array(action_max)
         self.action_high = -self.action_low
         self.q = q
@@ -134,7 +137,7 @@ class optimizer_nlp_forces(template_optimizer):
 
         # We use an explicit RK4 integrator here to discretize continuous dynamics
 
-        self.integrator_stepsize = 0.02
+        self.integrator_stepsize = self.dt
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -153,11 +156,11 @@ class optimizer_nlp_forces(template_optimizer):
         # Define solver options
         codeoptions = forcespro.CodeOptions()
         codeoptions.maxit = 40                                  # Maximum number of iterations
-        codeoptions.printlevel = 1                              # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.printlevel = 2                              # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.nlp.integrator.Ts = self.integrator_stepsize
         codeoptions.nlp.integrator.nodes = 1
-        # codeoptions.nlp.integrator.type = 'ERK'
+        # codeoptions.nlp.integrator.type = 'ERK2'
         codeoptions.nlp.integrator.type = 'ForwardEuler'
         # codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.solvemethod = 'PDIP_NLP'
@@ -177,7 +180,7 @@ class optimizer_nlp_forces(template_optimizer):
         # codeoptions.threadSafeStorage = True;
         codeoptions.overwrite = 1
         codeoptions.nlp.TolStat = 1E-1                          # inf norm tol.on stationarity
-        codeoptions.nlp.TolEq = 1E-1                            # tol. on equality constraints
+        codeoptions.nlp.TolEq = 1E-2                            # tol. on equality constraints
         codeoptions.nlp.TolIneq = 1E-3                          # tol.on inequality constraints
         codeoptions.nlp.TolComp = 1E-3                          # tol.on complementarity
         codeoptions.mu0 = 10                                    #complementary slackness
@@ -210,12 +213,20 @@ class optimizer_nlp_forces(template_optimizer):
         new_x = np.array([float(new_x[i]) for i in range(x.shape[0])])
         return new_x
 
+
+    def offset_angles(self, s, is_angle):
+        f = lambda x: x + 2 * np.pi if x < 0 else x
+        for i in is_angle:
+            s[i] = f(s[i])
+        return
+
     def step(self, s: np.ndarray, time=None):
+        self.offset_angles(s, self.is_angle)
         s = s[self.optimize_over].astype(np.float32)
         nx = len(s)
         nu = self.nu
         u0 = 0.0
-        x0 = np.hstack((np.ones((1,))*u0, s))                              # add initial guess for input 0
+        x0 = np.hstack((np.ones((nu,))*u0, s))                              # add initial guess for input 0
 
         dt = self.integrator_stepsize
         for i in range(self.model.N-1):
@@ -226,7 +237,10 @@ class optimizer_nlp_forces(template_optimizer):
 
         # x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
         problem = {"x0": x0}
-        self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
+        try:
+            self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
+        except AttributeError:
+            pass
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
         problem["xinit"] = s
@@ -235,14 +249,14 @@ class optimizer_nlp_forces(template_optimizer):
         output, exitflag, info = self.solver.solve(problem)
         solution_obj = self.test_open_loop_solution(problem, output)
 
-        open_loop = True
+        open_loop = False
         if open_loop:
             if self.j == 0:
                 self.open_loop_solution = output.copy()
             # u = x0[self.j * (nx + nu):self.j * (nx + nu) + nu]
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
             self.j += 1
-            if self.j == self.model.N - 1:
+            if self.j == self.model.N:
                 self.j = 0
 
         else:
