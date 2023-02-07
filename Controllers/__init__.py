@@ -14,7 +14,7 @@ from others.globals_and_utils import load_or_reload_config_if_modified, update_a
 from get_logger import get_logger
 log = get_logger(__name__)
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
