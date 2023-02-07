@@ -3,4 +3,7 @@ tensorflow_probability
 numpy
 torch
 torchvision
+gym
+dictdiffer
+ruamel.yaml
 gymnasium

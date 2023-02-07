@@ -1,20 +1,24 @@
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Tuple
+from typing import Tuple, Union
 
 import numpy as np
 import yaml
-from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
+from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
-logger = get_logger(__name__)
+from get_logger import get_logger
+log = get_logger(__name__)
+
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
-1. Be in Controller folder
+1. Be in Controllers folder
 2. Have a name starting with "controller_"
 3. The name of the controller class must be the same as the name of the file.
 4. It must have __init__ and step methods
@@ -26,7 +30,7 @@ See the provided examples of controllers to gain more insight.
 class template_controller(ABC):
     _has_optimizer = False
     # Define the computation library in your controller class or in the controller's configuration:
-    _computation_library: "type[ComputationLibrary]" = None
+    _computation_library: ComputationLibrary = None
     
     def __init__(
         self,
@@ -38,14 +42,17 @@ class template_controller(ABC):
         initial_environment_attributes: "dict[str, TensorType]",
     ):
         # Load controller config and select the entry for the current controller
-        config_controllers = yaml.load(
-            open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
-            Loader=yaml.FullLoader
-        )
+        (config_controllers,_) = load_or_reload_config_if_modified(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")) # ignore the _ changes return since this is initial call
+        f=os.path.join("Control_Toolkit_ASF", "config_controllers.yml")
+        fp=Path(f)
+        log.debug(f'loading controller config from "{fp.absolute()}"')
+        config_controllers = yaml.load(open(f), Loader=yaml.FullLoader)
         # self.controller_name is inferred from the class name, which is the class being instantiated
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.
-        self.config_controller = dict(config_controllers[self.controller_name])
+        config_key=self.controller_name
+        self.config_controller = config_controllers[config_key]
+        # add timestep .dt to all controllers here
         self.config_controller["dt"] = dt
         
         # Set computation library
@@ -53,7 +60,7 @@ class template_controller(ABC):
         
         if computation_library_name:
             # Assign computation library from config
-            logger.info(f"Found library {computation_library_name} for MPC controller.")
+            log.info(f"Found library {computation_library_name} for MPC controller.")
             if "tensorflow" in computation_library_name.lower():
                 self._computation_library = TensorFlowLibrary
             elif "pytorch" in computation_library_name.lower():
@@ -67,7 +74,7 @@ class template_controller(ABC):
             if not issubclass(self.computation_library, ComputationLibrary):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
-                logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
+                log.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
         self.lib = self.computation_library  # Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library
 
         # Environment-related parameters
@@ -78,15 +85,20 @@ class template_controller(ABC):
         self.num_control_inputs = num_control_inputs
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
-        
+
+        # todo these are special for cartpole but we would need a base cartpole controller class to put them there
+        # self.target_position=None
+        # self.target_equilibrium=None
+
         # Set properties like target positions on this controller
-        for p, v in initial_environment_attributes.items():
-            if type(v) in {np.ndarray, float, int, bool}:
-                data_type = getattr(v, "dtype", self.lib.float32)
-                data_type = self.lib.int32 if data_type == int else self.lib.float32
-                v = self.lib.to_variable(v, data_type)
-            setattr(self, p, v)
-                
+        for property, new_value in initial_environment_attributes.items():
+            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
+
+        # set all controller config numerical values as float variables in the computation space, e.g. tensorflow, so they can be updqted during runtime
+        for property, value in self.config_controller.items():
+            if value is float or value is int:
+                setattr(self, property, self.computation_library.to_variable(value, self.computation_library.float32))
+
         # Initialize control variable
         self.u = 0.0
 
@@ -106,21 +118,22 @@ class template_controller(ABC):
     def configure(self, **kwargs):
         # In your controller, implement any additional initialization steps here
         pass
-    
-    def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
-        for property, new_value in updated_attributes.items():
-            try:
-                # Assume the variable is an attribute type and assign
-                attr = getattr(self, property)
-                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
-            except:
-                setattr(self, property, new_value)
-    
+
     @abstractmethod
-    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, Union[TensorType,float]]" = dict()):
+        """
+        Execute one timestep of control.
+
+        :param state: the state array, dimensions are TODO add dimension to help users
+        :param time: the time in seconds
+        :param updated_attributes: dict of updated attributes
+
+        :returns: the next control action u e.g. a normed control input in the range [-1,1] TODO is this correct?
+
+        """
         ### Any computations in order to retrieve the current control. Such as:
         ## If the environment's target positions etc. change, copy the new attributes over to this controller so the cost function knows about it:
-        # self.update_attributes(updated_attributes)
+        # update_attributes(updated_attributes,self)
         ## Use some sort of optimization procedure to get your control, e.g.
         # u = self.optimizer.step(s, time)
         ## Use the following call to populate the self.logs dictionary with savevars, such as:
@@ -132,7 +145,7 @@ class template_controller(ABC):
     # Optionally: A method called after an experiment.
     # May be used to print some statistics about controller performance (e.g. number of iter. to converge)
     def controller_report(self):
-        logger.info("No controller report implemented for this controller. Stopping without report.")
+        log.info("No controller report implemented for this controller. Stopping without report.")
         pass
 
     # Optionally: reset the controller after an experiment
@@ -143,10 +156,17 @@ class template_controller(ABC):
     def controller_reset(self):
         raise NotImplementedError
     
-    @property
+    @property # decorates the controller so it has the field .controller_name that gets its short name which is the key in the .yml config file
     def controller_name(self):
+        """ Generates standard name for this controller, but use this method like it were a field.
+
+        :returns: the short name which is the key to the controller in the config_controller.yml file, e.g. 'cartpole_mppi'
+
+        """
         name = self.__class__.__name__
         if name != "template_controller":
+            if 'controller_' not in name:
+                raise AttributeError(f'this controller named "{name}" does not contain "controller_". Controllers should start or contain "controller_" and the key in the config_controllers.yml file should follow the underscore')
             return name.replace("controller_", "").replace("_", "-").lower()
         else:
             raise AttributeError()
@@ -156,7 +176,7 @@ class template_controller(ABC):
         return {}
 
     @property
-    def computation_library(self) -> "type[ComputationLibrary]":
+    def computation_library(self) -> ComputationLibrary:
         if self._computation_library == None:
             raise NotImplementedError("Controller class needs to specify its computation library")
         return self._computation_library

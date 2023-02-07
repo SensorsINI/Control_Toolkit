@@ -23,7 +23,7 @@ class optimizer_gradient_tf(template_optimizer):
         seed: int,
         mpc_horizon: int,
         gradient_steps: int,
-        num_rollouts: int,
+        batch_size: int,
         initial_action_stdev: float,
         learning_rate: float,
         adam_beta_1: float,
@@ -43,7 +43,7 @@ class optimizer_gradient_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )

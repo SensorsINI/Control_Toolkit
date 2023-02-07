@@ -7,36 +7,51 @@ from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
-
-# cost_function config
-cost_function_config = yaml.load(
-    open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"),
-    Loader=yaml.FullLoader,
-)
-
+from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
+from get_logger import get_logger
+log=get_logger(__name__)
 
 class CostFunctionWrapper:
     """
     Wrapper class for cost functions.
     It allows the creation of an instance with deferred specification which specific class containing cost functions is to be used.
-    
+
     Usage:
     1) Instantiate this wrapper in controller.
     2) Call `configure` with a reference to the controller instance and the name of the cost function, once this is known to the controller.
-    
-    You can do both steps 
+
+    You can do both steps
     """
     def __init__(self):
         self.cost_function = None
-        self.cost_function_name_default: str = cost_function_config[
-            "cost_function_name_default"
-        ]
+        # cost_function config
+        (self.cost_function_config, _) = load_or_reload_config_if_modified(
+            os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"), search_path=['CartPoleSimulation']) # if run from physical-cartpole, need to find it relative to CartPoleSimulation submodule
+
+        self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
+        self.lib = None # filled by configure(), needed to update TF variables
+
+        log.info(f'default cost function name is {self.cost_function_name_default}')
+        # cost_function config
+        (self.cost_function_config, _) = load_or_reload_config_if_modified(
+            os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"),search_path=['CartPoleSimulation'])
+
+        self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
+        self.lib = None # filled by configure(), needed to update TF variables
+
+        log.info(f'default cost function name is {self.cost_function_name_default}')
 
     def configure(
         self,
         controller: template_controller,
         cost_function_specification: str=None,
     ):
+        """
+        Configures the cost function. TODO This lazy constructor is needed why?
+
+        :param controller: the controller that uses this cost function
+        :param cost_function_specification: the string name of the cost function class, to construct the class and find the config values in config_cost_functions.yml
+        """
         """Configure this wrapper as part of a controller.
 
         :param controller: Reference to the controller instance this wrapper is used by
@@ -59,6 +74,12 @@ class CostFunctionWrapper:
             cost_function_module, self.cost_function_name
         )(controller, computation_library)
 
+        self.lib=self.cost_function.lib
+
+        config=self.cost_function_config['CartPole'][self.cost_function_name] # todo hardcoded 'CartPole' has to go, not sure how to determine it, maybe from module folder?
+        update_attributes(config, self.cost_function)
+        log.info(f'configured controller {controller.__class__.__name__} with cost function {self.cost_function.__class__}')
+
     def update_cost_function_name_from_specification(
         self, environment_name: str, cost_function_specification: str = None
     ):
@@ -80,10 +101,9 @@ class CostFunctionWrapper:
         return self.cost_function.get_stage_cost(states, inputs, previous_input)
 
     def get_trajectory_cost(
-        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
-    ):
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None, config:dict=None, time:float=None):
         """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
-        return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
+        return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input, time=time)
 
     def copy(self):
         """

@@ -5,9 +5,9 @@ import tensorflow as tf
 import torch
 
 from SI_Toolkit.computation_library import ComputationLibrary, TensorType
-from Control_Toolkit.others.globals_and_utils import get_logger
 from gymnasium.spaces import Box
 
+from get_logger import get_logger
 log = get_logger(__name__)
 
 
@@ -132,6 +132,6 @@ class EnvironmentBatched:
     @property
     def logs(self):
         return getattr(self, "_logs", dict())
-    
+
     def set_logs(self, logs: "dict[str, Any]"):
         self._logs = logs

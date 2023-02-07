@@ -6,11 +6,12 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
-logger = get_logger(__name__)
+from get_logger import get_logger
+log = get_logger(__name__)
 
 
 class optimizer_rpgd_ml_tf(template_optimizer):
@@ -258,7 +259,7 @@ class optimizer_rpgd_ml_tf(template_optimizer):
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx, axis=0),
             ], axis=0)
-            
+
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [

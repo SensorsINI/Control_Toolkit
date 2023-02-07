@@ -5,11 +5,12 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit.others.globals_and_utils import CompileTF
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
-logger = get_logger(__name__)
+from get_logger import get_logger
+log = get_logger(__name__)
 
 
 class optimizer_rpgd_particle_tf(template_optimizer):
@@ -94,7 +95,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             self.theta_max = tf.repeat(tf.expand_dims(self.action_high, 1), 2, 1)
         else:
             raise ValueError(f"Unsupported sampling distribution {self.SAMPLING_DISTRIBUTION}")
-        
+
         self.optimizer_reset()
     
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
@@ -160,7 +161,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
 
-        # Warmstart for next iteration        
+        # Warmstart for next iteration
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
 
@@ -172,9 +173,9 @@ class optimizer_rpgd_particle_tf(template_optimizer):
             [tf.math.mod(c, n), tf.math.floormod(c, n)],
             axis=1,
         )
-        
-        
-    
+
+
+
     @CompileTF
     def get_plans_to_resample(self, Qn: tf.Tensor, terminal_states: tf.Tensor, number_of_plans: int) -> tf.Tensor:
         """Find out which of the terminal states are in the least dense region.
@@ -197,11 +198,11 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         distances_min = tf.reduce_min(distances, axis=1)
         # indices_of_min = tf.where(distances == tf.repeat(distances_min[:, tf.newaxis], batch_size, axis=1))
         # Sanity check: Is np.all(tf.gather_nd(distances, indices_of_min) == distances_min) == True?
-        
+
         # Determine which of the plans to gather
         gather_indices = tf.argsort(distances_min, direction="DESCENDING")[:number_of_plans]
-        
-        return tf.gather(Qn, gather_indices, axis=0)        
+
+        return tf.gather(Qn, gather_indices, axis=0)
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:

@@ -11,7 +11,6 @@ mpc:
   controller_logging: true
 do-mpc-discrete:
   mpc_horizon: 50                       # steps
-  num_rollouts: 1
   # Initial positions
   position_init: 0.0
   positionD_init: 0.0
@@ -21,7 +20,6 @@ do-mpc-discrete:
 do-mpc:
   seed: null                          # If null, random seed based on datetime is used
   mpc_horizon: 50                       # steps
-  num_rollouts: 1
   p_Q: 0.00  # Perturbation factors: Change of output from optimal
   # Random change of cost function by factor
   p_position: 0.0

@@ -9,49 +9,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 import tensorflow as tf
 import torch
 from numpy.random import SFC64, Generator
-from SI_Toolkit.Functions.TF.Compile import CompileTF, CompileAdaptive
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
-
-LOGGING_LEVEL = logging.INFO
-
-
-class CustomFormatter(logging.Formatter):
-    """Logging Formatter to add colors and count warning / errors"""
-
-    grey = "\x1b[38;21m"
-    yellow = "\x1b[33;21m"
-    red = "\x1b[31;21m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    format = (
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
-    )
-
-    FORMATS = {
-        logging.DEBUG: grey + format + reset,
-        logging.INFO: grey + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset,
-    }
-
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
-
-
-def get_logger(name):
-    # logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    logger = logging.getLogger(name)
-    logger.setLevel(LOGGING_LEVEL)
-    # create console handler
-    ch = logging.StreamHandler()
-    ch.setFormatter(CustomFormatter())
-    logger.addHandler(ch)
-    return logger
-
-
+from get_logger import get_logger
 log = get_logger(__name__)
 
 
@@ -240,3 +199,5 @@ def get_optimizer_name(optimizer_names=None, optimizer_name=None, optimizer_idx=
         optimizer_name = optimizer_names[optimizer_idx]
 
     return optimizer_name, optimizer_idx
+
+

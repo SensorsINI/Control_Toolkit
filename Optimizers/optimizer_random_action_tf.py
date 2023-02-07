@@ -22,7 +22,7 @@ class optimizer_random_action_tf(template_optimizer):
         computation_library: "type[ComputationLibrary]",
         seed: int,
         mpc_horizon: int,
-        num_rollouts: int,
+        batch_size: int,
         optimizer_logging: bool,
     ):
         super().__init__(
@@ -33,7 +33,7 @@ class optimizer_random_action_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
