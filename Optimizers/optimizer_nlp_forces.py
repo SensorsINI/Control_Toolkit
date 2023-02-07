@@ -1,6 +1,8 @@
 """
-This is a linear-quadratic optimizer
-The Jacobian of the model needs to be provided
+This is a non-linear optimizer
+Requires ForcesPro software in folder 'forces' in the working directory
+Requires environment specific parameters in config_optimizers and environment specific dynamics in
+others.dynamics_forces_interface.py
 """
 
 from typing import Tuple
@@ -40,18 +42,11 @@ class optimizer_nlp_forces(template_optimizer):
             num_control_inputs: int,
             control_limits: "Tuple[np.ndarray, np.ndarray]",
             computation_library: "type[ComputationLibrary]",
+            optimizer_logging: bool,
             seed: int,
             mpc_horizon: int,
             num_rollouts: int,
-            optimizer_logging: bool,
-            dynamics: str,
-            action_max: list[float],
-            state_max: list[float],
-            optimize_over: list[int],
-            is_angle: list[int],
-            q: list[float],
-            r: list[float],
-            dt: float
+            environment_specific_parameters: dict
     ):
         super().__init__(
             predictor=predictor,
@@ -65,139 +60,121 @@ class optimizer_nlp_forces(template_optimizer):
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
-
         # save cost function for debug purpose
         self.cost_function = cost_function
 
-        # dynamically import dynamics of the model
-        self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, dynamics)
+        # retrieve environment specific parameters of the optimizer
+        environment_name = self.cost_function.cost_function.controller.environment_name
+        environment_name = ''.join(environment_name.split('_')[:-1])
+        env_pars = environment_specific_parameters[environment_name]
 
-        self.optimize_over = optimize_over
-        self.is_angle = is_angle
-        self.dt = dt
-        self.action_low = -np.array(action_max)
-        self.action_high = -self.action_low
-        self.q = q
-        self.r = r
-        self.optimizer_reset()
-
-        self.rsnorms = []
-        self.res_eqs = []
-
-        # lower and upper bounds
-        # constrained_idx = [i for i, x in enumerate(state_max) if x != 'inf']
-        #
-        # xmax = np.array([state_max[i] for i in constrained_idx])
-        xmax = np.array([s if s != 'inf' else np.inf for s in state_max])
-        xmin = -xmax
-
-        umin = self.action_low
-        umax = self.action_high
-
-        # ubidx = [1] + [i + 2 for i in constrained_idx]
-        # lbidx = ubidx
-
-        self.nx = len(optimize_over)
-        self.nu = len(action_max)
-
-        # # Cost matrices for LQR controller
-        # self.Q = np.diag([self.P] * self.nx).astype(np.float32)  # How much to punish x
-        # self.R = np.diag([self.R] * self.nu).astype(np.float32)  # How much to punish u
+        # set attributes
+        self.optimize_over = env_pars['optimize_over']
+        self.is_angle = env_pars['is_angle']
+        self.dt = env_pars['dt']
+        self.q = env_pars['q']
+        self.r = env_pars['r']
+        self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
+        self.state_max = env_pars['state_max']
+        self.action_max = env_pars['action_max']
+        self.action_high = np.array(self.action_max)
+        self.nx = len(self.optimize_over)
+        self.nu = len(self.action_max)
 
         # for readability
         N = self.mpc_horizon
-
         nx = self.nx
         nu = self.nu
+        xmax = np.array([s if s != 'inf' else np.inf for s in self.state_max])
+        xmin = -xmax
+        umin = self.action_low
+        umax = self.action_high
 
-        self.j = 0              #Global counter for debug
-        self.open_loop_solution = dict() #Global variable for debug
+        # global debug variables
+        self.j = 0
+        self.open_loop_solution = dict()
+        self.rsnorms = []
+        self.res_eqs = []
+        self.action_low = -self.action_high
+
+        # reset optimizer
+        self.optimizer_reset()
 
         # Model Definition
         # ----------------
 
         # Problem dimensions
-        self.model = forcespro.nlp.SymbolicModel(N)  # horizon length
+        self.model = forcespro.nlp.SymbolicModel(N)             # horizon length
         model = self.model
-        model.nvar = nu + nx  # number of variables
-        model.neq = nx  # number of equality constraints
-        model.nh = 0  # number of inequality constraint functions
-        model.npar = nu + nx  # number of runtime parameters
+        model.nvar = nu + nx                                    # number of variables
+        model.neq = nx                                          # number of equality constraints
+        model.nh = 0                                            # number of inequality constraint functions
+        model.npar = nu + nx                                    # number of runtime parameters
+        model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
 
-
-        sqrt_weights = [np.sqrt(p) for p in r + q]
-
-        # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
-
-        # model.LSobjective = lambda z, p: np.array(sqrt_weights) * casadi.fmin(2*np.pi -z,z)
-
+        # Cost function
+        sqrt_weights = [np.sqrt(p) for p in self.r + self.q]
         self.target = np.zeros((nu + nx,))
         model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
-        model.continuous_dynamics = self.dynamics       #continuous_dynamics : (s, u) --> ds/dx
+        # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
 
-        # We use an explicit RK4 integrator here to discretize continuous dynamics
-
-        self.integrator_stepsize = self.dt
+        # Dynamics for equality costraints
+        model.continuous_dynamics = self.dynamics               # continuous_dynamics : (s, u) --> ds/dx
+        # Inequality constraints
+        # upper/lower variable bounds lb <= z <= ub
+        model.lb = np.concatenate((umin, xmin), 0)
+        model.ub = np.concatenate((umax, xmax), 0)
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
         model.E = np.concatenate([np.zeros((nx, nu)), np.identity(nx)], axis=1)
 
-        # Inequality constraints
-        # upper/lower variable bounds lb <= x <= ub
-        model.lb = np.concatenate((umin, xmin), 0)
-        model.ub = np.concatenate((umax, xmax), 0)
 
-        model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
 
         # Generate solver
         # ---------------
 
-        # Define solver options
+        # Solver options
+        # Documented at: https://forces.embotech.com/Documentation/solver_options/index.html?highlight=erk2#high-level-interface-options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 40                                  # Maximum number of iterations
-        codeoptions.printlevel = 2                              # Use printlevel = 2 to print progress (but not for timings)
-        codeoptions.optlevel = 2                                # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
-        codeoptions.nlp.integrator.Ts = self.integrator_stepsize
+        codeoptions.maxit = 40                                      # Maximum number of iterations
+        codeoptions.printlevel = 2                                  # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.optlevel = 2                                    # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
+        codeoptions.solvemethod = 'PDIP_NLP'
+        # codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.nlp.hessian_approximation = 'gauss-newton'      # Works only with LSobjective
+        # codeoptions.nlp.hessian_approximation = 'bfgs'            # Works with both LSobjective and objective
+        codeoptions.forcenonconvex = 1
+        # codeoptions.floattype = 'float'
+        # codeoptions.threadSafeStorage = True;
+
+        # Integration
+        codeoptions.nlp.integrator.Ts = self.dt
         codeoptions.nlp.integrator.nodes = 1
         # codeoptions.nlp.integrator.type = 'ERK2'
         codeoptions.nlp.integrator.type = 'ForwardEuler'
-        # codeoptions.solvemethod = 'SQP_NLP'
-        codeoptions.solvemethod = 'PDIP_NLP'
-        # codeoptions.solvemethod = 'ADMM'
 
+        # Tolerances
+        codeoptions.overwrite = 1
+        codeoptions.nlp.TolStat = 1E-1  # inf norm tol.on stationarity
+        codeoptions.nlp.TolEq = 1E-2  # tol. on equality constraints
+        codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
+        codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
+        codeoptions.mu0 = 10  # complementary slackness
+        codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
+
+        # Method specific parameters, override generic ones
         codeoptions.ADMMrho = 6
         codeoptions.ADMMfactorize = 1
         codeoptions.sqp_nlp.rti = 10
         codeoptions.sqp_nlp.maxSQPit = 100
         codeoptions.sqp_nlp.reg_hessian = 5e-2
-        codeoptions.sqp_nlp.qpinit = 0                             # 0 for cold start, 1 for centered start
-
-        codeoptions.nlp.hessian_approximation = 'gauss-newton'
-        # codeoptions.nlp.hessian_approximation = 'bfgs'
-        codeoptions.forcenonconvex = 1
-        # codeoptions.floattype = 'float'
-        # codeoptions.threadSafeStorage = True;
-        codeoptions.overwrite = 1
-        codeoptions.nlp.TolStat = 1E-1                          # inf norm tol.on stationarity
-        codeoptions.nlp.TolEq = 1E-2                            # tol. on equality constraints
-        codeoptions.nlp.TolIneq = 1E-3                          # tol.on inequality constraints
-        codeoptions.nlp.TolComp = 1E-3                          # tol.on complementarity
-        codeoptions.mu0 = 10                                    #complementary slackness
-        codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
-
-        # try:
-        #     with open('model.pickle', 'rb') as handle:
-        #         saved_codeoptions = pickle.load(handle)
-        # except Exception:
-        #     saved_codeoptions = None
+        codeoptions.sqp_nlp.qpinit = 0                              # 0 for cold start, 1 for centered start
 
         generate_new_code = True
         if generate_new_code:
-            # Generate FORCESPRO solver
+            # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
-            # with open('model.pickle', 'wb') as handle:
-            #     pickle.dump(codeoptions, handle, protocol=pickle.HIGHEST_PROTOCOL)
         else:
             # Read already generated solver
             gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
@@ -213,6 +190,8 @@ class optimizer_nlp_forces(template_optimizer):
         new_x = np.array([float(new_x[i]) for i in range(x.shape[0])])
         return new_x
 
+    def int_to_dict_key(self, n):
+        return 'x' + str(n+1).zfill(2)
 
     def offset_angles(self, s, is_angle):
         f = lambda x: x + 2 * np.pi if x < 0 else x
@@ -221,21 +200,24 @@ class optimizer_nlp_forces(template_optimizer):
         return
 
     def step(self, s: np.ndarray, time=None):
+
+        # Offset angles
         self.offset_angles(s, self.is_angle)
+
+        # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
+
+        # Build initial guess x0
         nx = len(s)
         nu = self.nu
         u0 = 0.0
-        x0 = np.hstack((np.ones((nu,))*u0, s))                              # add initial guess for input 0
-
-        dt = self.integrator_stepsize
+        x0 = np.hstack((np.ones((nu,))*u0, s))
+        dt = self.dt
         for i in range(self.model.N-1):
             new_x = self.rungekutta4(x0[-nx:], u0, dt)
             x0 = np.hstack((x0, u0, new_x))
 
-
-
-        # x0 = np.transpose(np.tile(s, (1, self.mpc_horizon)))
+        # Define the problem
         problem = {"x0": x0}
         try:
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
@@ -245,10 +227,12 @@ class optimizer_nlp_forces(template_optimizer):
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
         problem["xinit"] = s
 
-        initial_obj = self.test_initial_condition(problem)
+        # Solve
+        initial_obj = self.test_initial_condition(problem)                      #DEBUG
         output, exitflag, info = self.solver.solve(problem)
-        solution_obj = self.test_open_loop_solution(problem, output)
+        solution_obj = self.test_open_loop_solution(problem, output)            #DEBUG
 
+        # Open loop is useful for debug purposes
         open_loop = False
         if open_loop:
             if self.j == 0:
@@ -258,17 +242,15 @@ class optimizer_nlp_forces(template_optimizer):
             self.j += 1
             if self.j == self.model.N:
                 self.j = 0
-
         else:
             u = output["x01"][0:self.nu]
-        # sD = self.model.continuous_dynamics(s, u)
+
+        # Debug infos
         self.rsnorms.append(info.rsnorm)
         self.res_eqs.append(info.res_eq)
         self.previous_exitflag = exitflag
-        return u.astype(np.float32)
 
-    def int_to_dict_key(self, n):
-        return 'x' + str(n+1).zfill(2)
+        return u.astype(np.float32)
 
     def test_initial_condition(self, problem):
         x0 = problem['x0']
