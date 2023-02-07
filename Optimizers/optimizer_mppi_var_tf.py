@@ -28,7 +28,7 @@ class optimizer_mppi_var_tf(template_optimizer):
         R: float,
         LBD_mc: float,
         mpc_horizon: int,
-        num_rollouts: int,
+        batch_size: int,
         NU_mc: float,
         SQRTRHOINV_mc: float,
         LR: float,
@@ -46,7 +46,7 @@ class optimizer_mppi_var_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )

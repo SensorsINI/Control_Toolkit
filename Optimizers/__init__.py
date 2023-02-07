@@ -54,7 +54,7 @@ class template_optimizer:
         """Pass any additional arguments from the controller to the optimizer."""
         pass
     
-    def step(self, s: np.ndarray, time=None):
+    def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         raise NotImplementedError("Implement this function in a subclass.")
     
     def optimizer_reset(self):

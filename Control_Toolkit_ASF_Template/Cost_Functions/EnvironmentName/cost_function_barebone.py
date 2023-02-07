@@ -9,7 +9,7 @@ from Control_Toolkit.Cost_Functions import cost_function_base
 
 
 # TODO: Load constants from the cost config file, like this:
-config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"), Loader=yaml.FullLoader)
+config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"), "r"), Loader=yaml.FullLoader)
 
 # TODO: Rename parent folder from EnvironmentName to the actual name of you environment
 # TODO: Load constants like this:
@@ -22,6 +22,8 @@ config = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functio
 
 class cost_function_barebone(cost_function_base):
     """This class can contain arbitrary helper functions to compute the cost of a trajectory or inputs."""
+    MAX_COST = 0.0  # Define maximum value the cost can take. Used for shifting
+
     # Example: Cost for difference from upright position
     # def _E_pot_cost(self, angle):
     #     """Compute penalty for not balancing pole upright (penalize large angles)"""
@@ -37,7 +39,7 @@ class cost_function_barebone(cost_function_base):
         # return terminal_cost
         pass
 
-    # all stage costs together
+    # all stage costs together. A 'stage' is one timestep of a rollout.
     def get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType):
         # Shape of states: [batch_size, mpc_horizon, num_states]
         # TODO: Compute stage cost

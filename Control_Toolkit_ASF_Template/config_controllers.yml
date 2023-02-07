@@ -4,14 +4,13 @@
 
 # Examples to get started:
 mpc:
-  optimizer: mppi-tf
+  optimizer: mppi
   predictor_specification: "ODE_TF"    # Can be "ODE", "ODE_TF", network/GP name (possibly with path) e.g. 'GRU-6IN-32H1-32H2-5OUT-0'/'SGP_30' or a name of a custom predictor. For more info see config_predictors in SI_Toolkit_ASF
   cost_function_specification: default  # One of "default", "quadratic_boundary_grad", "quadratic_boundary_nonconvex", "quadratic_boundary"
   computation_library: tensorflow  # One of "numpy", "tensorflow", "pytorch". Defaults to "numpy" if none given.
   controller_logging: true
 do-mpc-discrete:
   mpc_horizon: 50                       # steps
-  num_rollouts: 1
   # Initial positions
   position_init: 0.0
   positionD_init: 0.0
@@ -21,7 +20,6 @@ do-mpc-discrete:
 do-mpc:
   seed: null                          # If null, random seed based on datetime is used
   mpc_horizon: 50                       # steps
-  num_rollouts: 1
   p_Q: 0.00  # Perturbation factors: Change of output from optimal
   # Random change of cost function by factor
   p_position: 0.0

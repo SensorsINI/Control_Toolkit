@@ -26,7 +26,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
         mpc_horizon: int,
         cem_outer_it: int,
         cem_initial_action_stdev: float,
-        num_rollouts: int,
+        batch_size: int,
         cem_stdev_min: float,
         cem_best_k: int,
         optimizer_logging: bool,
@@ -39,7 +39,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
@@ -52,7 +52,6 @@ class optimizer_cem_gmm_tf(template_optimizer):
         
         self.optimizer_reset()
 
-    @CompileTF
     def predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
@@ -67,7 +66,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
 
         #rollout the trajectories and get cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
-        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.mpc_horizon+1, self.num_states])
+        rollout_trajectory = tf.ensure_shape(rollout_trajectory, [self.num_rollouts, self.mpc_horizon + 1, self.num_states])
 
         #sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
@@ -106,7 +105,7 @@ class optimizer_cem_gmm_tf(template_optimizer):
         s = np.tile(s, tf.constant([self.num_rollouts, 1]))
         s = tf.convert_to_tensor(s, dtype=tf.float32)
         Q = tf.zeros((self.num_rollouts, self.mpc_horizon, self.num_control_inputs), dtype=tf.float32)
-        rollout_trajectory = tf.zeros((self.num_rollouts, self.mpc_horizon+1, self.num_states), dtype=tf.float32)
+        rollout_trajectory = tf.zeros((self.num_rollouts, self.mpc_horizon + 1, self.num_states), dtype=tf.float32)
         traj_cost = tf.zeros((self.num_rollouts), dtype=tf.float32)
 
         for _ in range(0, self.cem_outer_it):

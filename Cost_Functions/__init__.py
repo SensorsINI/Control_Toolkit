@@ -1,3 +1,5 @@
+from typing import Optional
+
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
 from Control_Toolkit.Controllers import template_controller
 

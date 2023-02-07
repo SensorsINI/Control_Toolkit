@@ -27,7 +27,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         seed: int,
         mpc_horizon: int,
         cem_outer_it: int,
-        num_rollouts: int,
+        batch_size: int,
         cem_initial_action_stdev: float,
         cem_stdev_min: float,
         cem_best_k: int,
@@ -48,7 +48,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
-            num_rollouts=num_rollouts,
+            batch_size=batch_size,
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )

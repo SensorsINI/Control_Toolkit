@@ -9,7 +9,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 import tensorflow as tf
 import torch
 from numpy.random import SFC64, Generator
-from SI_Toolkit.Functions.TF.Compile import CompileTF, CompileAdaptive
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 from get_logger import get_logger
 log = get_logger(__name__)
@@ -200,3 +199,5 @@ def get_optimizer_name(optimizer_names=None, optimizer_name=None, optimizer_idx=
         optimizer_name = optimizer_names[optimizer_idx]
 
     return optimizer_name, optimizer_idx
+
+
