@@ -29,7 +29,7 @@ class cost_function_base:
         self.controller:template_controller = controller
         self.config:dict=config
         self.set_computation_library(ComputationLib)
-        logger.info(f'constructed {self} with controller {controller} computation library {ComputationLib} and config {config}')
+        log.info(f'constructed {self} with controller {controller} computation library {ComputationLib} and config {config}')
 
     def get_terminal_cost(self, terminal_states: TensorType) -> TensorType:
         """Compute a batch of terminal costs for a batch of terminal states.

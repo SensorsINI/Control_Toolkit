@@ -26,7 +26,7 @@ class CostFunctionWrapper:
         self.cost_function = None
         # cost_function config
         (self.cost_function_config, _) = load_or_reload_config_if_modified(
-            os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"))
+            os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"), search_path=['CartPoleSimulation']) # if run from physical-cartpole, need to find it relative to CartPoleSimulation submodule
 
         self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
         self.lib = None # filled by configure(), needed to update TF variables
