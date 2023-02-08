@@ -17,10 +17,10 @@ from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
-
 # Forces
 import sys
 import os
+
 sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
 import forcespro.nlp
@@ -30,6 +30,7 @@ import casadi
 import os
 import pickle
 import Control_Toolkit.others.dynamics_forces_interface
+
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -65,8 +66,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         # retrieve environment specific parameters of the optimizer
         environment_name = self.cost_function.cost_function.controller.environment_name
-        environment_name = ''.join(environment_name.split('_')[:-1])
+        environment_name = '_'.join(environment_name.split('_')[:-1])
         env_pars = environment_specific_parameters[environment_name]
+        self.environment_name = environment_name
 
         # set attributes
         self.optimize_over = env_pars['optimize_over']
@@ -96,6 +98,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.rsnorms = []
         self.res_eqs = []
         self.action_low = -self.action_high
+        self.open_loop_errors = np.zeros((N, 1))
 
         # reset optimizer
         self.optimizer_reset()
@@ -104,22 +107,27 @@ class optimizer_nlp_forces(template_optimizer):
         # ----------------
 
         # Problem dimensions
-        self.model = forcespro.nlp.SymbolicModel(N)             # horizon length
-        model = self.model
-        model.nvar = nu + nx                                    # number of variables
-        model.neq = nx                                          # number of equality constraints
-        model.nh = 0                                            # number of inequality constraint functions
-        model.npar = nu + nx                                    # number of runtime parameters
+        model = forcespro.nlp.SymbolicModel(N)
+        model.nvar = nu + nx  # number of variables
+        model.neq = nx  # number of equality constraints
+        model.nh = 0  # number of inequality constraint functions
+        model.npar = nu + nx  # number of runtime parameters
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
+        self.model = model
 
         # Cost function
+        # More info at https://forces.embotech.com/Documentation/solver_options/index.html?highlight=lsobjective#gauss-newton-options
         sqrt_weights = [np.sqrt(p) for p in self.r + self.q]
         self.target = np.zeros((nu + nx,))
-        model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
+        # model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
         # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
+        # model.objective = lambda z, p: -casadi.sin(3 * z[1]) / ((z[1] - p[1] - 0.8) ** 2)
+        # model.LSobjective = lambda z, p: casadi.sin(3*z[1])/((z[1]-p[0]-0.5)**2)
+        model.objective = lambda z, p:  -1.27*(z[1] + 0.4)**3 - 1.56 * (z[1] + 0.4)**2 + 0.00326758 * (z[1] + 0.4) + 0.322505
+        # model.objectiveN = lambda z, p: 100*model.objective(z,p)
 
         # Dynamics for equality costraints
-        model.continuous_dynamics = self.dynamics               # continuous_dynamics : (s, u) --> ds/dx
+        model.continuous_dynamics = self.dynamics  # continuous_dynamics : (s, u) --> ds/dx
         # Inequality constraints
         # upper/lower variable bounds lb <= z <= ub
         model.lb = np.concatenate((umin, xmin), 0)
@@ -129,24 +137,23 @@ class optimizer_nlp_forces(template_optimizer):
         # sure the matrix E has structure [0 I] where I is the identity matrix.
         model.E = np.concatenate([np.zeros((nx, nu)), np.identity(nx)], axis=1)
 
-
-
         # Generate solver
         # ---------------
 
         # Solver options
         # Documented at: https://forces.embotech.com/Documentation/solver_options/index.html?highlight=erk2#high-level-interface-options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 40                                      # Maximum number of iterations
-        codeoptions.printlevel = 2                                  # Use printlevel = 2 to print progress (but not for timings)
-        codeoptions.optlevel = 2                                    # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
+        codeoptions.maxit = 1000  # Maximum number of iterations
+        codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.solvemethod = 'PDIP_NLP'
         # codeoptions.solvemethod = 'SQP_NLP'
-        codeoptions.nlp.hessian_approximation = 'gauss-newton'      # Works only with LSobjective
-        # codeoptions.nlp.hessian_approximation = 'bfgs'            # Works with both LSobjective and objective
+        # codeoptions.nlp.hessian_approximation = 'gauss-newton'      # Works only with LSobjective
+        codeoptions.nlp.hessian_approximation = 'bfgs'  # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
+        codeoptions.overwrite = 1
 
         # Integration
         codeoptions.nlp.integrator.Ts = self.dt
@@ -155,9 +162,8 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.integrator.type = 'ForwardEuler'
 
         # Tolerances
-        codeoptions.overwrite = 1
         codeoptions.nlp.TolStat = 1E-1  # inf norm tol.on stationarity
-        codeoptions.nlp.TolEq = 1E-2  # tol. on equality constraints
+        codeoptions.nlp.TolEq = 5E-2  # tol. on equality constraints
         codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
         codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
         codeoptions.mu0 = 10  # complementary slackness
@@ -169,9 +175,12 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.sqp_nlp.rti = 10
         codeoptions.sqp_nlp.maxSQPit = 100
         codeoptions.sqp_nlp.reg_hessian = 5e-2
-        codeoptions.sqp_nlp.qpinit = 0                              # 0 for cold start, 1 for centered start
+        codeoptions.sqp_nlp.qpinit = 0  # 0 for cold start, 1 for centered start
 
-        generate_new_code = True
+        # Open loop is useful for debug purposes
+        self.open_loop = False
+
+        generate_new_code = False
         if generate_new_code:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
@@ -191,7 +200,7 @@ class optimizer_nlp_forces(template_optimizer):
         return new_x
 
     def int_to_dict_key(self, n):
-        return 'x' + str(n+1).zfill(2)
+        return 'x' + str(n + 1).zfill(2)
 
     def offset_angles(self, s, is_angle):
         f = lambda x: x + 2 * np.pi if x < 0 else x
@@ -211,9 +220,9 @@ class optimizer_nlp_forces(template_optimizer):
         nx = len(s)
         nu = self.nu
         u0 = 0.0
-        x0 = np.hstack((np.ones((nu,))*u0, s))
+        x0 = np.hstack((np.ones((nu,)) * u0, s))
         dt = self.dt
-        for i in range(self.model.N-1):
+        for i in range(self.model.N - 1):
             new_x = self.rungekutta4(x0[-nx:], u0, dt)
             x0 = np.hstack((x0, u0, new_x))
 
@@ -223,32 +232,50 @@ class optimizer_nlp_forces(template_optimizer):
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
         except AttributeError:
             pass
+        if self.environment_name == 'mountaincar_continuos':
+            self.target[0] = 0.45
+
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
         problem["xinit"] = s
 
-        # Solve
-        initial_obj = self.test_initial_condition(problem)                      #DEBUG
-        output, exitflag, info = self.solver.solve(problem)
-        solution_obj = self.test_open_loop_solution(problem, output)            #DEBUG
+        if not self.open_loop or self.j == 0:
+            # Solve
+            initial_obj = self.test_initial_condition(problem)  # DEBUG
+            output, exitflag, info = self.solver.solve(problem)
+            solution_obj = self.test_open_loop_solution(problem, output)  # DEBUG
 
-        # Open loop is useful for debug purposes
-        open_loop = False
-        if open_loop:
-            if self.j == 0:
+            # If solver failed use previous output
+            if exitflag >= 0 or self.open_loop_solution == {}:
+                self.j = 0
                 self.open_loop_solution = output.copy()
-            # u = x0[self.j * (nx + nu):self.j * (nx + nu) + nu]
+            else:
+                self.j += 1
+
+            # Get input
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
+
+            # Debug infos
+            self.rsnorms.append(info.rsnorm)
+            self.res_eqs.append(info.res_eq)
+            self.previous_exitflag = exitflag
+
+            if self.open_loop:
+                self.open_loop_solution = output.copy()
+                self.j += 1
+        else:
+            # Retrieve jth element from the open loop solution
+            u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
+
+            # DEBUG
+            self.open_loop_errors[self.j] = np.linalg.norm(
+                self.open_loop_solution[self.int_to_dict_key(self.j)][1:] - s)
+            print('Open loop prediction:' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
+            print('Open loop error:' + str(self.open_loop_errors[self.j]) + '\n\n')
+
             self.j += 1
             if self.j == self.model.N:
                 self.j = 0
-        else:
-            u = output["x01"][0:self.nu]
-
-        # Debug infos
-        self.rsnorms.append(info.rsnorm)
-        self.res_eqs.append(info.res_eq)
-        self.previous_exitflag = exitflag
 
         return u.astype(np.float32)
 
@@ -259,18 +286,21 @@ class optimizer_nlp_forces(template_optimizer):
         initial_trajectory = np.zeros((self.model.N, self.model.neq))
         for ss in range(self.model.N - 1):
             z = x0[ss * self.model.nvar:(ss + 1) * self.model.nvar]
-            p = pars[ss,:]
+            p = pars[ss, :]
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
             # self.cost_function.get_stage_cost(z[self.nu:self.nu+self.nx].astype(np.float32), z[0:self.nu].astype(np.float32),
             #                                   z[0:self.nu].astype(np.float32))
             assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
-            assert not (np.any(np.isnan(np.sum(jacc))) or np.any(np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
+            assert not (np.any(np.isnan(np.sum(jacc))) or np.any(
+                np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
             assert not (np.any(np.isnan(ineq)) or np.any(np.isinf(ineq))), 'Encountered NaN in ineq at stage ' + str(ss)
-            assert not (np.any(np.isnan(jacineq)) or np.any(np.isinf(jacineq))), 'Encountered NaN in jacineq at stage ' + str(ss)
+            assert not (np.any(np.isnan(jacineq)) or np.any(
+                np.isinf(jacineq))), 'Encountered NaN in jacineq at stage ' + str(ss)
             assert not (np.any(np.isnan(obj)) or np.any(np.isinf(obj))), 'Encountered NaN in obj at stage ' + str(ss)
-            assert not (np.any(np.isnan(gradobj)) or np.any(np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
+            assert not (np.any(np.isnan(gradobj)) or np.any(
+                np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
             total_obj += obj
             initial_trajectory[ss, :, np.newaxis] = c
         return total_obj
@@ -282,7 +312,7 @@ class optimizer_nlp_forces(template_optimizer):
         initial_trajectory = np.zeros((self.model.N, self.model.neq))
         for ss in range(self.model.N - 1):
             z = output[("x0" if ss + 1 < 10 else "x") + str(ss + 1)]
-            p = pars[ss,:]
+            p = pars[ss, :]
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
@@ -293,4 +323,3 @@ class optimizer_nlp_forces(template_optimizer):
 
     def optimizer_reset(self):
         pass
-
