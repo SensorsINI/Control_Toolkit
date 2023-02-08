@@ -1,14 +1,11 @@
 from importlib import import_module
 import os
 from SI_Toolkit.computation_library import TensorType
-import yaml
-from copy import deepcopy as dcp
-from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
 from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log=get_logger(__name__)
 
 class CostFunctionWrapper:

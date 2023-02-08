@@ -2,7 +2,6 @@ import os
 from typing import Optional
 
 from Control_Toolkit_ASF.Cost_Functions.CartPole.cartpole_trajectory_generator import cartpole_trajectory_generator
-from GUI import gui_default_params
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
@@ -18,12 +17,12 @@ from torch import inference_mode
 
 from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
 
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log = get_logger(__name__)
 
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 
 
 class controller_mpc(template_controller):

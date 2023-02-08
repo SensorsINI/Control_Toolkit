@@ -1,5 +1,4 @@
 import glob
-import logging
 import os
 from datetime import datetime
 from importlib import import_module
@@ -10,7 +9,7 @@ import tensorflow as tf
 import torch
 from numpy.random import SFC64, Generator
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log = get_logger(__name__)
 
 

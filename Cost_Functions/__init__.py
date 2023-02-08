@@ -3,7 +3,7 @@ from typing import Optional
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
 from Control_Toolkit.Controllers import template_controller
 
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log = get_logger(__name__)
 
 class cost_function_base:

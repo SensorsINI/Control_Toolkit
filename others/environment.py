@@ -1,13 +1,11 @@
 from typing import Any, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow as tf
-import torch
 
 from SI_Toolkit.computation_library import ComputationLibrary, TensorType
 from gymnasium.spaces import Box
 
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log = get_logger(__name__)
 
 

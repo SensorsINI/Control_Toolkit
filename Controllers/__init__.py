@@ -1,7 +1,6 @@
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Tuple
 from typing import Tuple, Union
 
 import numpy as np
@@ -9,12 +8,12 @@ import yaml
 from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
-from others.globals_and_utils import load_or_reload_config_if_modified, update_attributes
+from others.globals_and_utils import load_or_reload_config_if_modified
 
-from get_logger import get_logger
+from Control_Toolkit.others.get_logger import get_logger
 log = get_logger(__name__)
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml")), Loader=yaml.FullLoader)
 
 """
 For a controller to be found and imported by CartPoleGUI/DataGenerator it must:
