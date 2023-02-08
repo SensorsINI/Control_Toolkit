@@ -30,6 +30,7 @@ import casadi
 import os
 import pickle
 import Control_Toolkit.others.dynamics_forces_interface
+import Control_Toolkit.others.cost_forces_interface
 
 
 class optimizer_nlp_forces(template_optimizer):
@@ -77,6 +78,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.q = env_pars['q']
         self.r = env_pars['r']
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
+        self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
+                                                                                             'cost'] != None else None
         self.state_max = env_pars['state_max']
         self.action_max = env_pars['action_max']
         self.action_high = np.array(self.action_max)
@@ -117,14 +120,14 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Cost function
         # More info at https://forces.embotech.com/Documentation/solver_options/index.html?highlight=lsobjective#gauss-newton-options
-        sqrt_weights = [np.sqrt(p) for p in self.r + self.q]
         self.target = np.zeros((nu + nx,))
-        # model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
-        # model.objective = lambda z, p: (sqrt_weights*z).T @ (sqrt_weights*z)
-        # model.objective = lambda z, p: -casadi.sin(3 * z[1]) / ((z[1] - p[1] - 0.8) ** 2)
-        # model.LSobjective = lambda z, p: casadi.sin(3*z[1])/((z[1]-p[0]-0.5)**2)
-        model.objective = lambda z, p:  -1.27*(z[1] + 0.4)**3 - 1.56 * (z[1] + 0.4)**2 + 0.00326758 * (z[1] + 0.4) + 0.322505
-        # model.objectiveN = lambda z, p: 100*model.objective(z,p)
+        if self.cost != None:
+            model.objective = self.cost
+            model.objectiveN = lambda z, p: model.objective(z, p)
+        else:
+            sqrt_weights = [np.sqrt(p) for p in self.r + self.q]
+            model.LSobjective = lambda z, p: np.array(sqrt_weights) * (z - p)
+            model.LSobjectiveN = lambda z, p: model.LSobjective(z, p)
 
         # Dynamics for equality costraints
         model.continuous_dynamics = self.dynamics  # continuous_dynamics : (s, u) --> ds/dx
@@ -148,8 +151,8 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.solvemethod = 'PDIP_NLP'
         # codeoptions.solvemethod = 'SQP_NLP'
-        # codeoptions.nlp.hessian_approximation = 'gauss-newton'      # Works only with LSobjective
-        codeoptions.nlp.hessian_approximation = 'bfgs'  # Works with both LSobjective and objective
+        codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
+        codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
@@ -170,17 +173,14 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
 
         # Method specific parameters, override generic ones
-        codeoptions.ADMMrho = 6
-        codeoptions.ADMMfactorize = 1
+        # codeoptions.ADMMrho = 6
+        # codeoptions.ADMMfactorize = 1
         codeoptions.sqp_nlp.rti = 10
         codeoptions.sqp_nlp.maxSQPit = 100
         codeoptions.sqp_nlp.reg_hessian = 5e-2
-        codeoptions.sqp_nlp.qpinit = 0  # 0 for cold start, 1 for centered start
+        codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
 
-        # Open loop is useful for debug purposes
-        self.open_loop = False
-
-        generate_new_code = False
+        generate_new_code = True
         if generate_new_code:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
@@ -189,6 +189,9 @@ class optimizer_nlp_forces(template_optimizer):
             gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
             self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
             pass
+
+        # Open loop is useful for debug purposes
+        self.open_loop = False
 
     def rungekutta4(self, x, u, dt):
         k1 = self.model.continuous_dynamics(x, u, 0)
@@ -229,11 +232,9 @@ class optimizer_nlp_forces(template_optimizer):
         # Define the problem
         problem = {"x0": x0}
         try:
-            self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()
+            self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
         except AttributeError:
             pass
-        if self.environment_name == 'mountaincar_continuos':
-            self.target[0] = 0.45
 
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))

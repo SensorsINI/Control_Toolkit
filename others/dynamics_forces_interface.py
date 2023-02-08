@@ -58,7 +58,13 @@ def acrobot_dynamics(s, u, p):
     I2 = LINK_MOI
     g = 9.8
 
-    theta1, theta2, dtheta1, dtheta2 = np.unstack(s, 4, 1)
+    # theta1, theta2, dtheta1, dtheta2 = tuple(list(s))
+    # theta1, theta2, dtheta1, dtheta2 = np.unstack(s, 4, 1)
+    theta1 = s[0]
+    theta2 = s[1]
+    dtheta1 = s[2]
+    dtheta2 = s[3]
+
     a = u
     d1 = (
         m1 * lc1**2
@@ -93,14 +99,16 @@ def acrobot_dynamics(s, u, p):
 
     return sD
 
-def continuous_mountain_car(s,u,p):
+def continuous_mountaincar(s,u,p):
     power = 0.0015
     force = u
     min_position = -1.2
 
+    position = s[0]
+    velocity = s[1]
     sD = casadi.SX.sym('sD', 2, 1)
 
-    sD[0] = s[1] * casadi.logic_not(casadi.logic_and((s[0] <= min_position), (s[1] < 0)))
-    sD[1] = force * power - 0.0025 * casadi.cos(3 * s[0])
+    sD[0] = s[1] * casadi.logic_not(casadi.logic_and((position <= min_position), (velocity < 0)))
+    sD[1] = force * power - 0.0025 * casadi.cos(3 * position)
 
     return sD
