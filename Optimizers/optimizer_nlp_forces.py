@@ -182,7 +182,7 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.sqp_nlp.reg_hessian = 5e-2
         codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
 
-        generate_new_code = False
+        generate_new_code = True
         if generate_new_code:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
@@ -213,19 +213,21 @@ class optimizer_nlp_forces(template_optimizer):
             s[i] = f(s[i])
         return
 
-    def initial_trajectory_guess(self, s0, target, initial_control_plan):
+    def initial_trajectory_guess(self, s0, target, control_strategy):
         x0 = np.ndarray((0,))
         s = s0
-        u = initial_control_plan(s, target)
+        u = control_strategy(s, target)
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
             new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
-            u = initial_control_plan(new_x, target)
+            u = control_strategy(new_x, target)
             x0 = np.hstack((x0, u, new_x))
 
         return x0
+
+
 
     def step(self, s: np.ndarray, time=None):
 
@@ -234,7 +236,6 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
-
 
         # Define the problem
         try:
