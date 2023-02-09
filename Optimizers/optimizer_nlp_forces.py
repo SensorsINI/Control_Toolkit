@@ -31,7 +31,7 @@ import os
 import pickle
 import Control_Toolkit.others.dynamics_forces_interface
 import Control_Toolkit.others.cost_forces_interface
-
+import Control_Toolkit.others.initial_guess_forces_interface
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -47,6 +47,7 @@ class optimizer_nlp_forces(template_optimizer):
             optimizer_logging: bool,
             seed: int,
             mpc_horizon: int,
+            initial_guess: str,
             num_rollouts: int,
             environment_specific_parameters: dict
     ):
@@ -77,6 +78,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.dt = env_pars['dt']
         self.q = env_pars['q']
         self.r = env_pars['r']
+        self.initial_strategy = getattr(Control_Toolkit.others.initial_guess_forces_interface, initial_guess)
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
         self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
                                                                                              'cost'] != None else None
@@ -180,7 +182,7 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.sqp_nlp.reg_hessian = 5e-2
         codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
 
-        generate_new_code = True
+        generate_new_code = False
         if generate_new_code:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
@@ -211,6 +213,20 @@ class optimizer_nlp_forces(template_optimizer):
             s[i] = f(s[i])
         return
 
+    def initial_trajectory_guess(self, s0, target, initial_control_plan):
+        x0 = np.ndarray((0,))
+        s = s0
+        u = initial_control_plan(s, target)
+        x0 = np.hstack((x0, u, s))
+
+        for i in range(self.model.N-1):
+            # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
+            new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
+            u = initial_control_plan(new_x, target)
+            x0 = np.hstack((x0, u, new_x))
+
+        return x0
+
     def step(self, s: np.ndarray, time=None):
 
         # Offset angles
@@ -219,22 +235,16 @@ class optimizer_nlp_forces(template_optimizer):
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
 
-        # Build initial guess x0
-        nx = len(s)
-        nu = self.nu
-        u0 = 0.0
-        x0 = np.hstack((np.ones((nu,)) * u0, s))
-        dt = self.dt
-        for i in range(self.model.N - 1):
-            new_x = self.rungekutta4(x0[-nx:], u0, dt)
-            x0 = np.hstack((x0, u0, new_x))
 
         # Define the problem
-        problem = {"x0": x0}
         try:
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
         except AttributeError:
             pass
+
+        # Build initial guess x0
+        x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        problem = {"x0": x0}
 
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
@@ -242,9 +252,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         if not self.open_loop or self.j == 0:
             # Solve
-            initial_obj = self.test_initial_condition(problem)  # DEBUG
+            self.initial_obj = self.test_initial_condition(problem)  # DEBUG
             output, exitflag, info = self.solver.solve(problem)
-            solution_obj = self.test_open_loop_solution(problem, output)  # DEBUG
+            self.solution_obj = self.test_open_loop_solution(problem, output)  # DEBUG
 
             # If solver failed use previous output
             if exitflag >= 0 or self.open_loop_solution == {}:
@@ -271,8 +281,8 @@ class optimizer_nlp_forces(template_optimizer):
             # DEBUG
             self.open_loop_errors[self.j] = np.linalg.norm(
                 self.open_loop_solution[self.int_to_dict_key(self.j)][1:] - s)
-            print('Open loop prediction:' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
-            print('Open loop error:' + str(self.open_loop_errors[self.j]) + '\n\n')
+            print('\n\n' + 'Open loop prediction: ' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
+            print('Open loop error: ' + str(self.open_loop_errors[self.j,0]))
 
             self.j += 1
             if self.j == self.model.N:
@@ -312,7 +322,7 @@ class optimizer_nlp_forces(template_optimizer):
         total_obj = 0
         initial_trajectory = np.zeros((self.model.N, self.model.neq))
         for ss in range(self.model.N - 1):
-            z = output[("x0" if ss + 1 < 10 else "x") + str(ss + 1)]
+            z = output[self.int_to_dict_key(ss)]
             p = pars[ss, :]
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
