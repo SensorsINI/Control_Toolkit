@@ -150,8 +150,8 @@ class optimizer_nlp_forces(template_optimizer):
         else:
             model.lbidx = list(range(model.nvar))
             model.ubidx = list(range(model.nvar))
-            self.lb_tiled = np.tile(lb, (self.model.N,))
-            self.ub_tiled = np.tile(ub, (self.model.N,))
+            # self.lb_tiled = np.tile(lb, (self.model.N,))
+            # self.ub_tiled = np.tile(ub, (self.model.N,))
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -175,8 +175,8 @@ class optimizer_nlp_forces(template_optimizer):
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
         codeoptions.overwrite = 1
-        if terminal_set_width > 0:
-            codeoptions.nlp.stack_parambounds = True
+        # if terminal_set_width > 0:
+        #     codeoptions.nlp.stack_parambounds = True
 
         # Integration
         codeoptions.nlp.integrator.Ts = self.dt
@@ -215,6 +215,21 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Open loop is useful for debug purposes
         self.open_loop = False
+
+        # Specify fixed parameters of the problem
+        self.problem = {}
+
+        # Lower and upper bounds
+        self.problem['lb01'] = lb[:nu]
+        self.problem['ub01'] = ub[:nu]
+        for i in range(1, N):
+            key = "{:02d}".format(i + 1)
+            self.problem['lb'+key] = lb
+            self.problem['ub'+key] = ub
+
+        # Override SQP initial guess at every step
+        if self.codeoptions.solvemethod == 'SQP_NLP':
+            self.problem['reinitialize'] = True
 
     def rungekutta4(self, x, u, dt):
         k1 = self.model.continuous_dynamics(x, u, 0)
@@ -267,28 +282,28 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
-        problem = {"x0": x0}
+        self.problem["x0"] = x0
 
         # Terminal set around target
         if self.terminal_set_width > 0:
-            self.lb_tiled[:-self.nx][self.idx_terminal_set] = self.target[self.idx_terminal_set] - self.terminal_set_width
-            self.ub_tiled[:-self.nx][self.idx_terminal_set] = self.target[self.idx_terminal_set] + self.terminal_set_width
-            problem['lb'] = self.lb_tiled
-            problem['ub'] = self.ub_tiled
+            key = "{:02d}".format(self.model.N)
+            self.problem['lb' + key] = self.problem['lb' + key].copy()
+            self.problem['ub' + key] = self.problem['ub' + key].copy()
+            self.problem['lb' + key][self.nu:][self.idx_terminal_set] = \
+                self.target[self.nu:][self.idx_terminal_set] - self.terminal_set_width
+            self.problem['ub' + key][self.nu:][self.idx_terminal_set] = \
+                self.target[self.nu:][self.idx_terminal_set] + self.terminal_set_width
 
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
-        problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
-        problem['xinit'] = s
+        self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
+        self.problem['xinit'] = s
         # problem['xfinal'] = self.target[self.nu:] if self.terminal_constraint_at_target else None
-
-        if self.codeoptions.solvemethod == 'SQP_NLP':
-            problem['reinitialize'] = True
 
         if not self.open_loop or self.j == 0:
             # Solve
-            self.initial_obj = self.test_initial_condition(problem)  # DEBUG
-            output, exitflag, info = self.solver.solve(problem)
-            self.solution_obj = self.test_open_loop_solution(problem, output)  # DEBUG
+            self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
+            output, exitflag, info = self.solver.solve(self.problem)
+            self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
 
             # If solver failed use previous output
             if exitflag >= 0 or self.open_loop_solution == {}:
