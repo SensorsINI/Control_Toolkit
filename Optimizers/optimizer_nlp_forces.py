@@ -48,6 +48,8 @@ class optimizer_nlp_forces(template_optimizer):
             seed: int,
             mpc_horizon: int,
             initial_guess: str,
+            generate_new_solver: bool,
+            terminal_constraint_at_target: bool,
             num_rollouts: int,
             environment_specific_parameters: dict
     ):
@@ -82,6 +84,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
         self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
                                                                                              'cost'] != None else None
+        self.generate_new_solver = generate_new_solver
+        self.terminal_constraint_at_target = terminal_constraint_at_target
         self.state_max = env_pars['state_max']
         self.action_max = env_pars['action_max']
         self.action_high = np.array(self.action_max)
@@ -118,6 +122,7 @@ class optimizer_nlp_forces(template_optimizer):
         model.nh = 0  # number of inequality constraint functions
         model.npar = nu + nx  # number of runtime parameters
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
+        model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
 
         # Cost function
@@ -151,10 +156,11 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.maxit = 1000  # Maximum number of iterations
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
-        codeoptions.solvemethod = 'PDIP_NLP'
-        # codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.parallel = 1
+        # codeoptions.solvemethod = 'PDIP_NLP'
+        codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
-        codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
+        # codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
@@ -167,23 +173,26 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.integrator.type = 'ForwardEuler'
 
         # Tolerances
-        codeoptions.nlp.TolStat = 1E-1  # inf norm tol.on stationarity
-        codeoptions.nlp.TolEq = 5E-2  # tol. on equality constraints
+        codeoptions.nlp.TolStat = 1E-3  # inf norm tol.on stationarity
+        codeoptions.nlp.TolEq = 1E-3  # tol. on equality constraints
         codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
         codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
-        codeoptions.mu0 = 10  # complementary slackness
+        # codeoptions.mu0 = 10  # complementary slackness
         codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
 
         # Method specific parameters, override generic ones
         # codeoptions.ADMMrho = 6
         # codeoptions.ADMMfactorize = 1
-        codeoptions.sqp_nlp.rti = 10
-        codeoptions.sqp_nlp.maxSQPit = 100
-        codeoptions.sqp_nlp.reg_hessian = 5e-2
-        codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
+        # codeoptions.sqp_nlp.rti = 10
+        codeoptions.sqp_nlp.maxqps = 200
+        # codeoptions.sqp_nlp.maxSQPit = 100
+        # codeoptions.sqp_nlp.reg_hessian = 5e-2
+        # codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
+        codeoptions.sqp_nlp.qp_timeout = 0
+        # Save codeoptions
+        self.codeoptions = codeoptions
 
-        generate_new_code = True
-        if generate_new_code:
+        if self.generate_new_solver:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
         else:
@@ -238,6 +247,7 @@ class optimizer_nlp_forces(template_optimizer):
         s = s[self.optimize_over].astype(np.float32)
 
         # Define the problem
+        #@TODO Refactor
         try:
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
         except AttributeError:
@@ -250,6 +260,9 @@ class optimizer_nlp_forces(template_optimizer):
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
         problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
         problem["xinit"] = s
+        problem["xfinal"] = self.target[self.nu:]
+        if self.codeoptions.solvemethod == 'SQP_NLP':
+            problem["reinitialize"] = True
 
         if not self.open_loop or self.j == 0:
             # Solve
