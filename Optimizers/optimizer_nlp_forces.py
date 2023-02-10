@@ -50,6 +50,7 @@ class optimizer_nlp_forces(template_optimizer):
             initial_guess: str,
             generate_new_solver: bool,
             terminal_constraint_at_target: bool,
+            terminal_set_width: float,
             num_rollouts: int,
             environment_specific_parameters: dict
     ):
@@ -86,6 +87,8 @@ class optimizer_nlp_forces(template_optimizer):
                                                                                              'cost'] != None else None
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
+        self.terminal_set_width = terminal_set_width
+        self.idx_terminal_set = env_pars['idx_terminal_set']
         self.state_max = env_pars['state_max']
         self.action_max = env_pars['action_max']
         self.action_high = np.array(self.action_max)
@@ -122,7 +125,7 @@ class optimizer_nlp_forces(template_optimizer):
         model.nh = 0  # number of inequality constraint functions
         model.npar = nu + nx  # number of runtime parameters
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
-        model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
+        # model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
 
         # Cost function
@@ -139,9 +142,16 @@ class optimizer_nlp_forces(template_optimizer):
         # Dynamics for equality costraints
         model.continuous_dynamics = self.dynamics  # continuous_dynamics : (s, u) --> ds/dx
         # Inequality constraints
-        # upper/lower variable bounds lb <= z <= ub
-        model.lb = np.concatenate((umin, xmin), 0)
-        model.ub = np.concatenate((umax, xmax), 0)
+        # # upper/lower variable bounds lb <= z <= ub
+        lb = np.concatenate((umin, xmin), 0)
+        ub = np.concatenate((umax, xmax), 0)
+        if terminal_set_width <= 0:
+            model.lb, model.ub = lb, ub
+        else:
+            model.lbidx = list(range(model.nvar))
+            model.ubidx = list(range(model.nvar))
+            self.lb_tiled = np.tile(lb, (self.model.N,))
+            self.ub_tiled = np.tile(ub, (self.model.N,))
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -157,14 +167,16 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.parallel = 1
-        # codeoptions.solvemethod = 'PDIP_NLP'
-        codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.solvemethod = 'PDIP_NLP'
+        # codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
         # codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
         # codeoptions.threadSafeStorage = True;
         codeoptions.overwrite = 1
+        if terminal_set_width > 0:
+            codeoptions.nlp.stack_parambounds = True
 
         # Integration
         codeoptions.nlp.integrator.Ts = self.dt
@@ -257,12 +269,20 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
         problem = {"x0": x0}
 
+        # Terminal set around target
+        if self.terminal_set_width > 0:
+            self.lb_tiled[:-self.nx][self.idx_terminal_set] = self.target[self.idx_terminal_set] - self.terminal_set_width
+            self.ub_tiled[:-self.nx][self.idx_terminal_set] = self.target[self.idx_terminal_set] + self.terminal_set_width
+            problem['lb'] = self.lb_tiled
+            problem['ub'] = self.ub_tiled
+
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
-        problem["all_parameters"] = np.tile(self.target, (self.model.N, 1))
-        problem["xinit"] = s
-        problem["xfinal"] = self.target[self.nu:]
+        problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
+        problem['xinit'] = s
+        # problem['xfinal'] = self.target[self.nu:] if self.terminal_constraint_at_target else None
+
         if self.codeoptions.solvemethod == 'SQP_NLP':
-            problem["reinitialize"] = True
+            problem['reinitialize'] = True
 
         if not self.open_loop or self.j == 0:
             # Solve
