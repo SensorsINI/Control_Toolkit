@@ -9,7 +9,7 @@ class CustomFormatter(logging.Formatter):
 
     grey = "\x1b[38;21m"
     yellow = "\x1b[33;21m"
-    cyan = "\x1b[1;36m" # dark green
+    cyan = "\x1b[1;36m" #
     green = "\x1b[31;21m" # dark green
     red = "\x1b[31;21m"
     bold_red = "\x1b[31;1m"
@@ -20,7 +20,7 @@ class CustomFormatter(logging.Formatter):
     format = '[%(levelname)s]: %(asctime)s - %(name)s - %(message)s (File "%(pathname)s", line %(lineno)d, in %(funcName)s)'
 
     FORMATS = {
-        logging.DEBUG: light_blue + format + reset,
+        logging.DEBUG: grey + format + reset,
         logging.INFO: cyan + format + reset,
         logging.WARNING: red + format + reset,
         logging.ERROR: bold_red + format + reset,

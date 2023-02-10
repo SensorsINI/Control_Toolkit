@@ -124,7 +124,7 @@ class template_controller(ABC):
         Execute one timestep of control.
 
         :param state: the state array, dimensions are TODO add dimension to help users
-        :param time: the time in seconds
+        :param time: the time now in seconds
         :param updated_attributes: dict of updated attributes
 
         :returns: the next control action u e.g. a normed control input in the range [-1,1] TODO is this correct?
