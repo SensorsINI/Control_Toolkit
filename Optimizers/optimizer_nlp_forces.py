@@ -219,13 +219,14 @@ class optimizer_nlp_forces(template_optimizer):
         # Specify fixed parameters of the problem
         self.problem = {}
 
-        # Lower and upper bounds
-        self.problem['lb01'] = lb[:nu]
-        self.problem['ub01'] = ub[:nu]
-        for i in range(1, N):
-            key = "{:02d}".format(i + 1)
-            self.problem['lb'+key] = lb
-            self.problem['ub'+key] = ub
+        if terminal_set_width > 0:
+            # Lower and upper bounds
+            self.problem['lb01'] = lb[:nu]
+            self.problem['ub01'] = ub[:nu]
+            for i in range(1, N):
+                key = "{:02d}".format(i + 1)
+                self.problem['lb'+key] = lb
+                self.problem['ub'+key] = ub
 
         # Override SQP initial guess at every step
         if self.codeoptions.solvemethod == 'SQP_NLP':
