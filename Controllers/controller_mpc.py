@@ -143,4 +143,6 @@ class controller_mpc(template_controller):
 
     def controller_reset(self):
         self.optimizer.optimizer_reset()
+        self.cartpole_trajectory_generator.reset()
+
         
