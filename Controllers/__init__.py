@@ -196,6 +196,8 @@ class template_controller(ABC):
         }
         
     def update_logs(self, logging_values: "dict[str, TensorType]") -> None:
+        """ Appends controller logging information to memory in self.logs if self.controller_logging exists, according to self.save_vars
+        """
         if self.controller_logging:
             for name, var in zip(
                 self.save_vars, [logging_values.get(var_name, None) for var_name in self.save_vars]

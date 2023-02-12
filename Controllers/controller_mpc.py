@@ -92,7 +92,7 @@ class controller_mpc(template_controller):
             self.step = self.step
 
         
-    def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, TensorType]" = {}):
+    def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, TensorType]" = {})->float:
         """ Compute one step of control.
 
         :param state: the current state as 1d state vector
@@ -136,8 +136,12 @@ class controller_mpc(template_controller):
                             update_attributes(updated_attributes,o)
                 log.debug(f'updated {objs} with scalar updated_attributes {updated_attributes}')
 
-
+        # obtain the next control action from the optimizer
         u = self.optimizer.step(state, time)
+
+        # for analysis of model mismatch, obtain the prediction of next state with this control action
+
+
         self.update_logs(self.optimizer.logging_values)
         return u
 

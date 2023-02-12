@@ -76,6 +76,8 @@ The toolkit provides a uniform interface to log values in the controller. These 
 
 The `controller_mpc.step` method takes the `optimizer.logging_values` dictionary and copies it to its `controller_mpc.logs` dictionary in each step. The `template_controller` has two related attributes: `controller_logging` and `save_vars`. If the former is `true`, then the controller populates the fields of `save_vars` in the `template_controller.logs` dictionary with values if your controller calls `update_logs` within the `step` method.
 
+The resulting dict (stored in RAM during runtime) is written out to disk on exit.
+
 
 ## Examples of Application-Specific Controllers
 
