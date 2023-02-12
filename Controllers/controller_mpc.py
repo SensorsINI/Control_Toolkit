@@ -13,16 +13,16 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
+from Utilities.utils import ConfigManager
 
-config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+
 logger = get_logger(__name__)
 
 
 class controller_mpc(template_controller):
     _has_optimizer = True
     
-    def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
+    def configure(self, config_manager: ConfigManager, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
             logger.info(f"Using optimizer {optimizer_name} specified in controller config file")
@@ -30,7 +30,7 @@ class controller_mpc(template_controller):
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
             logger.info(f"Using predictor {predictor_specification} specified in controller config file")
         
-        config_optimizer = config_optimizers[optimizer_name]
+        config_optimizer = config_manager("config_optimizers")[optimizer_name]
         
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
