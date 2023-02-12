@@ -24,7 +24,6 @@ class optimizer_gradient_tf(template_optimizer):
         mpc_horizon: int,
         gradient_steps: int,
         num_rollouts: int,
-        initial_action_stdev: float,
         learning_rate: float,
         adam_beta_1: float,
         adam_beta_2: float,
@@ -50,7 +49,6 @@ class optimizer_gradient_tf(template_optimizer):
         
         # MPC parameters
         self.gradient_steps = gradient_steps
-        self.initial_action_stdev = initial_action_stdev
 
         # Initialize optimizer
         self.optim = tf.keras.optimizers.Adam(
