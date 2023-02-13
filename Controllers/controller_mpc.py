@@ -40,7 +40,7 @@ class controller_mpc(template_controller):
     ):
         super().__init__(dt, environment_name, num_states, num_control_inputs, control_limits,
                          initial_environment_attributes)
-        self.cartpole_trajectory_generator = cartpole_trajectory_generator()
+        self.cartpole_trajectory_generator:cartpole_trajectory_generator = cartpole_trajectory_generator()
 
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
@@ -149,4 +149,14 @@ class controller_mpc(template_controller):
         self.optimizer.optimizer_reset()
         self.cartpole_trajectory_generator.reset()
 
-        
+    def keyboard_input(self, c):
+      try:
+          self.cartpole_trajectory_generator.keyboard_input(c)
+      except AttributeError:
+          pass
+
+    def print_keyboard_help(self):
+        try:
+            self.cartpole_trajectory_generator.print_keyboard_help()
+        except AttributeError:
+            pass

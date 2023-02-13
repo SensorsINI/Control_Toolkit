@@ -206,3 +206,13 @@ class template_controller(ABC):
                     self.logs[name].append(
                         var.numpy().copy() if hasattr(var, "numpy") else var.copy()
                     )
+
+    def keyboard_input(self, c):
+        """ process keyboard input character. Default implementation does nothing.
+        :param c: character
+        """
+        pass
+
+    def print_keyboard_help(self):
+        """ Print help for keybaord input"""
+        pass
