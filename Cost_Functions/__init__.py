@@ -81,9 +81,14 @@ class cost_function_base:
         :return: The summed cost of the trajectory. Has shape [batch_size].
         :rtype: TensorType
         """
-        stage_costs = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)  # Select all but last state of the horizon
-        terminal_cost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
-        total_cost = self.lib.mean(self.lib.concat([stage_costs, terminal_cost], 1), 1)  # Average across the MPC horizon dimension
+        # Select all but last state of the horizon
+        # stages costs has dimension [num_rollouts, horizon, states]
+        stage_costs = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)
+        # select last states of horizon for all rollouts
+        # compute the cost of these terminal states, result is ???
+        # terminal_cost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
+        # total_cost = self.lost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
+        total_cost = self.lib.mean(stage_costs, 1)  # Average across the MPC horizon dimension to leave a 1-d vector of num_rollouts dimension
         return total_cost
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
