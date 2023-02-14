@@ -29,7 +29,7 @@ class controller_mpc(template_controller):
         if predictor_specification in {None, ""}:
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
             logger.info(f"Using predictor {predictor_specification} specified in controller config file")
-        
+
         config_optimizer = config_optimizers[optimizer_name]
         
         # Create cost function
