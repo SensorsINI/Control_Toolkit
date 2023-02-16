@@ -45,8 +45,7 @@ class controller_mpc(template_controller):
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:
             optimizer_name = str(self.config_controller["optimizer"])
-            log.info(f'Using optimizer "{optimizer_name}" specified in controller config file')
-            log.info(f"Using optimizer {optimizer_name} specified in controller config file")
+            log.info(f'Using optimizer \'{optimizer_name}\' specified in controller config file')
         if predictor_specification in {None, ""}:
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
             log.info(f'Using predictor_specification="{predictor_specification}" specified in controller config file')
