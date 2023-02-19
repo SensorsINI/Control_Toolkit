@@ -1,4 +1,8 @@
+# useful utilies to ask question at console terminal with default answer and timeout
+
 import signal
+import time
+
 def alarm_handler(signum, frame):
     raise TimeoutError
 def input_with_timeout(prompt, timeout=30):
