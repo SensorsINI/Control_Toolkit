@@ -42,12 +42,13 @@ class template_controller(ABC):
             open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
             Loader=yaml.FullLoader
         )
+
         # self.controller_name is inferred from the class name, which is the class being instantiated
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.
         self.config_controller = dict(config_controllers[self.controller_name])
         self.config_controller["dt"] = dt
-        
+
         # Set computation library
         computation_library_name = str(self.config_controller.get("computation_library", ""))
         
