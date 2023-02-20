@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF
+from SI_Toolkit.Functions.TF.Compile import CompileTF
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
@@ -15,6 +15,7 @@ log = get_logger(__name__)
 
 
 class optimizer_rpgd_tf(template_optimizer):
+    """ The tensorflow (tf) version of the Resampling Parallel Gradient Descent (RPGD) optimizer reported in ICRA paper """
     supported_computation_libraries = {TensorFlowLibrary}
     
     def __init__(
