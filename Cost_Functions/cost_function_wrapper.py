@@ -75,7 +75,7 @@ class CostFunctionWrapper:
 
         config=self.cost_function_config['CartPole'][self.cost_function_name] # todo hardcoded 'CartPole' has to go, not sure how to determine it, maybe from module folder?
         update_attributes(config, self.cost_function)
-        log.info(f'configured controller {controller.__class__.__name__} with cost function {self.cost_function.__class__}')
+        log.debug(f'configured controller {controller.__class__.__name__} with cost function {self.cost_function.__class__}')
 
     def update_cost_function_name_from_specification(
         self, environment_name: str, cost_function_specification: str = None
