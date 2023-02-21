@@ -72,6 +72,8 @@ class optimizer_nlp_forces(template_optimizer):
         # retrieve environment specific parameters of the optimizer
         environment_name = self.cost_function.cost_function.controller.environment_name
         environment_name = '_'.join(environment_name.split('_')[:-1])
+        if environment_name == '':
+            environment_name = 'f1tenth'
         env_pars = environment_specific_parameters[environment_name]
         self.environment_name = environment_name
 
@@ -83,8 +85,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.r = env_pars['r']
         self.initial_strategy = getattr(Control_Toolkit.others.initial_guess_forces_interface, initial_guess)
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
-        self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
-                                                                                             'cost'] != None else None
+        self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars['cost'] != None else None
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -94,6 +95,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.action_high = np.array(self.action_max)
         self.nx = len(self.optimize_over)
         self.nu = len(self.action_max)
+        self.previous_input = np.zeros((self.nu,))
 
         # for readability
         N = self.mpc_horizon
@@ -101,6 +103,7 @@ class optimizer_nlp_forces(template_optimizer):
         nu = self.nu
         xmax = np.array([s if s != 'inf' else np.inf for s in self.state_max])
         xmin = -xmax
+        self.action_low = -self.action_high
         umin = self.action_low
         umax = self.action_high
 
@@ -109,7 +112,6 @@ class optimizer_nlp_forces(template_optimizer):
         self.open_loop_solution = dict()
         self.rsnorms = []
         self.res_eqs = []
-        self.action_low = -self.action_high
         self.open_loop_errors = np.zeros((N, 1))
 
         # reset optimizer
@@ -123,7 +125,7 @@ class optimizer_nlp_forces(template_optimizer):
         model.nvar = nu + nx  # number of variables
         model.neq = nx  # number of equality constraints
         model.nh = 0  # number of inequality constraint functions
-        model.npar = nu + nx  # number of runtime parameters
+        model.npar = env_pars['npar'] if 'npar' in env_pars.keys() else nu + nx  # number of runtime parameters
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
         # model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
@@ -131,7 +133,10 @@ class optimizer_nlp_forces(template_optimizer):
         # Cost function
         # More info at https://forces.embotech.com/Documentation/solver_options/index.html?highlight=lsobjective#gauss-newton-options
         self.target = np.zeros((nu + nx,))
-        if self.cost != None:
+        if environment_name == 'f1tenth':
+            model.objective = lambda z, p: self.cost_function.get_stage_cost(z[2:], z[:2], p)
+            model.objectiveN = lambda z, p: model.objective(z, p)
+        elif self.cost != None:
             model.objective = self.cost
             model.objectiveN = lambda z, p: model.objective(z, p)
         else:
@@ -141,6 +146,7 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Dynamics for equality costraints
         model.continuous_dynamics = self.dynamics  # continuous_dynamics : (s, u) --> ds/dx
+
         # Inequality constraints
         # # upper/lower variable bounds lb <= z <= ub
         lb = np.concatenate((umin, xmin), 0)
@@ -152,6 +158,7 @@ class optimizer_nlp_forces(template_optimizer):
             model.ubidx = list(range(model.nvar))
             # self.lb_tiled = np.tile(lb, (self.model.N,))
             # self.ub_tiled = np.tile(ub, (self.model.N,))
+
 
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
@@ -166,7 +173,7 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.maxit = 1000  # Maximum number of iterations
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
-        codeoptions.parallel = 1
+        # codeoptions.parallel = 1              #Makes it slower for some reason
         codeoptions.solvemethod = 'PDIP_NLP'
         # codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
@@ -185,28 +192,35 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.integrator.type = 'ForwardEuler'
 
         # Tolerances
-        codeoptions.nlp.TolStat = 1E-3  # inf norm tol.on stationarity
-        codeoptions.nlp.TolEq = 1E-3  # tol. on equality constraints
-        codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
+        TolStat = 1E-1  # inf norm tol.on stationarity
+        TolEq = 1E-1  # tol. on equality constraints
+
+        # Method specific parameters
+        # PDIP
+        codeoptions.nlp.TolStat = TolStat  # inf norm tol.on stationarity
+        codeoptions.nlp.TolEq = TolEq  # tol. on equality constraints
+        # codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
         codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
         # codeoptions.mu0 = 10  # complementary slackness
         codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
 
-        # Method specific parameters, override generic ones
-        # codeoptions.ADMMrho = 6
-        # codeoptions.ADMMfactorize = 1
+        # SQP
+        codeoptions.sqp_nlp.TolStat = TolStat
+        codeoptions.sqp_nlp.TolEq = TolEq
         # codeoptions.sqp_nlp.rti = 10
-        codeoptions.sqp_nlp.maxqps = 200
+        codeoptions.sqp_nlp.maxqps = 100
         # codeoptions.sqp_nlp.maxSQPit = 100
         # codeoptions.sqp_nlp.reg_hessian = 5e-2
         # codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
         codeoptions.sqp_nlp.qp_timeout = 0
+
         # Save codeoptions
         self.codeoptions = codeoptions
 
         if self.generate_new_solver:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
+
         else:
             # Read already generated solver
             gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
@@ -254,12 +268,14 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.ndarray((0,))
         s = s0
         u = control_strategy(s, target)
+        u = np.ones((self.nu,))*u
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
             new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
             u = control_strategy(new_x, target)
+            u = np.ones(self.nu, ) * u
             x0 = np.hstack((x0, u, new_x))
 
         return x0
@@ -274,12 +290,14 @@ class optimizer_nlp_forces(template_optimizer):
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
 
-        # Define the problem
-        #@TODO Refactor
+        #@TODO This should not be here
         try:
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
         except AttributeError:
             pass
+
+        ########################################
+
 
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
@@ -295,8 +313,11 @@ class optimizer_nlp_forces(template_optimizer):
             self.problem['ub' + key][self.nu:][self.idx_terminal_set] = \
                 self.target[self.nu:][self.idx_terminal_set] + self.terminal_set_width
 
-        # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
+        # @Todo provide parameters trough dedicated function
+        if self.environment_name == 'f1tenth':
+            self.target = np.hstack((self.previous_input, self.cost_function.cost_function.controller.next_waypoints.numpy().flatten()))[np.newaxis,:]
         self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
+
         self.problem['xinit'] = s
         # problem['xfinal'] = self.target[self.nu:] if self.terminal_constraint_at_target else None
 
@@ -306,20 +327,21 @@ class optimizer_nlp_forces(template_optimizer):
             output, exitflag, info = self.solver.solve(self.problem)
             self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
 
-            # If solver failed use previous output
+            # If solver succeded use copy output
             if exitflag >= 0 or self.open_loop_solution == {}:
                 self.j = 0
                 self.open_loop_solution = output.copy()
+            # else use previous output
             else:
                 self.j += 1
 
             # Get input
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
 
-            # Debug infos
-            self.rsnorms.append(info.rsnorm)
-            self.res_eqs.append(info.res_eq)
-            self.previous_exitflag = exitflag
+            # # Debug infos
+            # self.rsnorms.append(info.rsnorm)
+            # self.res_eqs.append(info.res_eq)
+            # self.previous_exitflag = exitflag
 
             if self.open_loop:
                 self.open_loop_solution = output.copy()
@@ -337,7 +359,7 @@ class optimizer_nlp_forces(template_optimizer):
             self.j += 1
             if self.j == self.model.N:
                 self.j = 0
-
+        self.previous_input = u.astype(np.float32)
         return u.astype(np.float32)
 
     def test_initial_condition(self, problem):
