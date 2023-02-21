@@ -40,7 +40,7 @@ class controller_mpc(template_controller):
     ):
         super().__init__(dt, environment_name, num_states, num_control_inputs, control_limits,
                          initial_environment_attributes)
-        self.cartpole_trajectory_generator:cartpole_trajectory_generator = cartpole_trajectory_generator()
+        self.cartpole_trajectory_generator:cartpole_trajectory_generator = cartpole_trajectory_generator() # TODO awkward to add this specific cost function generator here to generic controller_mpc
 
     def configure(self, optimizer_name: Optional[str]=None, predictor_specification: Optional[str]=None):
         if optimizer_name in {None, ""}:

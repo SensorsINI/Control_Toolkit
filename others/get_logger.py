@@ -33,10 +33,11 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record).replace("\\", "/") #replace \ with / for pycharm links
 
 
-def get_logger(name):
+def get_logger(name=None):
     """ Use get_logger to define a logger with useful color output and info and warning turned on according to the global LOGGING_LEVEL.
 
     :param name: the name of this logger. Use __name__ to give it the name of the module that instantiates it.
+        If no name is supplied, it defaults to root logger which may turn on a LOT of undesired logging output.
 
     :returns: the logger.
     """
