@@ -1,6 +1,7 @@
 import logging
 # general logger for all control/si_toolkit users. Produces nice output format with live hyperlinks for pycharm users
-# to use it, just call log=get_logger(__name__) at the top of your python file
+# to use it, just call log=get_logger() at the top of your python file
+# all these loggers share the same logger name 'Control_Toolkit'
 
 LOGGING_LEVEL = logging.DEBUG # usually INFO is good
 class CustomFormatter(logging.Formatter):
@@ -11,9 +12,9 @@ class CustomFormatter(logging.Formatter):
     # The control sequence CSI n m, named Select Graphic Rendition (SGR), sets display attributes.
     grey = "\x1b[2;37m" # 2 faint, 37 gray
     yellow = "\x1b[33;21m"
-    cyan = "\x1b[1;36m" # 1 bold 36 cyan
+    cyan = "\x1b[0;36m" # 0 normal 36 cyan
     green = "\x1b[31;21m" # dark green
-    red = "\x1b[31;21m"
+    red = "\x1b[31;21m" # bold red
     bold_red = "\x1b[31;1m"
     light_blue = "\x1b[1;36m"
     blue = "\x1b[1;34m"
@@ -45,8 +46,9 @@ def get_logger(name='ControlToolkit'):
     # logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     logger = logging.getLogger('ControlToolkit') # tobi changed so all have same name so we can uniformly affect all of them
     logger.setLevel(LOGGING_LEVEL)
-    # create console handler
-    ch = logging.StreamHandler()
-    ch.setFormatter(CustomFormatter())
-    logger.addHandler(ch)
+    # create console handler if this logger does not have handler yet
+    if len(logger.handlers)==0:
+        ch = logging.StreamHandler()
+        ch.setFormatter(CustomFormatter())
+        logger.addHandler(ch)
     return logger
