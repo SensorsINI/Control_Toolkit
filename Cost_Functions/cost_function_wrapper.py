@@ -28,7 +28,7 @@ class CostFunctionWrapper:
         self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
         self.lib = None # filled by configure(), needed to update TF variables
 
-        log.info(f'default cost function name is {self.cost_function_name_default}')
+        log.debug(f'default cost function name is {self.cost_function_name_default}')
         # cost_function config
         (self.cost_function_config, _) = load_or_reload_config_if_modified(
             os.path.join("Control_Toolkit_ASF", "config_cost_functions.yml"),search_path=['CartPoleSimulation'])
@@ -36,7 +36,7 @@ class CostFunctionWrapper:
         self.cost_function_name_default: str = self.cost_function_config.cost_function_name_default
         self.lib = None # filled by configure(), needed to update TF variables
 
-        log.info(f'default cost function name is {self.cost_function_name_default}')
+        log.debug(f'default cost function name is {self.cost_function_name_default}')
 
     def configure(
         self,

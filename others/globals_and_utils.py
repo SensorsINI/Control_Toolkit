@@ -100,7 +100,7 @@ def import_controller_by_name(controller_name: str) -> type:
     assert len(controller_relative_paths) == 1, f"Controller {controller_full_name} must be in a unique location. {len(controller_relative_paths)} found."
     controller_relative_path = controller_relative_paths[0]
 
-    log.info(f"Importing controller from {controller_relative_path}")
+    log.debug(f"Importing controller from {controller_relative_path}")
     
     Controller: type = getattr(import_module(controller_relative_path.replace(".py", "").replace(os.sep, ".")), controller_full_name)
     return Controller

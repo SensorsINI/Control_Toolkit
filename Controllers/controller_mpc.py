@@ -48,13 +48,13 @@ class controller_mpc(template_controller):
             log.info(f'Using optimizer \'{optimizer_name}\' specified in controller config file')
         if predictor_specification in {None, ""}:
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
-            log.info(f'Using predictor_specification="{predictor_specification}" specified in controller config file')
+            log.info(f"Using predictor_specification='{predictor_specification}' specified in controller config file")
 
         config_optimizer = config_optimizers[optimizer_name]
 
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
-        log.info(f'using cost_function_specification="{cost_function_specification}" in config {self.config_controller}')
+        log.info(f'using cost_function_specification=\'{cost_function_specification}\' in config {self.config_controller}')
         self.cost_function_wrapper = CostFunctionWrapper()
         self.cost_function_wrapper.configure(self, cost_function_specification=cost_function_specification)
 
