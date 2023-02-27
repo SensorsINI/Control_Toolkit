@@ -28,6 +28,7 @@ class optimizer_rpgd_tf(template_optimizer):
         num_rollouts: int,
         outer_its: int,
         sample_stdev: float,
+        sample_mean: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
         SAMPLING_DISTRIBUTION: str,
@@ -60,7 +61,10 @@ class optimizer_rpgd_tf(template_optimizer):
         
         # RPGD parameters
         self.outer_its = outer_its
-        self.sample_stdev = sample_stdev
+
+        self.sample_stdev = tf.convert_to_tensor(sample_stdev, dtype=tf.float32)
+        self.sample_mean = tf.convert_to_tensor(sample_mean, dtype=tf.float32)
+
         self.resamp_per = resamp_per
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.do_warmup = warmup
@@ -99,7 +103,7 @@ class optimizer_rpgd_tf(template_optimizer):
         if self.SAMPLING_DISTRIBUTION == "normal":
             Qn = rng_gen.normal(
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-                mean=0.0,
+                mean=self.sample_mean,
                 stddev=self.sample_stdev,
                 dtype=tf.float32,
             )
