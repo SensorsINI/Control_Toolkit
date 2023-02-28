@@ -231,8 +231,7 @@ class optimizer_rpgd_tf(template_optimizer):
             J,
             self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
-        self.u_nom = tf.squeeze(self.Q_tf[best_idx[0], :, :])
-        self.u_nom = self.u_nom[tf.newaxis, :, :]
+        self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
         self.u = self.u_nom[0, 0, :].numpy()
         
         if self.optimizer_logging:
