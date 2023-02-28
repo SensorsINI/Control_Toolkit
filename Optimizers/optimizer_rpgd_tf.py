@@ -42,6 +42,7 @@ class optimizer_rpgd_tf(template_optimizer):
         adam_beta_2: float,
         adam_epsilon: float,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
@@ -89,6 +90,8 @@ class optimizer_rpgd_tf(template_optimizer):
             epsilon=adam_epsilon,
         )
 
+        self.calculate_optimal_trajectory = calculate_optimal_trajectory
+        self.optimal_trajectory = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
         
         self.optimizer_reset()
@@ -314,7 +317,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Q_tf.assign(Qn)
         self.count += 1
 
-        if False:
+        if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
 

@@ -50,6 +50,7 @@ class controller_mpc(template_controller):
             control_limits=self.control_limits,
             optimizer_logging=self.controller_logging,
             computation_library=self.computation_library,
+            calculate_optimal_trajectory=self.config_controller.get('calculate_optimal_trajectory')
             **config_optimizer,
         )
         # Some optimizers require additional controller parameters (e.g. predictor_specification or dt) to be fully configured.
