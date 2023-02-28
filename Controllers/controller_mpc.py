@@ -109,12 +109,8 @@ class controller_mpc(template_controller):
         cost_function=self.cost_function_wrapper.cost_function
         update_attributes(updated_attributes,cost_function) # update target_position and target_equilibrium in cost function to use
         updated_attributes.clear()
-        target_trajectory = \
-            self.cartpole_trajectory_generator.\
+        self.cartpole_trajectory_generator.\
                 generate_cartpole_trajectory(time=time, state=state, controller=self, cost_function=self.cost_function_wrapper.cost_function)
-        updated_attributes['target_trajectory']=target_trajectory
-        update_attributes(updated_attributes,cost_function) # update
-        updated_attributes.clear()
 
         # now we fill this dict with config file changes if there are any and update attributes in the controller, the cost function, and the optimizer
         # detect any changes in config scalar values and pass to this controller or the cost function or optimizer

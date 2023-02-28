@@ -78,7 +78,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
                                          self.num_control_inputs, self.lib)
 
-        self.opt = tf.keras.optimizers.Adam(
+        self.opt:tf.keras.optimizers.Adam = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
