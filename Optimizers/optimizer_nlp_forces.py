@@ -32,6 +32,7 @@ import pickle
 import Control_Toolkit.others.dynamics_forces_interface
 import Control_Toolkit.others.cost_forces_interface
 import Control_Toolkit.others.initial_guess_forces_interface
+from line_profiler_pycharm import profile
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -95,6 +96,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.action_high = np.array(self.action_max)
         self.nx = len(self.optimize_over)
         self.nu = len(self.action_max)
+        self.nz = self.nx + self.nu
         self.previous_input = np.zeros((self.nu,))
 
         # for readability
@@ -192,8 +194,8 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.integrator.type = 'ForwardEuler'
 
         # Tolerances
-        TolStat = 1E-1  # inf norm tol.on stationarity
-        TolEq = 1E-1  # tol. on equality constraints
+        TolStat = 1E-2  # inf norm tol.on stationarity
+        TolEq = 1E-5  # tol. on equality constraints
 
         # Method specific parameters
         # PDIP
@@ -264,6 +266,14 @@ class optimizer_nlp_forces(template_optimizer):
             s[i] = f(s[i])
         return
 
+    def add_state_to_guess(self, x0, target, control_strategy):
+        # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
+        new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
+        u = control_strategy(new_x, target)
+        u = np.ones(self.nu, ) * u
+        x0 = np.hstack((x0, u, new_x))
+        return x0
+
     def initial_trajectory_guess(self, s0, target, control_strategy):
         x0 = np.ndarray((0,))
         s = s0
@@ -272,16 +282,10 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
-            # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
-            new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
-            u = control_strategy(new_x, target)
-            u = np.ones(self.nu, ) * u
-            x0 = np.hstack((x0, u, new_x))
+            x0 = self.add_state_to_guess(x0, target, control_strategy)
 
         return x0
-
-
-
+    @profile
     def step(self, s: np.ndarray, time=None):
 
         # Offset angles
@@ -300,8 +304,13 @@ class optimizer_nlp_forces(template_optimizer):
 
 
         # Build initial guess x0
-        x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
-        self.problem["x0"] = x0
+        if 'x0' not in self.problem.keys():
+            x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        else:
+            x0 = np.hstack(self.open_loop_solution[key] for key in self.open_loop_solution)[(self.j+1)*self.nz:]
+            for i in range(self.model.N - self.j - 1, self.model.N):
+                x0 = self.add_state_to_guess(x0, self.target, self.initial_strategy)
+        self.problem['x0'] = x0
 
         # Terminal set around target
         if self.terminal_set_width > 0:
@@ -323,9 +332,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         if not self.open_loop or self.j == 0:
             # Solve
-            self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
+            # self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
             output, exitflag, info = self.solver.solve(self.problem)
-            self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+            # self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
 
             # If solver succeded use copy output
             if exitflag >= 0 or self.open_loop_solution == {}:
