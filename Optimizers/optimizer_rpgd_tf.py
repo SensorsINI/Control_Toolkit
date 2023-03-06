@@ -10,7 +10,7 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 logger = get_logger(__name__)
-
+FORGET_GRADIENT = False
 
 class optimizer_rpgd_tf(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -223,6 +223,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
+        Q_old = tf.identity(self.Q_tf)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
@@ -247,6 +248,14 @@ class optimizer_rpgd_tf(template_optimizer):
         ) = self.get_action(s, self.Q_tf)
         self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
         self.u = self.u_nom[0, 0, :].numpy()
+
+        if FORGET_GRADIENT:
+            (
+                Qn,
+                best_idx,
+                J,
+                self.rollout_trajectories,
+            ) = self.get_action(s, Q_old)
         
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
