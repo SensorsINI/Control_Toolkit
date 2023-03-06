@@ -189,6 +189,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
+        Qold = tf.identity(self.Q_tf)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
@@ -230,7 +231,7 @@ class optimizer_rpgd_tf(template_optimizer):
             Qres = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
+            Q_keep = tf.gather(Qold, best_idx)  # resorting according to costs
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
