@@ -30,6 +30,7 @@ from line_profiler_pycharm import profile
 import Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface
+import Control_Toolkit_ASF.Forces_interfaces.target_forces_interface
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -70,8 +71,7 @@ class optimizer_nlp_forces(template_optimizer):
         # retrieve environment specific parameters of the optimizer
         environment_name = self.cost_function.cost_function.controller.environment_name
         environment_name = '_'.join(environment_name.split('_')[:-1])
-        if environment_name == '':
-            environment_name = 'f1tenth'
+        if environment_name == '': environment_name = self.cost_function.cost_function.controller.environment_name
         env_pars = environment_specific_parameters[environment_name]
         self.environment_name = environment_name
 
@@ -83,7 +83,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.r = env_pars['r']
         self.initial_strategy = getattr(Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface, initial_guess)
         self.dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface, env_pars['dynamics'])
-        self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface, env_pars['cost']) if env_pars['cost'] != None else None
+        self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface, env_pars['cost']) if 'cost' in env_pars.keys() else None
+        self.target_function = getattr(Control_Toolkit_ASF.Forces_interfaces.target_forces_interface, env_pars['target'] if 'target' in env_pars.keys() else 'standard_target')
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -132,10 +133,7 @@ class optimizer_nlp_forces(template_optimizer):
         # Cost function
         # More info at https://forces.embotech.com/Documentation/solver_options/index.html?highlight=lsobjective#gauss-newton-options
         self.target = np.zeros((nu + nx,))
-        if environment_name == 'f1tenth':
-            model.objective = lambda z, p: self.cost_function.get_stage_cost(z[2:], z[:2], p)
-            model.objectiveN = lambda z, p: model.objective(z, p)
-        elif self.cost != None:
+        if self.cost != None:
             model.objective = self.cost
             model.objectiveN = lambda z, p: model.objective(z, p)
         else:
@@ -291,20 +289,11 @@ class optimizer_nlp_forces(template_optimizer):
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
 
-        #@TODO This should not be here
-        try:
-            self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
-        except AttributeError:
-            pass
-
-        ########################################
-
-
         # Build initial guess x0
-        if 'x0' not in self.problem.keys():
+        if 'x0' not in self.problem.keys() or self.j == self.model.N - 1:
             x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
         else:
-            x0 = np.hstack(self.open_loop_solution[key] for key in self.open_loop_solution)[(self.j+1)*self.nz:]
+            x0 = np.hstack(tuple(self.open_loop_solution[key] for key in self.open_loop_solution))[(self.j+1)*self.nz:]
             for i in range(self.model.N - self.j - 1, self.model.N):
                 x0 = self.add_state_to_guess(x0, self.target, self.initial_strategy)
         self.problem['x0'] = x0
@@ -319,9 +308,8 @@ class optimizer_nlp_forces(template_optimizer):
             self.problem['ub' + key][self.nu:][self.idx_terminal_set] = \
                 self.target[self.nu:][self.idx_terminal_set] + self.terminal_set_width
 
-        # @Todo provide parameters trough dedicated function
-        if self.environment_name == 'f1tenth':
-            self.target = np.hstack((self.previous_input, self.cost_function.cost_function.controller.next_waypoints.numpy().flatten()))[np.newaxis,:]
+        parameter_map = {'previous_input': self.previous_input, 'nz': self.nz}
+        self.target = self.target_function(self.cost_function.cost_function.controller, parameter_map)
         self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
 
         self.problem['xinit'] = s
