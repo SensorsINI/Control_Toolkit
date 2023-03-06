@@ -20,19 +20,16 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 # Forces
 import sys
 import os
-
 sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
 import forcespro.nlp
-import numpy as np
 from forces import get_userid
 import casadi
-import os
 import pickle
-import Control_Toolkit.others.dynamics_forces_interface
-import Control_Toolkit.others.cost_forces_interface
-import Control_Toolkit.others.initial_guess_forces_interface
 from line_profiler_pycharm import profile
+import Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface
+import Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface
+import Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -84,9 +81,9 @@ class optimizer_nlp_forces(template_optimizer):
         self.dt = env_pars['dt']
         self.q = env_pars['q']
         self.r = env_pars['r']
-        self.initial_strategy = getattr(Control_Toolkit.others.initial_guess_forces_interface, initial_guess)
-        self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
-        self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars['cost'] != None else None
+        self.initial_strategy = getattr(Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface, initial_guess)
+        self.dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface, env_pars['dynamics'])
+        self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface, env_pars['cost']) if env_pars['cost'] != None else None
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -361,7 +358,7 @@ class optimizer_nlp_forces(template_optimizer):
 
             # DEBUG
             self.open_loop_errors[self.j] = np.linalg.norm(
-                self.open_loop_solution[self.int_to_dict_key(self.j)][1:] - s)
+                self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:] - s)
             print('\n\n' + 'Open loop prediction: ' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
             print('Open loop error: ' + str(self.open_loop_errors[self.j,0]))
 
