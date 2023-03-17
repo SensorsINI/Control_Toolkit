@@ -7,6 +7,7 @@ others.dynamics_forces_interface.py
 
 from typing import Tuple
 from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
+from Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface import casadi_to_numpy
 
 import numpy as np
 import tensorflow as tf
@@ -81,10 +82,15 @@ class optimizer_nlp_forces(template_optimizer):
         self.dt = env_pars['dt']
         self.q = env_pars['q']
         self.r = env_pars['r']
-        self.initial_strategy = getattr(Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface, initial_guess)
+        self.initial_strategy = getattr(Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface,
+                                        initial_guess)
         self.dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface, env_pars['dynamics'])
-        self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface, env_pars['cost']) if 'cost' in env_pars.keys() else None
-        self.target_function = getattr(Control_Toolkit_ASF.Forces_interfaces.target_forces_interface, env_pars['target'] if 'target' in env_pars.keys() else 'standard_target')
+        self.env_dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface,
+                                    environment_name + '_env')
+        self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface,
+                            env_pars['cost']) if 'cost' in env_pars.keys() else None
+        self.target_function = getattr(Control_Toolkit_ASF.Forces_interfaces.target_forces_interface,
+                                       env_pars['target'] if 'target' in env_pars.keys() else 'standard_target')
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -97,6 +103,9 @@ class optimizer_nlp_forces(template_optimizer):
         self.nz = self.nx + self.nu
         self.previous_input = np.zeros((self.nu,))
 
+        # check env and interface dynamics match
+        self.compare_dynamics(200)
+
         # for readability
         N = self.mpc_horizon
         nx = self.nx
@@ -108,7 +117,7 @@ class optimizer_nlp_forces(template_optimizer):
         umax = self.action_high
 
         # global debug variables
-        self.j = 0
+        self.j = N
         self.open_loop_solution = dict()
         self.rsnorms = []
         self.res_eqs = []
@@ -156,7 +165,6 @@ class optimizer_nlp_forces(template_optimizer):
             # self.lb_tiled = np.tile(lb, (self.model.N,))
             # self.ub_tiled = np.tile(ub, (self.model.N,))
 
-
         # Indices on LHS of dynamical constraint - for efficiency reasons, make
         # sure the matrix E has structure [0 I] where I is the identity matrix.
         model.E = np.concatenate([np.zeros((nx, nu)), np.identity(nx)], axis=1)
@@ -171,9 +179,10 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         # codeoptions.parallel = 1              #Makes it slower for some reason
-        codeoptions.solvemethod = 'PDIP_NLP'
-        # codeoptions.solvemethod = 'SQP_NLP'
-        codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
+        # codeoptions.solvemethod = 'PDIP_NLP'
+        codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(
+            type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
         # codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
         # codeoptions.floattype = 'float'
@@ -190,7 +199,7 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Tolerances
         TolStat = 1E-2  # inf norm tol.on stationarity
-        TolEq = 1E-5  # tol. on equality constraints
+        TolEq = 1E-2  # tol. on equality constraints
 
         # Method specific parameters
         # PDIP
@@ -200,6 +209,10 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
         # codeoptions.mu0 = 10  # complementary slackness
         codeoptions.accuracy.eq = 1e-2  # infinity norm of residual for equalities
+        codeoptions.warmstart = True
+        # codeoptions.debug = True
+        codeoptions.nlp.BarrStrat = 'monotone'
+        codeoptions.nlp.linear_solver = 'symm_indefinite_legacy'
 
         # SQP
         codeoptions.sqp_nlp.TolStat = TolStat
@@ -208,7 +221,7 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.sqp_nlp.maxqps = 100
         # codeoptions.sqp_nlp.maxSQPit = 100
         # codeoptions.sqp_nlp.reg_hessian = 5e-2
-        # codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
+        codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
         codeoptions.sqp_nlp.qp_timeout = 0
 
         # Save codeoptions
@@ -225,7 +238,7 @@ class optimizer_nlp_forces(template_optimizer):
             pass
 
         # Open loop is useful for debug purposes
-        self.open_loop = False
+        self.open_loop = True
 
         # Specify fixed parameters of the problem
         self.problem = {}
@@ -236,12 +249,12 @@ class optimizer_nlp_forces(template_optimizer):
             self.problem['ub01'] = ub[:nu]
             for i in range(1, N):
                 key = "{:02d}".format(i + 1)
-                self.problem['lb'+key] = lb
-                self.problem['ub'+key] = ub
+                self.problem['lb' + key] = lb
+                self.problem['ub' + key] = ub
 
         # Override SQP initial guess at every step
         if self.codeoptions.solvemethod == 'SQP_NLP':
-            self.problem['reinitialize'] = True
+            self.problem['reinitialize'] = False
 
     def rungekutta4(self, x, u, dt):
         k1 = self.model.continuous_dynamics(x, u, 0)
@@ -273,13 +286,14 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.ndarray((0,))
         s = s0
         u = control_strategy(s, target)
-        u = np.ones((self.nu,))*u
+        # u = np.ones((self.nu,))*u
         x0 = np.hstack((x0, u, s))
 
-        for i in range(self.model.N-1):
+        for i in range(self.model.N - 1):
             x0 = self.add_state_to_guess(x0, target, control_strategy)
 
         return x0
+
     @profile
     def step(self, s: np.ndarray, time=None):
 
@@ -289,11 +303,17 @@ class optimizer_nlp_forces(template_optimizer):
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
 
+        # Set parameters
+        parameter_map = {'previous_input': self.previous_input, 'nz': self.nz}
+        self.target = self.target_function(self.cost_function.cost_function.controller, parameter_map)
+        self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
+
         # Build initial guess x0
-        if 'x0' not in self.problem.keys() or self.j == self.model.N - 1:
+        if 'x0' not in self.problem.keys() or self.j >= self.model.N - 1:
             x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
         else:
-            x0 = np.hstack(tuple(self.open_loop_solution[key] for key in self.open_loop_solution))[(self.j+1)*self.nz:]
+            x0 = np.hstack(tuple(self.open_loop_solution[key] for key in self.open_loop_solution))[
+                 (self.j + 1) * self.nz:]
             for i in range(self.model.N - self.j - 1, self.model.N):
                 x0 = self.add_state_to_guess(x0, self.target, self.initial_strategy)
         self.problem['x0'] = x0
@@ -308,26 +328,22 @@ class optimizer_nlp_forces(template_optimizer):
             self.problem['ub' + key][self.nu:][self.idx_terminal_set] = \
                 self.target[self.nu:][self.idx_terminal_set] + self.terminal_set_width
 
-        parameter_map = {'previous_input': self.previous_input, 'nz': self.nz}
-        self.target = self.target_function(self.cost_function.cost_function.controller, parameter_map)
-        self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
-
         self.problem['xinit'] = s
         # problem['xfinal'] = self.target[self.nu:] if self.terminal_constraint_at_target else None
 
-        if not self.open_loop or self.j == 0:
+        if not self.open_loop:
             # Solve
             # self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
             output, exitflag, info = self.solver.solve(self.problem)
             # self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+            solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
+                self.problem, output)
 
             # If solver succeded use copy output
             if exitflag >= 0 or self.open_loop_solution == {}:
                 self.j = 0
                 self.open_loop_solution = output.copy()
             # else use previous output
-            else:
-                self.j += 1
 
             # Get input
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
@@ -337,24 +353,42 @@ class optimizer_nlp_forces(template_optimizer):
             # self.res_eqs.append(info.res_eq)
             # self.previous_exitflag = exitflag
 
-            if self.open_loop:
-                self.open_loop_solution = output.copy()
-                self.j += 1
         else:
+            if self.j == self.model.N:
+                # Solve
+                # self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
+                output, exitflag, info = self.solver.solve(self.problem)
+                # self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+                solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
+                    self.problem, output)
+                if exitflag >= 0:
+                    self.j = 0
+                    self.open_loop_solution = output.copy()
+                else:
+                    self.j = self.model.N - 1  # if the solver fails and we run out of input solutions use the same
+                    self.open_loop_solution = self.trajectory_to_solution_format(x0)
+
             # Retrieve jth element from the open loop solution
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
 
             # DEBUG
-            self.open_loop_errors[self.j] = np.linalg.norm(
-                self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:] - s)
-            print('\n\n' + 'Open loop prediction: ' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
-            print('Open loop error: ' + str(self.open_loop_errors[self.j,0]))
+            open_loop_prediction = self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:]
+            self.open_loop_errors[self.j] = np.linalg.norm(open_loop_prediction - s, ord=np.inf)
+            np.set_printoptions(suppress=True)
+            print('\n\n' + 'Open loop prediction: \t\t' + np.array2string(open_loop_prediction, precision=3,
+                                                                          floatmode='fixed'))
+            print('Actual state: \t\t\t\t' + np.array2string(s, precision=3, floatmode='fixed'))
+            print('Open loop max error: \t\t' + "{0:0.3f}".format(self.open_loop_errors[self.j, 0]))
+            np.set_printoptions(suppress=False)
 
             self.j += 1
-            if self.j == self.model.N:
-                self.j = 0
+
         self.previous_input = u.astype(np.float32)
         return u.astype(np.float32)
+
+    def trajectory_to_solution_format(self, arr):
+        solution = {self.int_to_dict_key(i): arr[self.nz * i:self.nz * (i + 1)] for i in range(self.mpc_horizon)}
+        return solution
 
     def test_initial_condition(self, problem):
         x0 = problem['x0']
@@ -380,8 +414,8 @@ class optimizer_nlp_forces(template_optimizer):
                 np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
             total_obj += obj
             initial_trajectory[ss, :, np.newaxis] = c
+        # print('Did not encounter NaNs')
         return total_obj
-        print('Did not encounter NaNs')
 
     def test_open_loop_solution(self, problem, output):
         pars = problem['all_parameters']
@@ -395,8 +429,38 @@ class optimizer_nlp_forces(template_optimizer):
             obj, gradobj = self.solver.objective(z, p, stage=ss)
             total_obj += obj
             initial_trajectory[ss, :, np.newaxis] = c
+        # print('Did not encounter NaNs')
         return total_obj
-        print('Did not encounter NaNs')
+
+    def compare_open_loop_behaviour(self, problem, output):
+        pars = problem['all_parameters']
+        solution_trajectory = np.zeros((self.model.N, self.nx))
+        env_trajectory = np.zeros((self.model.N, self.nx))
+        solver_trajectory = np.zeros((self.model.N, self.nx))
+        interface_trajectory = np.zeros((self.model.N, self.nx))
+
+        for ss in range(self.model.N - 1):
+            z = output[self.int_to_dict_key(ss)]
+            s = z[self.nu:]
+            u = z[:self.nu]
+            p = pars[ss, :]
+            c, jacc = self.solver.dynamics(z, p, stage=ss)
+            solution_trajectory[ss, :] = output[self.int_to_dict_key(ss + 1)][self.nu:] if ss != self.model.N - 1 else s
+            solver_trajectory[ss, :, np.newaxis] = c
+            env_trajectory[ss, :] = s + self.dt * self.env_dynamics(s, u, p)
+            interface_trajectory[ss, :] = s + self.dt * casadi_to_numpy(self.dynamics(s, u, p))
+        return solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory
+
+    def compare_dynamics(self, M: int):
+        for i in range(M):
+            s = (np.random.random_sample((7,)) - 0.5) * 30
+            u = (np.random.random_sample((2,)) - 0.5) * 10
+            sD_env = self.env_dynamics(s, u, None)
+            sD_forces = casadi_to_numpy(self.dynamics(s, u, None))
+            error = np.linalg.norm(sD_env - sD_forces)
+            # if error > 0.001: raise Exception('env and interface dynamics don''t match')
+            pass
+        return
 
     def optimizer_reset(self):
         pass
