@@ -21,6 +21,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 # Forces
 import sys
 import os
+
 sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
 import forcespro.nlp
@@ -32,6 +33,7 @@ import Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.target_forces_interface
+
 
 class optimizer_nlp_forces(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -52,6 +54,7 @@ class optimizer_nlp_forces(template_optimizer):
             terminal_constraint_at_target: bool,
             terminal_set_width: float,
             num_rollouts: int,
+            mppi_reinitialization: bool,
             environment_specific_parameters: dict
     ):
         super().__init__(
@@ -102,6 +105,12 @@ class optimizer_nlp_forces(template_optimizer):
         self.nu = len(self.action_max)
         self.nz = self.nx + self.nu
         self.previous_input = np.zeros((self.nu,))
+
+        self.control_limits = control_limits
+        self.optimizer_logging = optimizer_logging,
+        self.computation_library = computation_library,
+        self.mppi_reinitialization = mppi_reinitialization
+        self.mppi_optimizer = None  # only for reinitialization if the option is active
 
         # check env and interface dynamics match
         self.compare_dynamics(200)
@@ -282,17 +291,61 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.hstack((x0, u, new_x))
         return x0
 
-    def initial_trajectory_guess(self, s0, target, control_strategy):
-        x0 = np.ndarray((0,))
-        s = s0
-        u = control_strategy(s, target)
-        # u = np.ones((self.nu,))*u
-        x0 = np.hstack((x0, u, s))
+    def state_to_obs(self, s):
+        obs = np.zeros((9,))
+        obs[[5, 6, 8, 1, 2, 0, 7]] = s
+        obs[3] = np.cos(s[4])
+        obs[4] = np.sin(s[4])
+        return obs
 
-        for i in range(self.model.N - 1):
-            x0 = self.add_state_to_guess(x0, target, control_strategy)
+    def initial_trajectory_guess(self, s0, target, control_strategy):
+        if self.mppi_reinitialization:
+            if self.mppi_optimizer is None:
+                self.initiate_mppi_optimizer()
+            obs = self.state_to_obs(s0)
+            self.mppi_optimizer.step(obs, time=None)
+            trajs = self.mppi_optimizer.rollout_trajectories
+            U = self.mppi_optimizer.u_nom[0, :, :]
+            x0 = np.ndarray((0,))
+            # x0 = np.hstack((x0, U[0], s0))
+            s = s0
+            for i in range(0, self.model.N):
+                x0 = np.hstack((x0, U[i], s0))
+                u = U[i].numpy()
+                s = s + self.dt * self.env_dynamics(s, u, None)
+        else:
+            x0 = np.ndarray((0,))
+            s = s0
+            u = control_strategy(s, target)
+            # u = np.ones((self.nu,))*u
+            x0 = np.hstack((x0, u, s))
+
+            for i in range(self.model.N - 1):
+                x0 = self.add_state_to_guess(x0, target, control_strategy)
 
         return x0
+
+    def initiate_mppi_optimizer(self):
+        # If mppi_reinitialization==True use MPPI for initialization
+        from Control_Toolkit.Optimizers.optimizer_mppi import optimizer_mppi
+        import yaml
+        config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")),
+                                      Loader=yaml.FullLoader)
+        config_mppi = config_optimizers['mppi']
+        self.mppi_optimizer: template_optimizer = optimizer_mppi(
+            predictor=self.predictor,
+            cost_function=self.cost_function,
+            num_states=self.num_states,
+            num_control_inputs=self.num_control_inputs,
+            control_limits=self.control_limits,
+            optimizer_logging=self.optimizer_logging[0],
+            computation_library=self.computation_library[0],
+            **config_mppi,
+        )
+        # Some optimizers require additional controller parameters (e.g. predictor_specification or dt) to be fully configured.
+        # Do this here. If the optimizer does not require any additional parameters, it will ignore them.
+        self.mppi_optimizer.configure(dt=self.dt, predictor_specification='ODE_TF')
+        return
 
     @profile
     def step(self, s: np.ndarray, time=None):
