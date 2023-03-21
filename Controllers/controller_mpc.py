@@ -35,7 +35,11 @@ class controller_mpc(template_controller):
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
         self.cost_function = CostFunctionWrapper()
-        self.cost_function.configure(self, cost_function_specification=cost_function_specification)
+        self.cost_function.configure(
+            variable_parameters=self.variable_parameters,
+            environment_name=self.environment_name,
+            computation_library=self.computation_library,
+            cost_function_specification=cost_function_specification)
         
         # Create predictor
         self.predictor = PredictorWrapper()
