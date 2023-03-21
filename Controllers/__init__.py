@@ -68,7 +68,6 @@ class template_controller(ABC):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
                 logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
-        self.lib = self.computation_library  # Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library
 
         # Environment-related parameters
         self.environment_name = environment_name
@@ -160,6 +159,11 @@ class template_controller(ABC):
         if self._computation_library == None:
             raise NotImplementedError("Controller class needs to specify its computation library")
         return self._computation_library
+
+    @property
+    def lib(self) -> "type[ComputationLibrary]":
+        """Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library"""
+        return self.computation_library
     
     @property
     def has_optimizer(self):
