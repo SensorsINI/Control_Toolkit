@@ -43,10 +43,10 @@ class controller_neural_imitator_tf(template_controller):
         self.update_attributes(updated_attributes)
 
         net_input = s[
-            ..., [STATE_INDICES.get(key) for key in self.net_info.inputs[:-2]]
+            ..., [STATE_INDICES.get(key) for key in self.net_info.inputs[:-1]]
         ]  # -1 is a fix to exclude target position
-        net_input = np.append(net_input, self.target_equilibrium)
-        net_input = np.append(net_input, self.target_position)
+        # net_input = np.append(net_input, self.variable_parameters.target_equilibrium)
+        net_input = np.append(net_input, self.variable_parameters.target_position)
 
         net_input = normalize_numpy_array(
             net_input, self.net_info.inputs, self.normalization_info

@@ -50,7 +50,7 @@ class controller_neural_imitator_pytorch(template_controller):
         net_input = s[
             ..., [STATE_INDICES.get(key) for key in self.net_info.inputs[:-1]]
         ]  # -1 is a fix to exclude target position
-        net_input = np.append(net_input, self.target_position)
+        net_input = np.append(net_input, self.variable_parameters.target_position)
 
         net_input = normalize_numpy_array(
             net_input, self.net_info.inputs, self.normalization_info
