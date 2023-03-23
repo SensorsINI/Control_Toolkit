@@ -21,6 +21,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 # Forces
 import sys
 import os
+from itertools import chain
 
 sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
@@ -105,13 +106,15 @@ class optimizer_nlp_forces(template_optimizer):
         self.nu = len(self.action_max)
         self.nz = self.nx + self.nu
         self.previous_input = np.zeros((self.nu,))
+        self.exitflag = -1
 
         self.control_limits = control_limits
         self.optimizer_logging = optimizer_logging,
         self.computation_library = computation_library,
         self.mppi_reinitialization = mppi_reinitialization
         self.mppi_optimizer = None  # only for reinitialization if the option is active
-
+        self.mppi_x = None
+        self.rollout_trajectories = np.zeros((1, mpc_horizon+1, 9))
         # check env and interface dynamics match
         self.compare_dynamics(200)
 
@@ -188,8 +191,8 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         # codeoptions.parallel = 1              #Makes it slower for some reason
-        # codeoptions.solvemethod = 'PDIP_NLP'
-        codeoptions.solvemethod = 'SQP_NLP'
+        codeoptions.solvemethod = 'PDIP_NLP'
+        # codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(
             type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
         # codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
@@ -232,6 +235,7 @@ class optimizer_nlp_forces(template_optimizer):
         # codeoptions.sqp_nlp.reg_hessian = 5e-2
         codeoptions.sqp_nlp.qpinit = 1  # 0 for cold start, 1 for centered start
         codeoptions.sqp_nlp.qp_timeout = 0
+        self.max_it = codeoptions.sqp_nlp.maxqps if codeoptions.solvemethod == 'SQP_NLP' else codeoptions.maxit
 
         # Save codeoptions
         self.codeoptions = codeoptions
@@ -247,7 +251,8 @@ class optimizer_nlp_forces(template_optimizer):
             pass
 
         # Open loop is useful for debug purposes
-        self.open_loop = True
+        # self.open_loop = True
+        self.open_loop = False
 
         # Specify fixed parameters of the problem
         self.problem = {}
@@ -275,7 +280,7 @@ class optimizer_nlp_forces(template_optimizer):
         return new_x
 
     def int_to_dict_key(self, n):
-        return 'x' + str(n + 1).zfill(2)
+        return 'x' + str(n + 1).zfill(1 if self.model.N<=9 else 2)
 
     def offset_angles(self, s, is_angle):
         f = lambda x: x + 2 * np.pi if x < 0 else x
@@ -286,8 +291,9 @@ class optimizer_nlp_forces(template_optimizer):
     def add_state_to_guess(self, x0, target, control_strategy):
         # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
         new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
-        u = control_strategy(new_x, target)
-        u = np.ones(self.nu, ) * u
+        # u = control_strategy(new_x, target)
+        # u = np.ones(self.nu, ) * u
+        u = x0[-(self.nu + self.nx):-self.nx]
         x0 = np.hstack((x0, u, new_x))
         return x0
 
@@ -298,30 +304,32 @@ class optimizer_nlp_forces(template_optimizer):
         obs[4] = np.sin(s[4])
         return obs
 
-    def initial_trajectory_guess(self, s0, target, control_strategy):
-        if self.mppi_reinitialization:
-            if self.mppi_optimizer is None:
-                self.initiate_mppi_optimizer()
-            obs = self.state_to_obs(s0)
-            self.mppi_optimizer.step(obs, time=None)
-            trajs = self.mppi_optimizer.rollout_trajectories
-            U = self.mppi_optimizer.u_nom[0, :, :]
-            x0 = np.ndarray((0,))
-            # x0 = np.hstack((x0, U[0], s0))
-            s = s0
-            for i in range(0, self.model.N):
-                x0 = np.hstack((x0, U[i], s0))
-                u = U[i].numpy()
-                s = s + self.dt * self.env_dynamics(s, u, None)
-        else:
-            x0 = np.ndarray((0,))
-            s = s0
-            u = control_strategy(s, target)
-            # u = np.ones((self.nu,))*u
-            x0 = np.hstack((x0, u, s))
+    def mppi_solution(self, s0):
+        if self.mppi_optimizer is None:
+            self.initiate_mppi_optimizer()
+        obs = self.state_to_obs(s0)
+        self.mppi_optimizer.step(obs, time=None)
+        trajs = self.mppi_optimizer.rollout_trajectories
+        U = self.mppi_optimizer.u_nom[0, :, :]
+        x = np.ndarray((0,))
+        # x0 = np.hstack((x0, U[0], s0))
+        s = s0
+        for i in range(0, self.model.N):
+            x = np.hstack((x, U[i], s))
+            u = U[i].numpy()
+            s = s + self.dt * self.env_dynamics(s, u, None)
+        pass
+        return x
 
-            for i in range(self.model.N - 1):
-                x0 = self.add_state_to_guess(x0, target, control_strategy)
+    def initial_trajectory_guess(self, s0, target, control_strategy):
+        x0 = np.ndarray((0,))
+        s = s0
+        u = control_strategy(s, target)
+        # u = np.ones((self.nu,))*u
+        x0 = np.hstack((x0, u, s))
+
+        for i in range(self.model.N - 1):
+            x0 = self.add_state_to_guess(x0, target, control_strategy)
 
         return x0
 
@@ -361,10 +369,13 @@ class optimizer_nlp_forces(template_optimizer):
         self.target = self.target_function(self.cost_function.cost_function.controller, parameter_map)
         self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
 
+        if self.mppi_reinitialization:
+            self.mppi_x = self.mppi_solution(s)
+
         # Build initial guess x0
-        if 'x0' not in self.problem.keys() or self.j >= self.model.N - 1:
-            x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
-        else:
+        if 'x0' not in self.problem.keys() or self.j >= self.model.N - 1 or self.exitflag<0:
+            x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy) if not self.mppi_reinitialization else self.mppi_x
+        else:   #warm start
             x0 = np.hstack(tuple(self.open_loop_solution[key] for key in self.open_loop_solution))[
                  (self.j + 1) * self.nz:]
             for i in range(self.model.N - self.j - 1, self.model.N):
@@ -386,14 +397,26 @@ class optimizer_nlp_forces(template_optimizer):
 
         if not self.open_loop:
             # Solve
-            # self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
+            self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
             output, exitflag, info = self.solver.solve(self.problem)
-            # self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+            self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+            #
+            # If reached max it set as failed
+            if info.it == self.max_it:
+                exitflag = -1
+
+            self.exitflag = exitflag
             solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
                 self.problem, output)
 
+
+
             # If solver succeded use copy output
-            if exitflag >= 0 or self.open_loop_solution == {}:
+            if exitflag<0 : #and self.j == self.model.N - 1:
+                # self.j = self.model.N - 1  # if the solver fails and we run out of input solutions use the initial guess
+                self.j = 0
+                self.open_loop_solution = self.trajectory_to_solution_format(x0)
+            elif exitflag >= 0:
                 self.j = 0
                 self.open_loop_solution = output.copy()
             # else use previous output
@@ -415,33 +438,45 @@ class optimizer_nlp_forces(template_optimizer):
                 solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
                     self.problem, output)
                 if exitflag >= 0:
-                    self.j = 0
+                    # if False:
                     self.open_loop_solution = output.copy()
                 else:
-                    self.j = self.model.N - 1  # if the solver fails and we run out of input solutions use the same
+                    # self.j = self.model.N - 1  # if the solver fails and we run out of input solutions use the initial guess
                     self.open_loop_solution = self.trajectory_to_solution_format(x0)
 
-            # Retrieve jth element from the open loop solution
+                # Retrieve jth element from the open loop solution
+                self.j = 0
             u = self.open_loop_solution[self.int_to_dict_key(self.j)][0:self.nu]
 
             # DEBUG
             open_loop_prediction = self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:]
             self.open_loop_errors[self.j] = np.linalg.norm(open_loop_prediction - s, ord=np.inf)
             np.set_printoptions(suppress=True)
-            print('\n\n' + 'Open loop prediction: \t\t' + np.array2string(open_loop_prediction, precision=3,
-                                                                          floatmode='fixed'))
-            print('Actual state: \t\t\t\t' + np.array2string(s, precision=3, floatmode='fixed'))
+            print('\n\n' + 'Input: ' +'\t'*6 + np.array2string(u, precision=3, floatmode='fixed'))
+            print('Open loop prediction: \t\t' + np.array2string(open_loop_prediction, precision=3,
+                                                                 floatmode='fixed'))
+            print('Actual state: ' +'\t'*4 + np.array2string(s, precision=3, floatmode='fixed'))
             print('Open loop max error: \t\t' + "{0:0.3f}".format(self.open_loop_errors[self.j, 0]))
             np.set_printoptions(suppress=False)
 
             self.j += 1
 
+        self.rollout_trajectories = self.solution_to_envtrajectory_format(self.open_loop_solution)
+        if self.mppi_reinitialization:
+            self.rollout_trajectories = np.stack(
+                (self.solution_to_envtrajectory_format(self.trajectory_to_solution_format(self.mppi_x)), self.rollout_trajectories),
+                1).squeeze()
+        self.optimal_trajectory = self.rollout_trajectories
         self.previous_input = u.astype(np.float32)
         return u.astype(np.float32)
 
     def trajectory_to_solution_format(self, arr):
         solution = {self.int_to_dict_key(i): arr[self.nz * i:self.nz * (i + 1)] for i in range(self.mpc_horizon)}
         return solution
+
+    def solution_to_envtrajectory_format(self, d):
+        envtrajectory = np.vstack(tuple(self.state_to_obs(d[self.int_to_dict_key(i)][self.nu:]) for i in chain(range(self.model.N), [self.model.N-1])))[np.newaxis,:]
+        return envtrajectory
 
     def test_initial_condition(self, problem):
         x0 = problem['x0']
