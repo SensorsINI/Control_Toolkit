@@ -66,6 +66,7 @@ class controller_mpc(template_controller):
             horizon=self.optimizer.mpc_horizon,
             dt=self.config_controller["dt"],
             computation_library=self.computation_library,
+            variable_parameters=self.variable_parameters,
             predictor_specification=predictor_specification
         )
 
