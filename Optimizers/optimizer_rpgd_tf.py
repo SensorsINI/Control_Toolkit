@@ -125,6 +125,7 @@ class optimizer_rpgd_tf(template_optimizer):
             traj_cost, _ = self.predict_and_cost(s, Q)
         # retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
+        dc_dQ = tf.where(tf.math.is_nan(dc_dQ), tf.zeros_like(dc_dQ), dc_dQ)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
         # use optimizer to apply gradients and retrieve next set of input sequences
         opt.apply_gradients(zip([dc_dQ_prc], [Q]))
@@ -213,6 +214,7 @@ class optimizer_rpgd_tf(template_optimizer):
         ) = self.get_action(s, self.Q_tf)
         self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
         self.u = self.u.numpy()
+        self.optimal_trajectory = self.rollout_trajectories[best_idx[0]:best_idx[0]+1]
         
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()

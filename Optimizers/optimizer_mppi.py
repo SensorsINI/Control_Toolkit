@@ -198,9 +198,10 @@ class optimizer_mppi(template_optimizer):
             self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
 
-        if False:
-            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
-
+        if True:
+            # self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
+            sorted_cost = np.argsort(traj_cost)
+            self.optimal_trajectory = self.rollout_trajectories[sorted_cost[0]:sorted_cost[0]+1]
         return self.u
 
     def optimizer_reset(self):
