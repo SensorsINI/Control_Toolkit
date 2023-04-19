@@ -89,8 +89,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.initial_strategy = getattr(Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface,
                                         initial_guess)
         self.dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface, env_pars['dynamics'])
-        self.env_dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface,
-                                    environment_name + '_env')
+        # self.env_dynamics = getattr(Control_Toolkit_ASF.Forces_interfaces.dynamics_forces_interface,
+        #                             environment_name + '_env')
         self.cost = getattr(Control_Toolkit_ASF.Forces_interfaces.cost_forces_interface,
                             env_pars['cost']) if 'cost' in env_pars.keys() else None
         self.target_function = getattr(Control_Toolkit_ASF.Forces_interfaces.target_forces_interface,
@@ -116,7 +116,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.mppi_x = None
         self.rollout_trajectories = np.zeros((1, mpc_horizon+1, 9))
         # check env and interface dynamics match
-        self.compare_dynamics(200)
+        # self.compare_dynamics(200)
 
         # for readability
         N = self.mpc_horizon
@@ -373,7 +373,7 @@ class optimizer_nlp_forces(template_optimizer):
             self.mppi_x = self.mppi_solution(s)
 
         # Build initial guess x0
-        if 'x0' not in self.problem.keys() or self.j >= self.model.N - 1 or self.exitflag<0:
+        if True or 'x0' not in self.problem.keys() or self.j >= self.model.N - 1 or self.exitflag<0:
             x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy) if not self.mppi_reinitialization else self.mppi_x
         else:   #warm start
             x0 = np.hstack(tuple(self.open_loop_solution[key] for key in self.open_loop_solution))[
@@ -399,6 +399,7 @@ class optimizer_nlp_forces(template_optimizer):
             # Solve
             self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
             output, exitflag, info = self.solver.solve(self.problem)
+            self.rollout_trajectories = self.solution_to_envtrajectory_format(output)
             self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
             #
             # If reached max it set as failed
@@ -406,13 +407,13 @@ class optimizer_nlp_forces(template_optimizer):
                 exitflag = -1
 
             self.exitflag = exitflag
-            solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
-                self.problem, output)
+            # solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
+            #     self.problem, output)
 
 
 
             # If solver succeded use copy output
-            if exitflag<0 : #and self.j == self.model.N - 1:
+            if True or exitflag<0 : #and self.j == self.model.N - 1:
                 # self.j = self.model.N - 1  # if the solver fails and we run out of input solutions use the initial guess
                 self.j = 0
                 self.open_loop_solution = self.trajectory_to_solution_format(x0)
@@ -435,8 +436,8 @@ class optimizer_nlp_forces(template_optimizer):
                 # self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
                 output, exitflag, info = self.solver.solve(self.problem)
                 # self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
-                solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
-                    self.problem, output)
+                # solution_trajectory, env_trajectory, solver_trajectory, interface_trajectory = self.compare_open_loop_behaviour(
+                #     self.problem, output)
                 if exitflag >= 0:
                     # if False:
                     self.open_loop_solution = output.copy()
@@ -461,11 +462,12 @@ class optimizer_nlp_forces(template_optimizer):
 
             self.j += 1
 
-        self.rollout_trajectories = self.solution_to_envtrajectory_format(self.open_loop_solution)
-        if self.mppi_reinitialization:
-            self.rollout_trajectories = np.stack(
-                (self.solution_to_envtrajectory_format(self.trajectory_to_solution_format(self.mppi_x)), self.rollout_trajectories),
-                1).squeeze()
+        # self.rollout_trajectories = self.solution_to_envtrajectory_format(self.open_loop_solution)
+
+        # if self.mppi_reinitialization:
+        #     self.rollout_trajectories = np.stack(
+        #         (self.solution_to_envtrajectory_format(self.trajectory_to_solution_format(self.mppi_x)), self.rollout_trajectories),
+        #         1).squeeze()
         self.optimal_trajectory = self.rollout_trajectories
         self.previous_input = u.astype(np.float32)
         return u.astype(np.float32)
