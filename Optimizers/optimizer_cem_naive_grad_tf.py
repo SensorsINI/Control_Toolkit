@@ -33,6 +33,7 @@ class optimizer_cem_naive_grad_tf(template_optimizer):
         learning_rate: float,
         gradmax_clip: float,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
