@@ -31,7 +31,6 @@ class optimizer_mppi(template_optimizer):
         SQRTRHOINV: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
-        calculate_optimal_trajectory: bool,
     ):
         """Instantiate MPPI optimizer, see
         Williams et al. 2017, 'Model Predictive Path Integral Control: From Theory to Parallel Computation'
@@ -107,9 +106,6 @@ class optimizer_mppi(template_optimizer):
         self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
 
         self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
-
-        self.calculate_optimal_trajectory = calculate_optimal_trajectory
-        self.optimal_trajectory = None
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
 
         self.optimizer_reset()
@@ -202,7 +198,7 @@ class optimizer_mppi(template_optimizer):
             self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
 
-        if self.calculate_optimal_trajectory:
+        if False:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
         return self.u
