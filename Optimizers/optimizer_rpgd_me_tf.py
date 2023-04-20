@@ -48,7 +48,6 @@ class optimizer_rpgd_me_tf(template_optimizer):
         adam_epsilon: float,
         maximum_entropy_alpha: float,
         optimizer_logging: bool,
-        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,

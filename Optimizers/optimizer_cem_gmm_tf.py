@@ -30,7 +30,6 @@ class optimizer_cem_gmm_tf(template_optimizer):
         cem_stdev_min: float,
         cem_best_k: int,
         optimizer_logging: bool,
-        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
