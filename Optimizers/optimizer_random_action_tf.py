@@ -24,7 +24,6 @@ class optimizer_random_action_tf(template_optimizer):
         mpc_horizon: int,
         num_rollouts: int,
         optimizer_logging: bool,
-        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
