@@ -10,8 +10,15 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 logger = get_logger(__name__)
-FORGET_GRADIENT = False
 
+import yaml
+import os
+config = yaml.load(open(os.path.join("config.yml")), Loader=yaml.FullLoader)
+FORGET_GRADIENT = config['FORGET_GRADIENT']
+if not isinstance(FORGET_GRADIENT, bool):
+    raise ValueError
+else:
+    print('Gradient variable OK!')
 class optimizer_rpgd_tf(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
     
