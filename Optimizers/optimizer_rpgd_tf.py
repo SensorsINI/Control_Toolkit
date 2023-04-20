@@ -29,6 +29,9 @@ class optimizer_rpgd_tf(template_optimizer):
         outer_its: int,
         sample_stdev: float,
         sample_mean: float,
+        sample_whole_control_space: bool,
+        uniform_dist_min: float,
+        uniform_dist_max: float,
         resamp_per: int,
         period_interpolation_inducing_points: int,
         SAMPLING_DISTRIBUTION: str,
@@ -42,6 +45,7 @@ class optimizer_rpgd_tf(template_optimizer):
         adam_beta_2: float,
         adam_epsilon: float,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
@@ -64,6 +68,14 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.sample_stdev = tf.convert_to_tensor(sample_stdev, dtype=tf.float32)
         self.sample_mean = tf.convert_to_tensor(sample_mean, dtype=tf.float32)
+
+        self.sample_whole_control_space = sample_whole_control_space
+        if self.sample_whole_control_space:
+            self.sample_min = tf.convert_to_tensor(self.action_low, dtype=tf.float32)
+            self.sample_max = tf.convert_to_tensor(self.action_high, dtype=tf.float32)
+        else:
+            self.sample_min = tf.convert_to_tensor(uniform_dist_min, dtype=tf.float32)
+            self.sample_max = tf.convert_to_tensor(uniform_dist_max, dtype=tf.float32)
 
         self.resamp_per = resamp_per
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
@@ -89,6 +101,8 @@ class optimizer_rpgd_tf(template_optimizer):
             epsilon=adam_epsilon,
         )
 
+        self.calculate_optimal_trajectory = calculate_optimal_trajectory
+        self.optimal_trajectory = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
         
         self.optimizer_reset()
@@ -110,8 +124,8 @@ class optimizer_rpgd_tf(template_optimizer):
         elif self.SAMPLING_DISTRIBUTION == "uniform":
             Qn = rng_gen.uniform(
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-                minval=self.action_low,
-                maxval=self.action_high,
+                minval=self.sample_min,
+                maxval=self.sample_max,
                 dtype=tf.float32,
             )
         else:
@@ -314,7 +328,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Q_tf.assign(Qn)
         self.count += 1
 
-        if False:
+        if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
 
