@@ -31,6 +31,7 @@ class optimizer_cem_tf(template_optimizer):
         warmup: bool,
         warmup_iterations: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
