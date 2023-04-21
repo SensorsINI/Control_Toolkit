@@ -140,7 +140,7 @@ def import_controller_by_name(controller_name: str) -> type:
     
     # Search for the controller in the Controllers folders
     controller_relative_paths = (
-        glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
+        glob.glob(f"{os.path.join('**', 'Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
         + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
     )
     
