@@ -173,6 +173,7 @@ def get_available_controller_names() -> "list[str]":
     """
     controller_files = (
         glob.glob(f"Control_Toolkit_ASF/Controllers/controller_*.py")
+        + glob.glob(f"**/Control_Toolkit_ASF/Controllers/controller_*.py")
         + glob.glob(f"**/Control_Toolkit/Controllers/controller_*.py", recursive=True)
     )
     controller_names = ['manual-stabilization']
