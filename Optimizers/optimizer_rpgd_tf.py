@@ -255,7 +255,8 @@ class optimizer_rpgd_tf(template_optimizer):
             self.logging_values["rollout_trajectories_logged"] = self.rollout_trajectories.numpy()
             self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
             self.logging_values["u_logged"] = self.u
-            self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
+
+        self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.

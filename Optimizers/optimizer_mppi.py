@@ -202,7 +202,8 @@ class optimizer_mppi(template_optimizer):
             self.logging_values["J_logged"] = self.lib.to_numpy(traj_cost)
             self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
-            self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
+
+        self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
 
         if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
