@@ -204,6 +204,7 @@ class optimizer_mppi(template_optimizer):
 
         if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
+            self.optimal_control_sequence = self.lib.to_numpy( self.u_nom)
 
         return self.u
 

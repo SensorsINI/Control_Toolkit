@@ -104,6 +104,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.calculate_optimal_trajectory = calculate_optimal_trajectory
         self.optimal_trajectory = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
+
         
         self.optimizer_reset()
 
@@ -328,8 +329,9 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Q_tf.assign(Qn)
         self.count += 1
 
-        if self.calculate_optimal_trajectory:
+        if self.calculate_optimal_trajectory :
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
+            self.optimal_control_sequence = self.lib.to_numpy( self.u_nom)
 
 
         return self.u
