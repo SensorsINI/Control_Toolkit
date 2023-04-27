@@ -103,8 +103,8 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.calculate_optimal_trajectory = calculate_optimal_trajectory
         self.optimal_trajectory = None
+        self.optimal_control_sequence = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
-
         
         self.optimizer_reset()
 
@@ -255,6 +255,7 @@ class optimizer_rpgd_tf(template_optimizer):
             self.logging_values["rollout_trajectories_logged"] = self.rollout_trajectories.numpy()
             self.logging_values["trajectory_ages_logged"] = self.trajectory_ages.numpy()
             self.logging_values["u_logged"] = self.u
+            self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
@@ -329,9 +330,8 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Q_tf.assign(Qn)
         self.count += 1
 
-        if self.calculate_optimal_trajectory :
+        if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
-            self.optimal_control_sequence = self.lib.to_numpy( self.u_nom)
 
 
         return self.u
