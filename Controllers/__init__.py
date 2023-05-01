@@ -111,12 +111,17 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            try:
-                # Assume the variable is an attribute type and assign
-                attr = getattr(self.variable_parameters, property)
-                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
-            except:
-                setattr(self.variable_parameters, property, new_value)
+            attr = getattr(self.variable_parameters, property)
+            self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            # This try-except was causing silent error! I comment it out on 1.05.2023
+            # If you see this comment after 1.08.2023 and this change is not causing problems
+            # Delete this comment with the commented lines below
+            # try:
+            #     # Assume the variable is an attribute type and assign
+            #     attr = getattr(self.variable_parameters, property)
+            #     self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            # except:
+            #     setattr(self.variable_parameters, property, new_value)
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
