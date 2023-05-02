@@ -12,6 +12,7 @@ from SI_Toolkit.computation_library import TensorType
 from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
 from torch import inference_mode
+import matplotlib.pyplot as plt
 
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -39,7 +40,7 @@ class controller_mpc(template_controller):
         
         # Create predictor
         self.predictor = PredictorWrapper()
-        
+
         # MPC Controller always has an optimizer
         Optimizer = import_optimizer_by_name(optimizer_name)
         self.optimizer: template_optimizer = Optimizer(
@@ -69,11 +70,34 @@ class controller_mpc(template_controller):
         else:
             self.step = self.step
 
+        # Plot variables
+        self.step_counter = 0
+        self.target_distance = np.zeros((1, 1))
+        self.dt = self.config_controller["dt"]
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
         self.update_logs(self.optimizer.logging_values)
+
+        target = 0.0
+        # Distance from target for debug pourpose
+        # pendulum
+        s[0] = np.mod(s[0] + np.pi, 2*np.pi) - np.pi
+        current_distance = np.abs(s[0:1] - target)[:, np.newaxis]  # pendulum
+
+        self.target_distance = np.hstack((self.target_distance, current_distance))
+        L = 95
+        if self.step_counter % L == L - 1:
+            fig = plt.figure()
+            plt.plot(np.arange(0, self.step_counter + 1) * self.dt, self.target_distance[0, 1:])
+            plt.xlabel('s')
+            plt.ylabel('error')
+            plt.yscale('log')
+            # plt.title('Plot of a Numpy Vector')
+            # plt.show()
+            fig.savefig('plot.pdf', dpi=fig.dpi)
+        self.step_counter += 1
         return u
 
     def controller_reset(self):

@@ -29,6 +29,7 @@ from forces import get_userid
 import casadi
 import os
 import pickle
+import matplotlib.pyplot as plt
 import Control_Toolkit.others.dynamics_forces_interface
 import Control_Toolkit.others.cost_forces_interface
 import Control_Toolkit.others.initial_guess_forces_interface
@@ -245,7 +246,8 @@ class optimizer_nlp_forces(template_optimizer):
         return 'x' + str(n + 1).zfill(2)
 
     def offset_angles(self, s, is_angle):
-        f = lambda x: x + 2 * np.pi if x < 0 else x
+        # f = lambda x: x + 2 * np.pi if x < 0 else x
+        f = lambda x: np.mod(x + np.pi, 2*np.pi) - np.pi
         for i in is_angle:
             s[i] = f(s[i])
         return
@@ -274,10 +276,12 @@ class optimizer_nlp_forces(template_optimizer):
         # Select only the indipendent variables
         s = s[self.optimize_over].astype(np.float32)
 
+
         # Define the problem
         #@TODO Refactor
         try:
             self.target[3] = self.cost_function.cost_function.controller.target_position.numpy()    #Cartpole
+
         except AttributeError:
             pass
 

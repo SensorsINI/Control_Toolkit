@@ -66,6 +66,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
         self.rtol = rtol
         self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
+        self.target_distance = np.zeros((num_states, 1))
 
         # Warmup setup
         self.first_iter_count = self.outer_its

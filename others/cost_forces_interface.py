@@ -14,10 +14,15 @@ config = yaml.load(
 
 
 def pendulum(z, p):
-    return -casadi.cos(z[1])
+    return -casadi.cos(z[1]) + 0.05*z[0]**2
+
+def pendulum_square_norm(z, p):
+    return z[1]**2
 
 def continuous_mountaincar(z, p):
-    return -casadi.sin(3 * z[1]) / ((z[1] - 1.25) ** 2)
+    # z[1] = casadi.fmax(z[1], -0.5)
+    z[1] = casadi.if_else(casadi.le(z[1],-0.5), -0.5, z[1])
+    return -casadi.sin(3 * z[1]) #/ ((z[1] - 1.25) ** 2)
 
 def continuous_mountaincar_approximated(z, p):
     return -1.27*(z[1] + 0.4)**3 - 1.56 * (z[1] + 0.4)**2 + 0.00326758 * (z[1] + 0.4) + 0.322505
