@@ -89,14 +89,15 @@ class controller_mpc(template_controller):
         self.target_distance = np.hstack((self.target_distance, current_distance))
         L = 95
         if self.step_counter % L == L - 1:
-            fig = plt.figure()
-            plt.plot(np.arange(0, self.step_counter + 1) * self.dt, self.target_distance[0, 1:])
-            plt.xlabel('s')
-            plt.ylabel('error')
-            plt.yscale('log')
+            pass
+            # fig = plt.figure()
+            # plt.plot(np.arange(0, self.step_counter + 1) * self.dt, self.target_distance[0, 1:])
+            # plt.xlabel('s')
+            # plt.ylabel('error')
+            # plt.yscale('log')
             # plt.title('Plot of a Numpy Vector')
             # plt.show()
-            fig.savefig('plot.pdf', dpi=fig.dpi)
+            # fig.savefig('plot.pdf', dpi=fig.dpi)
         self.step_counter += 1
         return u
 

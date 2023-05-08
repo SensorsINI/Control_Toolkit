@@ -112,3 +112,32 @@ def continuous_mountaincar(s,u,p):
     sD[1] = force * power - 0.0025 * casadi.cos(3 * position)
 
     return sD
+
+def obstacle_avoidance(s, u, p):
+    sD = casadi.SX.sym('sD', 6, 1)
+
+    for i in range(0, 3):
+        sD[i] = s[i + 3]
+
+    for i in range(3, 6):
+        sD[i] = u[i - 3]
+
+    return sD
+
+def dubins_car(s, u, p):
+
+    x, y, yaw_car, steering_rate = (s[i] for i in range(0,4))
+    throttle, steer = (u[i] for i in range(0,4))
+    # Update the pose as per Dubin's equations
+
+    sD = casadi.SX.sym('sD', 4, 1)
+
+    WB = 0.25
+    dt = 0.01
+
+    sD[0] = throttle * casadi.cos(yaw_car)
+    sD[1] = throttle * casadi.sin(yaw_car)
+    sD[2] = throttle / WB * casadi.tan(steer)
+    sD[3] = steer/dt
+
+    return self.lib.stack([x, y, yaw_car, steering_rate], 1)

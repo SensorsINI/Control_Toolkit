@@ -85,7 +85,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.initial_strategy = getattr(Control_Toolkit.others.initial_guess_forces_interface, initial_guess)
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
         self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
-                                                                                             'cost'] != None else None
+                                                                                             'cost'] is not None else None
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -125,6 +125,9 @@ class optimizer_nlp_forces(template_optimizer):
         model.neq = nx  # number of equality constraints
         model.nh = 0  # number of inequality constraint functions
         model.npar = nu + nx  # number of runtime parameters
+        if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+            N_obst = self.cost_function.cost_function.controller.obstacle_positions.shape[0]
+            model.npar = 3 + 4*N_obst
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
         # model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
@@ -132,7 +135,7 @@ class optimizer_nlp_forces(template_optimizer):
         # Cost function
         # More info at https://forces.embotech.com/Documentation/solver_options/index.html?highlight=lsobjective#gauss-newton-options
         self.target = np.zeros((nu + nx,))
-        if self.cost != None:
+        if self.cost is not None:
             model.objective = self.cost
             model.objectiveN = lambda z, p: model.objective(z, p)
         else:
@@ -186,7 +189,7 @@ class optimizer_nlp_forces(template_optimizer):
         codeoptions.nlp.integrator.type = 'ForwardEuler'
 
         # Tolerances
-        codeoptions.nlp.TolStat = 1E-3  # inf norm tol.on stationarity
+        codeoptions.nlp.TolStat = 1E-2  # inf norm tol.on stationarity
         codeoptions.nlp.TolEq = 1E-3  # tol. on equality constraints
         codeoptions.nlp.TolIneq = 1E-3  # tol.on inequality constraints
         codeoptions.nlp.TolComp = 1E-3  # tol.on complementarity
@@ -216,6 +219,7 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Open loop is useful for debug purposes
         self.open_loop = False
+        # self.open_loop = True
 
         # Specify fixed parameters of the problem
         self.problem = {}
@@ -256,12 +260,14 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.ndarray((0,))
         s = s0
         u = control_strategy(s, target)
+        # u = np.ones(self.nu) * u
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
             new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
             u = control_strategy(new_x, target)
+            # u = np.ones(self.nu)*u
             x0 = np.hstack((x0, u, new_x))
 
         return x0
@@ -285,6 +291,13 @@ class optimizer_nlp_forces(template_optimizer):
         except AttributeError:
             pass
 
+        p = self.target
+        if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+            self.target = self.cost_function.cost_function.controller.target_point.numpy()
+            obst = self.cost_function.cost_function.controller.obstacle_positions
+            obst = np.ndarray.flatten(obst.numpy())
+            p = np.hstack((self.target, obst))
+
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
         self.problem["x0"] = x0
@@ -300,7 +313,7 @@ class optimizer_nlp_forces(template_optimizer):
                 self.target[self.nu:][self.idx_terminal_set] + self.terminal_set_width
 
         # problem["all_parameters"] = np.ones((self.model.N, self.model.npar))
-        self.problem['all_parameters'] = np.tile(self.target, (self.model.N, 1))
+        self.problem['all_parameters'] = np.tile(p, (self.model.N, 1))
         self.problem['xinit'] = s
         # problem['xfinal'] = self.target[self.nu:] if self.terminal_constraint_at_target else None
 
@@ -334,8 +347,8 @@ class optimizer_nlp_forces(template_optimizer):
 
             # DEBUG
             self.open_loop_errors[self.j] = np.linalg.norm(
-                self.open_loop_solution[self.int_to_dict_key(self.j)][1:] - s)
-            print('\n\n' + 'Open loop prediction: ' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][1:]))
+                self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:] - s)
+            print('\n\n' + 'Open loop prediction: ' + str(self.open_loop_solution[self.int_to_dict_key(self.j)][self.nu:]))
             print('Open loop error: ' + str(self.open_loop_errors[self.j,0]))
 
             self.j += 1
