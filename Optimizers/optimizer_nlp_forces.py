@@ -260,14 +260,14 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.ndarray((0,))
         s = s0
         u = control_strategy(s, target)
-        # u = np.ones(self.nu) * u
+        u = np.ones(self.nu) * u
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
             new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
             u = control_strategy(new_x, target)
-            # u = np.ones(self.nu)*u
+            u = np.ones(self.nu)*u
             x0 = np.hstack((x0, u, new_x))
 
         return x0
@@ -297,6 +297,9 @@ class optimizer_nlp_forces(template_optimizer):
             obst = self.cost_function.cost_function.controller.obstacle_positions
             obst = np.ndarray.flatten(obst.numpy())
             p = np.hstack((self.target, obst))
+
+        # if self.cost_function.cost_function.controller.environment_name == 'dubinscar_batched':
+        #     self.cost_function.cost_function.controller.target_point = np.array([0.9, 0.0, 0.0])
 
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)

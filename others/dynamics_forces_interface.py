@@ -126,18 +126,19 @@ def obstacle_avoidance(s, u, p):
 
 def dubins_car(s, u, p):
 
-    x, y, yaw_car, steering_rate = (s[i] for i in range(0,4))
-    throttle, steer = (u[i] for i in range(0,4))
+    x, y, yaw_car, steering = (s[i] for i in range(0, 4))
+    throttle, steer_rate = (u[i] for i in range(0, 2))
     # Update the pose as per Dubin's equations
 
     sD = casadi.SX.sym('sD', 4, 1)
 
     WB = 0.25
-    dt = 0.01
+    dt = 0.005
 
     sD[0] = throttle * casadi.cos(yaw_car)
     sD[1] = throttle * casadi.sin(yaw_car)
-    sD[2] = throttle / WB * casadi.tan(steer)
-    sD[3] = steer/dt
+    sD[2] = throttle / WB * casadi.tan(steering)
+    # sD[2] = steering
+    sD[3] = steer_rate/dt
 
-    return self.lib.stack([x, y, yaw_car, steering_rate], 1)
+    return sD
