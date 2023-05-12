@@ -10,9 +10,9 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # FOR VISUALIZING TRAJECTORIES--------------------------------------------
-import matplotlib.pyplot as plt
-from scipy.cluster.hierarchy import linkage, fcluster
-from sklearn.datasets import make_blobs
+from Control_Toolkit.others import trajectory_visualize
+from typing import Optional
+import matplotlib
 
 # ------------------------------------------------------------------------
 
@@ -49,6 +49,10 @@ class optimizer_rpgd_pfi(template_optimizer):
             adam_beta_2: float,
             adam_epsilon: float,
             optimizer_logging: bool,
+            visualize: bool,
+            ax1=None,
+            ax2=None,
+            fig=None,
     ):
         super().__init__(
             predictor=predictor,
@@ -99,6 +103,11 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
 
         self.optimizer_reset()
+
+        self.visualize = visualize
+        if self.visualize:
+            self.fig, self.ax1, self.ax2 = trajectory_visualize.plot_open()
+
 
     def configure(self, dt: float, predictor_specification: str, **kwargs):
         self.predictor_single_trajectory.configure(
@@ -241,43 +250,10 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
         self.u = self.u_nom[0, 0, :].numpy()
 
-
-
-
-
         # VISUALIZE TRAJECTORIES --------------------
-        #reshape tensor from (32, 11, 9) to (32, 1, 2)
-        rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
-        end_rollout_trajectories = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
-
-        #find car position (1, 1, 2)
-        car_position = tf.reshape(self.rollout_trajectories[0, 0, 5:7], (1, 1, 2))
-
-        #get relative positions of the endpoints
-        relative_rollout_trajectories = end_rollout_trajectories - car_position
-        reshaped = np.reshape(relative_rollout_trajectories, (32, 2))
-
-        #clustering
-        clustered = linkage(reshaped, method='ward')
-        labels = fcluster(clustered, t=3.5, criterion='distance')
-        k = len(np.unique(labels))
-
-        #VISUALS:
-        fig, ax = plt.subplots()
-        colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k']
-        for i in range(k):
-            plt.scatter(reshaped[labels == i + 1, 0], reshaped[labels == i + 1, 1], c=colors[i])
-        #ax.scatter(relative_rollout_trajectories[:, 0, 0], relative_rollout_trajectories[:, 0, 1])
-        ax.scatter(0, 0, s=100, c='black')
-        ax.set_xlim([-5, 5])
-        ax.set_ylim([-5, 5])
-        plt.show()
+        if self.visualize:
+            trajectory_visualize.plot_update(self.ax1, self.ax2, self.fig, self.rollout_trajectories)
         # --------------------------------------------
-
-
-
-
-
 
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
@@ -361,16 +337,6 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         if False:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
-
-
-
-
-        # VISUALIZE TRAJECTORIES --------------------
-        plt.close()
-        # --------------------------------------------
-
-
-
 
         return self.u
 
