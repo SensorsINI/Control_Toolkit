@@ -10,9 +10,7 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # FOR VISUALIZING TRAJECTORIES--------------------------------------------
-from Control_Toolkit.others import trajectory_visualize
-from typing import Optional
-import matplotlib
+from Control_Toolkit.others.trajectory_visualize import TrajectoriesVizualizer
 
 # ------------------------------------------------------------------------
 
@@ -50,9 +48,6 @@ class optimizer_rpgd_pfi(template_optimizer):
             adam_epsilon: float,
             optimizer_logging: bool,
             visualize: bool,
-            ax1=None,
-            ax2=None,
-            fig=None,
     ):
         super().__init__(
             predictor=predictor,
@@ -106,7 +101,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         self.visualize = visualize
         if self.visualize:
-            self.fig, self.ax1, self.ax2 = trajectory_visualize.plot_open()
+            self.TV = TrajectoriesVizualizer()
 
 
     def configure(self, dt: float, predictor_specification: str, **kwargs):
@@ -252,7 +247,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         # VISUALIZE TRAJECTORIES --------------------
         if self.visualize:
-            trajectory_visualize.plot_update(self.ax1, self.ax2, self.fig, self.rollout_trajectories)
+            self.TV.plot_update(self.rollout_trajectories)
         # --------------------------------------------
 
         if self.optimizer_logging:
