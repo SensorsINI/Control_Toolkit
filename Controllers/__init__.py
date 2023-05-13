@@ -118,6 +118,14 @@ class template_controller(ABC):
         # In your controller, implement any additional initialization steps here
         pass
 
+    def update_attributes(self, updated_attributes: "dict[str,TensorType]"):
+        for property, new_value in updated_attributes.items():
+            try:
+                attr = getattr(self.variable_parameters, property)
+                self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            except:
+                setattr(self.variable_parameters, property, new_value)
+
     @abstractmethod
     def step(self, state: np.ndarray, time:float=None, updated_attributes: "dict[str, Union[TensorType,float]]" = dict()):
         """

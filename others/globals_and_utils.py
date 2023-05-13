@@ -159,7 +159,7 @@ def get_controller_name(controller_names=None, controller_name=None, controller_
         try:
             controller_idx = controller_names.index(controller_name)
         except ValueError:
-            print('{} is not in list. \n In list are: {}'.format(controller_name, controller_names))
+            log.error('{} is not in list. \n In list are: {}'.format(controller_name, controller_names))
             return None
     else:
         controller_name = controller_names[controller_idx]
