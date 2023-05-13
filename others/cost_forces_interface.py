@@ -114,6 +114,7 @@ def dubins_car(z, p):
     x, y, yaw_car, steering_rate = (z[i] for i in range(2, 6))
     # target = np.array([])
     x_target, y_target, yaw_target = 0.9, 0.0, 0.0
+    target = casadi.SX((x_target, y_target, yaw_target))
 
     # head_to_target = dubins_car_batched.get_heading(self.lib, states, self.lib.unsqueeze(target, 0))
     # alpha = head_to_target - yaw_car
@@ -130,7 +131,7 @@ def dubins_car(z, p):
         radius = obstacles[i, 2]
         # d = casadi.norm_2(z[3:6] - obst[i:i+3])
         d = casadi.norm_2(z[2:4] - obstacles[i, :-1])
-        if radius > 0.0020:
+        if radius > 0.20:
             obstacles_cost = casadi.fmax(obstacles_cost, 1.0 - (casadi.fmin(1.0, 1.0 * d / radius))**2)
 
     cost = (
@@ -149,5 +150,7 @@ def dubins_car(z, p):
     )
         # )
         # + self.lib.cast(~car_in_bounds, self.lib.float32)
-    ) - 1.0
-    return cost
+    )
+    # cost = casadi.if_else(casadi.le(casadi.norm_2(z[2:4]-target[0:2]), 0.01), 0.0 , cost)
+
+    return cost - 1.0

@@ -116,6 +116,8 @@ class optimizer_nlp_forces(template_optimizer):
         self.environment = None     #Bad practice, only for debug
         self.step_counter = 0
         self.logs = np.zeros((4,0))
+        self.rpgd_helper = True
+        # self.rpgd_helper = False
 
         # reset optimizer
         self.optimizer_reset()
@@ -276,6 +278,12 @@ class optimizer_nlp_forces(template_optimizer):
 
         return x0
 
+    def initial_trajectory_warmstart(self, output):
+        rollout = self.solution_to_rollout(output)
+        new_x = self.solver.dynamics(rollout[-1, :], p=np.zeros((self.nx+self.nu)), stage=0)[0]
+        new_rollout = np.vstack((rollout[1:,:], np.hstack((rollout[-1:, :self.nu], new_x.transpose()))))
+        return new_rollout.flatten()
+
     def trajectory_from_suboptimizer(self, s0):
         x0 = np.ndarray((0,))
         s = s0
@@ -306,11 +314,18 @@ class optimizer_nlp_forces(template_optimizer):
         rollout = np.vstack((output[k][:] for k in output))
         return rollout
 
+    def rollout_to_solution(self, rollout):
+        keys = ('x' + str(i).zfill(2) for i in range(1, self.mpc_horizon+1))
+        values = (rollout[i, :] for i in range(rollout.shape[0]))
+        output = dict(zip(keys, values))
+        return output
+
     def step(self, s: np.ndarray, time=None):
 
         # self.compare_dynamics()
-        u = self.suboptimizer.step(s)
-        rpgd_solution = self.trajectory_from_suboptimizer(s)
+        if self.rpgd_helper:
+            self.suboptimizer.step(s)
+            rpgd_solution = self.trajectory_from_suboptimizer(s)
 
         # Offset angles
         self.offset_angles(s, self.is_angle)
@@ -339,8 +354,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        # x0 = self.initial_trajectory_warmstart(self.open_loop_solution) if self.step_counter > 10 else rpgd_solution
         # x0 = rpgd_solution
-        self.problem["x0"] = x0
+        self.problem["x0"]  = x0
 
 
         # Terminal set around target
@@ -365,21 +381,19 @@ class optimizer_nlp_forces(template_optimizer):
             self.solution_obj, self.solution_obj_env = self.test_open_loop_solution(self.problem, output)  # DEBUG
 
             # Solve 2
-            self.problem["x0"] = rpgd_solution
-            self.rpgd_obj, self.rpgd_obj_env =  self.test_initial_condition(self.problem, rpgd_solution)# DEBUG
-            output2, exitflag2, info2 = self.solver.solve(self.problem)
-            self.solution2_obj, self.solution2_obj_env = self.test_open_loop_solution(self.problem, output2)  # DEBUG
-
-
-
-            self.logs = np.hstack((self.logs, np.array([self.initial_obj,
+            if self.rpgd_helper:
+                self.problem["x0"] = rpgd_solution
+                self.rpgd_obj, self.rpgd_obj_env =  self.test_initial_condition(self.problem, rpgd_solution)# DEBUG
+                output2, exitflag2, info2 = self.solver.solve(self.problem)
+                self.solution2_obj, self.solution2_obj_env = self.test_open_loop_solution(self.problem, output2)  # DEBUG
+                self.logs = np.hstack((self.logs, np.array([self.initial_obj,
                                                                     self.solution_obj,
                                                                     self.solution2_obj,
                                                                     self.rpgd_obj])[:,np.newaxis]))
 
             # Plot
             L = 20
-            if self.step_counter % L == (L - 1):
+            if self.step_counter % L == (L - 1) and self.rpgd_helper:
                 # pass
                 # fig = plt.figure(2)
                 # times = np.arange(0, self.step_counter + 1) * self.dt
