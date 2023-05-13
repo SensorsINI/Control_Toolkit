@@ -67,6 +67,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.rtol = rtol
         self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
         self.target_distance = np.zeros((num_states, 1))
+        self.best_input_trajectory = None
 
         # Warmup setup
         self.first_iter_count = self.outer_its
@@ -213,6 +214,7 @@ class optimizer_rpgd_tf(template_optimizer):
             self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
         self.u = tf.squeeze(self.Q_tf[best_idx[0], 0, :])
+        self.best_input_trajectory = tf.squeeze(self.Q_tf[best_idx[0], :, :])
         self.u = self.u.numpy()
         
         if self.optimizer_logging:

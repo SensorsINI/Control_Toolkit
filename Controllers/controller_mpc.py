@@ -41,6 +41,9 @@ class controller_mpc(template_controller):
         # Create predictor
         self.predictor = PredictorWrapper()
 
+        # Temporarry bad coupling
+        self.env = None
+
         # MPC Controller always has an optimizer
         Optimizer = import_optimizer_by_name(optimizer_name)
         self.optimizer: template_optimizer = Optimizer(
@@ -56,7 +59,24 @@ class controller_mpc(template_controller):
         # Some optimizers require additional controller parameters (e.g. predictor_specification or dt) to be fully configured.
         # Do this here. If the optimizer does not require any additional parameters, it will ignore them.
         self.optimizer.configure(dt=self.config_controller["dt"], predictor_specification=predictor_specification)
-        
+
+        if optimizer_name == 'nlp-forces':
+            suboptmizer_name = 'rpgd-tf'
+            config_suboptimizer = config_optimizers[suboptmizer_name]
+            SubOptimizer = import_optimizer_by_name(suboptmizer_name)
+            suboptimizer = SubOptimizer(
+                predictor=self.predictor,
+                cost_function=self.cost_function,
+                num_states=self.num_states,
+                num_control_inputs=self.num_control_inputs,
+                control_limits=self.control_limits,
+                optimizer_logging=self.controller_logging,
+                computation_library=self.computation_library,
+                **config_suboptimizer,
+            )
+            self.optimizer.suboptimizer = suboptimizer
+
+
         self.predictor.configure(
             batch_size=self.optimizer.num_rollouts,
             horizon=self.optimizer.mpc_horizon,

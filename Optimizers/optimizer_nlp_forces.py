@@ -110,8 +110,12 @@ class optimizer_nlp_forces(template_optimizer):
         self.open_loop_solution = dict()
         self.rsnorms = []
         self.res_eqs = []
-        self.action_low = -self.action_high
+        # self.action_low = -self.action_high
         self.open_loop_errors = np.zeros((N, 1))
+        self.suboptimizer = None
+        self.environment = None     #Bad practice, only for debug
+        self.step_counter = 0
+        self.logs = np.zeros((4,0))
 
         # reset optimizer
         self.optimizer_reset()
@@ -230,8 +234,8 @@ class optimizer_nlp_forces(template_optimizer):
             self.problem['ub01'] = ub[:nu]
             for i in range(1, N):
                 key = "{:02d}".format(i + 1)
-                self.problem['lb'+key] = lb
-                self.problem['ub'+key] = ub
+                self.problem['lb' + key] = lb
+                self.problem['ub' + key] = ub
 
         # Override SQP initial guess at every step
         if self.codeoptions.solvemethod == 'SQP_NLP':
@@ -272,9 +276,41 @@ class optimizer_nlp_forces(template_optimizer):
 
         return x0
 
+    def trajectory_from_suboptimizer(self, s0):
+        x0 = np.ndarray((0,))
+        s = s0
+        u = self.suboptimizer.best_input_trajectory[0,:].numpy()
+        x0 = np.hstack((x0, u, s))
 
+        for i in range(self.model.N - 1):
+            # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
+            new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.model.npar,)), stage=0)[
+                0].squeeze()
+            # new_x = self.environment.step_dynamics(s[np.newaxis, :], u[np.newaxis,:], dt=self.dt)
+            u = self.suboptimizer.best_input_trajectory[0, :].numpy()
+            x0 = np.hstack((x0, u, new_x))
+
+        return x0
+
+    def compare_dynamics(self):
+        for _ in range(100):
+            s = np.array([np.random.uniform(-self.state_max[i], self.state_max[i]) for i in range(self.nx)])
+            u = np.array([np.random.uniform(self.action_low[i], self.action_high[i]) for i in range(self.nu)])
+            next_s_env = self.environment.step_dynamics(s[np.newaxis, :], u[np.newaxis,:], dt=self.dt)
+            next_s_solver = self.solver.dynamics(np.hstack((u, s)), p=np.zeros((self.model.npar,)), stage=0)[
+                0]
+            err = np.linalg.norm(next_s_env[0,:].numpy()-next_s_solver[:,0])
+            pass
+
+    def solution_to_rollout(self, output):
+        rollout = np.vstack((output[k][:] for k in output))
+        return rollout
 
     def step(self, s: np.ndarray, time=None):
+
+        # self.compare_dynamics()
+        u = self.suboptimizer.step(s)
+        rpgd_solution = self.trajectory_from_suboptimizer(s)
 
         # Offset angles
         self.offset_angles(s, self.is_angle)
@@ -303,7 +339,9 @@ class optimizer_nlp_forces(template_optimizer):
 
         # Build initial guess x0
         x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        # x0 = rpgd_solution
         self.problem["x0"] = x0
+
 
         # Terminal set around target
         if self.terminal_set_width > 0:
@@ -322,9 +360,42 @@ class optimizer_nlp_forces(template_optimizer):
 
         if not self.open_loop or self.j == 0:
             # Solve
-            self.initial_obj = self.test_initial_condition(self.problem)  # DEBUG
+            self.initial_obj, self.initial_obj_env = self.test_initial_condition(self.problem, self.problem['x0'])
             output, exitflag, info = self.solver.solve(self.problem)
-            self.solution_obj = self.test_open_loop_solution(self.problem, output)  # DEBUG
+            self.solution_obj, self.solution_obj_env = self.test_open_loop_solution(self.problem, output)  # DEBUG
+
+            # Solve 2
+            self.problem["x0"] = rpgd_solution
+            self.rpgd_obj, self.rpgd_obj_env =  self.test_initial_condition(self.problem, rpgd_solution)# DEBUG
+            output2, exitflag2, info2 = self.solver.solve(self.problem)
+            self.solution2_obj, self.solution2_obj_env = self.test_open_loop_solution(self.problem, output2)  # DEBUG
+
+
+
+            self.logs = np.hstack((self.logs, np.array([self.initial_obj,
+                                                                    self.solution_obj,
+                                                                    self.solution2_obj,
+                                                                    self.rpgd_obj])[:,np.newaxis]))
+
+            # Plot
+            L = 20
+            if self.step_counter % L == (L - 1):
+                # pass
+                # fig = plt.figure(2)
+                # times = np.arange(0, self.step_counter + 1) * self.dt
+                # # for i in range(self.logs.shape[0]):
+                # #     plt.plot(times, self.logs[i, :])
+                # plt.plot(times, self.logs.transpose())
+                # plt.xlabel('t')
+                # plt.ylabel('objectives')
+                # plt.yscale('log')
+                # plt.title('Plot of a Numpy Vector')
+                # plt.show()
+                # fig.savefig('plot.pdf', dpi=fig.dpi)
+                with open('data.npy', 'wb') as f:
+                    np.save(f, self.logs)
+                pass
+            self.step_counter += 1
 
             # If solver failed use previous output
             if exitflag >= 0 or self.open_loop_solution == {}:
@@ -360,10 +431,12 @@ class optimizer_nlp_forces(template_optimizer):
 
         return u.astype(np.float32)
 
-    def test_initial_condition(self, problem):
-        x0 = problem['x0']
+
+    def test_initial_condition(self, problem, x0):
+        # x0 = problem['x0']
         pars = problem['all_parameters']
-        total_obj = 0
+        total_obj = 0.
+        total_obj_env = 0.0
         initial_trajectory = np.zeros((self.model.N, self.model.neq))
         for ss in range(self.model.N - 1):
             z = x0[ss * self.model.nvar:(ss + 1) * self.model.nvar]
@@ -371,8 +444,8 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
-            # self.cost_function.get_stage_cost(z[self.nu:self.nu+self.nx].astype(np.float32), z[0:self.nu].astype(np.float32),
-            #                                   z[0:self.nu].astype(np.float32))
+            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
+                                              np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0,0]
             assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
             assert not (np.any(np.isnan(np.sum(jacc))) or np.any(
                 np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
@@ -383,13 +456,15 @@ class optimizer_nlp_forces(template_optimizer):
             assert not (np.any(np.isnan(gradobj)) or np.any(
                 np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
             total_obj += obj
+            total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
-        return total_obj
+        return total_obj, total_obj_env
         print('Did not encounter NaNs')
 
     def test_open_loop_solution(self, problem, output):
         pars = problem['all_parameters']
-        total_obj = 0
+        total_obj = 0.
+        total_obj_env = 0.
         initial_trajectory = np.zeros((self.model.N, self.model.neq))
         for ss in range(self.model.N - 1):
             z = output[self.int_to_dict_key(ss)]
@@ -397,9 +472,13 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
+            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
+                                                        np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[
+                0, 0]
             total_obj += obj
+            total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
-        return total_obj
+        return total_obj, total_obj_env
         print('Did not encounter NaNs')
 
     def optimizer_reset(self):
