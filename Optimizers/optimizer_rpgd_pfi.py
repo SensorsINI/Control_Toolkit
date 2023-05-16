@@ -247,7 +247,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         # VISUALIZE TRAJECTORIES --------------------
         if self.visualize:
-            self.TV.plot_update(self.rollout_trajectories)
+            self.TV.plot_update(self.rollout_trajectories, Qn)
         # --------------------------------------------
 
         if self.optimizer_logging:

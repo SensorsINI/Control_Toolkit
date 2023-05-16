@@ -90,13 +90,13 @@ class TrajectoriesVizualizer:
         # Make square, keep proportions
         axis.set_aspect('equal', adjustable='box')
 
-    def plot_update(self, rollout_trajectories):
+    def plot_update(self, rollout_trajectories, Qn):
         self.ax1.clear()
         self.ax2.clear()
 
         # Calculate the plot data
+        reshaped_input = self.calculate_input(Qn)
         reshaped_output = self.calculate_output(rollout_trajectories)
-        reshaped_input = self.calculate_input(rollout_trajectories)
 
         # Set plots
         self.plot_set(reshaped_input, self.ax1, 'Input Space', 'X-LABEL', 'Y-LABEL',
