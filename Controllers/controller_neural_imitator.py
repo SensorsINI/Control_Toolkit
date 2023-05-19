@@ -91,6 +91,9 @@ class controller_neural_imitator(template_controller):
 
         return Q
 
+    def controller_reset(self):
+        self.configure()
+
     def _evaluate_net(self, net_input):
         net_output = self.net(net_input)
         return net_output
