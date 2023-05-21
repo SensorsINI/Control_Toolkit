@@ -19,8 +19,6 @@ class optimizer_rpgd_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -50,8 +48,6 @@ class optimizer_rpgd_tf(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -91,8 +87,8 @@ class optimizer_rpgd_tf(template_optimizer):
         if self.do_warmup:
             self.first_iter_count = self.warmup_iterations
 
-        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
-                                         self.num_control_inputs, self.lib)
+        self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.Interpolator = None
 
         self.opt = tf.keras.optimizers.Adam(
             learning_rate=learning_rate,
@@ -105,14 +101,28 @@ class optimizer_rpgd_tf(template_optimizer):
         self.optimal_trajectory = None
         self.optimal_control_sequence = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
-        
-        self.optimizer_reset()
 
-    def configure(self, dt: float, predictor_specification: str, **kwargs):
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  dt: float,
+                  predictor_specification: str,
+                  **kwargs):
+        super().configure(
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            default_configure=False,
+        )
+
+        self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points,
+                                         self.num_control_inputs, self.lib)
+
         self.predictor_single_trajectory.configure(
             batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
         )
+
+        self.optimizer_reset()
 
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         if self.SAMPLING_DISTRIBUTION == "normal":

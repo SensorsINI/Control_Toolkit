@@ -16,8 +16,6 @@ class optimizer_gradient_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -39,8 +37,6 @@ class optimizer_gradient_tf(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -69,8 +65,6 @@ class optimizer_gradient_tf(template_optimizer):
         self.first_iter_count = self.gradient_steps
         if self.warmup:
             self.first_iter_count = self.warmup_iterations
-        
-        self.optimizer_reset()
     
     def _predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost

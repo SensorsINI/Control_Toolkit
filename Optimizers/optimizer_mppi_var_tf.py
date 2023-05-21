@@ -19,8 +19,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -42,8 +40,6 @@ class optimizer_mppi_var_tf(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -63,20 +59,38 @@ class optimizer_mppi_var_tf(template_optimizer):
         self.max_grad_norm = max_grad_norm
         self._SQRTRHOINV_mc = SQRTRHOINV_mc
 
-        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
+        self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.Interpolator = None
+
+        self.u_nom = None  # nominal u
+        self.nuvec = None  # vector of variances to be optimized
+
+
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  dt: float,
+                  **kwargs):
+
+        super().configure(
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            default_configure=False,
+        )
+
+        self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points,
                                          self.num_control_inputs, self.lib)
-        
+
         # Set up nominal u
         self.u_nom = tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32)
         # Set up vector of variances to be optimized
         self.nuvec = np.math.sqrt(self.NU)*tf.ones([1, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs])
         self.nuvec = tf.Variable(self.nuvec)
 
-        self.optimizer_reset()
-    
-    def configure(self, dt: float, **kwargs):
         self.SQRTRHODTINV = self._SQRTRHOINV_mc * (1 / np.sqrt(dt))
         del self._SQRTRHOINV_mc
+
+        self.optimizer_reset()
     
     #mppi correction
     def mppi_correction_cost(self, u, delta_u, nuvec):

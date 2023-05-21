@@ -39,8 +39,6 @@ class optimizer_nlp_forces(template_optimizer):
             self,
             predictor: PredictorWrapper,
             cost_function: CostFunctionWrapper,
-            num_states: int,
-            num_control_inputs: int,
             control_limits: "Tuple[np.ndarray, np.ndarray]",
             computation_library: "type[ComputationLibrary]",
             optimizer_logging: bool,
@@ -56,8 +54,6 @@ class optimizer_nlp_forces(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,

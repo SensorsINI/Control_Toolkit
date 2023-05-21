@@ -14,8 +14,6 @@ class template_optimizer:
             self,
             predictor: PredictorWrapper,
             cost_function: CostFunctionWrapper,
-            num_states: int,
-            num_control_inputs: int,
             control_limits: "Tuple[np.ndarray, np.ndarray]",
             optimizer_logging: bool,
             seed: int,
@@ -38,8 +36,8 @@ class template_optimizer:
         # Configure predictor
         self.predictor = predictor
         
-        self.num_states = num_states
-        self.num_control_inputs = num_control_inputs
+        self.num_states = None
+        self.num_control_inputs = None
         self.action_low, self.action_high = control_limits
         self.action_low = self.lib.to_tensor(self.action_low, self.lib.float32)
         self.action_high = self.lib.to_tensor(self.action_high, self.lib.float32)
@@ -50,9 +48,19 @@ class template_optimizer:
         self.logging_values = {}  # Can store trajectories and other things we want to log
         self.optimizer_logging = optimizer_logging
     
-    def configure(self, **kwargs):
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  default_configure: bool = True,
+                  ) -> None:
+
+        self.num_states = num_states
+        self.num_control_inputs = num_control_inputs
+
+        if default_configure:
+            self.optimizer_reset()
+
         """Pass any additional arguments from the controller to the optimizer."""
-        pass
     
     def step(self, s: np.ndarray, time=None):
         raise NotImplementedError("Implement this function in a subclass.")
