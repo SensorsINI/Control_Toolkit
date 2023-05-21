@@ -34,8 +34,6 @@ class template_controller(ABC):
         self,
         dt: float,
         environment_name: str,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         initial_environment_attributes: "dict[str, TensorType]",
     ):
@@ -76,8 +74,6 @@ class template_controller(ABC):
         self.initial_environment_attributes = initial_environment_attributes
         self.variable_parameters = SimpleNamespace()
 
-        self.num_states = num_states
-        self.num_control_inputs = num_control_inputs
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
         
