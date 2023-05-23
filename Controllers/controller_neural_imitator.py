@@ -4,7 +4,7 @@ from SI_Toolkit.computation_library import TensorType, NumpyLibrary
 import numpy as np
 
 from Control_Toolkit.Controllers import template_controller
-from SI_Toolkit.load_and_normalize import normalize_numpy_array, denormalize_numpy_array
+from SI_Toolkit.Functions.General.Normalising import get_normalization_function, get_denormalization_function
 
 try:
     from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
@@ -37,8 +37,14 @@ class controller_neural_imitator(template_controller):
                     batch_size=self.batch_size, stateful=True)
 
         self.normalization_info = get_norm_info_for_net(self.net_info)
+        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
+        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
+                                                                self.lib)
 
-        self.evaluate_net = CompileAdaptive(self._evaluate_net)
+        self.net_input_normed = self.lib.to_variable(
+            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
+
+        self.step_compilable = CompileAdaptive(self._step_compilable)
 
         self.state_2_input_idx = []
         self.remaining_inputs = self.net_info.inputs.copy()
@@ -74,23 +80,15 @@ class controller_neural_imitator(template_controller):
             for key in self.remaining_inputs:
                 net_input = np.append(net_input, getattr(self.variable_parameters, key))
 
-        net_input = normalize_numpy_array(
-            net_input, self.net_info.inputs, self.normalization_info
-        )
-
-        net_input = np.reshape(net_input, [-1, 1, len(self.net_info.inputs)])
-
-        net_input = self.lib.to_tensor(net_input, dtype=self.lib.float32)
+        net_input = self.lib.to_tensor(net_input, self.lib.float32)
 
         if self.lib.lib == 'Pytorch':
             net_input = net_input.to(self.device)
 
-        net_output = self.evaluate_net(net_input)
+        net_output = self.step_compilable(net_input)
 
         if self.lib.lib == 'Pytorch':
             net_output = net_output.detach().numpy()
-
-        net_output = denormalize_numpy_array(net_output, self.net_info.outputs, self.normalization_info)
 
         Q = net_output
 
@@ -99,6 +97,14 @@ class controller_neural_imitator(template_controller):
     def controller_reset(self):
         self.configure()
 
-    def _evaluate_net(self, net_input):
+    def _step_compilable(self, net_input):
+
+        self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
+
+        net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
+
         net_output = self.net(net_input)
+
+        net_output = self.denormalize_outputs(net_output)
+
         return net_output
