@@ -72,7 +72,7 @@ class controller_mpc(template_controller):
             dt=self.config_controller["dt"],
             computation_library=self.computation_library,
             variable_parameters=self.variable_parameters,
-            predictor_specification=predictor_specification
+            predictor_specification=predictor_specification,
         )
 
         self.optimizer.configure(
