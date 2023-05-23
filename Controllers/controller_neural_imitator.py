@@ -23,6 +23,8 @@ class controller_neural_imitator(template_controller):
         NET_NAME = self.config_controller["net_name"]
         PATH_TO_MODELS = self.config_controller["PATH_TO_MODELS"]
 
+        self.input_at_input = self.config_controller["input_at_input"]
+
         a = SimpleNamespace()
         self.batch_size = 1  # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
 
@@ -63,11 +65,14 @@ class controller_neural_imitator(template_controller):
         print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-        self.update_attributes(updated_attributes)
 
-        net_input = s[..., self.state_2_input_idx]
-        for key in self.remaining_inputs:
-            net_input = np.append(net_input, getattr(self.variable_parameters, key))
+        if self.input_at_input:
+            net_input = s
+        else:
+            self.update_attributes(updated_attributes)
+            net_input = s[..., self.state_2_input_idx]
+            for key in self.remaining_inputs:
+                net_input = np.append(net_input, getattr(self.variable_parameters, key))
 
         net_input = normalize_numpy_array(
             net_input, self.net_info.inputs, self.normalization_info
