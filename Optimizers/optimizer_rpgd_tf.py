@@ -342,7 +342,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.count += 1
 
         if self.calculate_optimal_trajectory:
-            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
+            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s[:1, :], self.u_nom))
 
 
         return self.u
