@@ -33,6 +33,7 @@ class optimizer_rpgd_tf(template_optimizer):
         resamp_per: int,
         period_interpolation_inducing_points: int,
         SAMPLING_DISTRIBUTION: str,
+        shift_previous: int,
         warmup: bool,
         warmup_iterations: int,
         learning_rate: float,
@@ -75,6 +76,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.resamp_per = resamp_per
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.shift_previous = shift_previous
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
         self.opt_keep_k = int(max(int(num_rollouts * opt_keep_k_ratio), 1))
@@ -210,7 +212,9 @@ class optimizer_rpgd_tf(template_optimizer):
         # # End of unnecessary part
 
         # Retrieve optimal input and warmstart for next iteration
-        Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
+        Qn = tf.concat(
+            [Q[:, self.shift_previous:, :], self.lib.tile(Q[:, -1:, :], (1, self.shift_previous, 1))]
+            , axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
 
     def _predict_optimal_trajectory(self, s, u_nom):
