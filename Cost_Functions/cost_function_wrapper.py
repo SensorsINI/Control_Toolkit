@@ -34,6 +34,8 @@ class CostFunctionWrapper:
 
     def configure(
         self,
+        batch_size: int,
+        horizon: int,
         variable_parameters: template_controller,
         environment_name: str,
         computation_library: "type[ComputationLibrary]",
@@ -55,6 +57,8 @@ class CostFunctionWrapper:
         self.cost_function: cost_function_base = getattr(
             cost_function_module, self.cost_function_name
         )(variable_parameters, computation_library)
+
+        self.cost_function.configure(batch_size=batch_size, horizon=horizon)
 
     def update_cost_function_name_from_specification(
         self, cost_function_specification: str = None

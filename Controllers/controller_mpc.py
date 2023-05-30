@@ -35,11 +35,6 @@ class controller_mpc(template_controller):
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
         self.cost_function = CostFunctionWrapper()
-        self.cost_function.configure(
-            variable_parameters=self.variable_parameters,
-            environment_name=self.environment_name,
-            computation_library=self.computation_library,
-            cost_function_specification=cost_function_specification)
         
         # Create predictor
         self.predictor = PredictorWrapper()
@@ -73,6 +68,15 @@ class controller_mpc(template_controller):
             computation_library=self.computation_library,
             variable_parameters=self.variable_parameters,
             predictor_specification=predictor_specification,
+        )
+
+        self.cost_function.configure(
+            batch_size=self.optimizer.num_rollouts,
+            horizon=self.optimizer.mpc_horizon,
+            variable_parameters=self.variable_parameters,
+            environment_name=self.environment_name,
+            computation_library=self.computation_library,
+            cost_function_specification=cost_function_specification
         )
 
         self.optimizer.configure(

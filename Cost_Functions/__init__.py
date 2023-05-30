@@ -16,6 +16,19 @@ class cost_function_base:
     def __init__(self, variable_parameters: SimpleNamespace, ComputationLib: "type[ComputationLibrary]") -> None:
         self.variable_parameters = variable_parameters
         self.set_computation_library(ComputationLib)
+
+        self.batch_size = None
+        self.horizon = None
+
+
+    def configure(
+            self,
+            batch_size: int,
+            horizon: int,
+    ):
+        self.batch_size = batch_size
+        self.horizon = horizon
+
     
     def get_terminal_cost(self, terminal_states: TensorType) -> TensorType:
         """Compute a batch of terminal costs for a batch of terminal states.
