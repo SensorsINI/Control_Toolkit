@@ -48,6 +48,13 @@ class CostFunctionWrapper:
         :type cost_function_specification: str, optional
         """
 
+        self.batch_size = batch_size
+        self.horizon = horizon
+        self.variable_parameters = variable_parameters
+        self.environment_name = environment_name
+        self.computation_library = computation_library
+        self.cost_function_specification = cost_function_specification
+
         # Set cost function attributes from given specification. Resort to defaults if required.
         self.update_cost_function_name_from_specification(cost_function_specification)
 
