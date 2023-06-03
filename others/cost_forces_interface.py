@@ -165,20 +165,9 @@ def dubins_obstacles3():
 
 def dubins_car(z, p):
     x, y, yaw_car, steering_rate = (z[i] for i in range(2, 6))
-    # target = np.array([])
-    # x_target, y_target, yaw_target = 0.9, 0.0, 0.0
-    # x_target, y_target, yaw_target = 0.682, -0.2, 0.0
-
-    # x_target, y_target, yaw_target = 0.9, -0.9, 0.0
-    # target = casadi.SX((x_target, y_target, yaw_target))
 
     target = casadi.SX(p[0:3])
     x_target, y_target, yaw_target = target[0], target[1], target[2]
-
-    # head_to_target = dubins_car_batched.get_heading(self.lib, states, self.lib.unsqueeze(target, 0))
-    # alpha = head_to_target - yaw_car
-    # ld = dubins_car_batched.get_distance(self.lib, states, self.lib.unsqueeze(target, 0))
-    # crossTrackError = self.lib.sin(alpha) * ld
 
     # car_in_bounds = dubins_car_batched._car_in_bounds(self.lib, x, y)
     # car_at_target = dubins_car_batched._car_at_target(self.lib, x, y, x_target, y_target)
@@ -217,23 +206,9 @@ def dubins_car(z, p):
 
 def dubins_car_hardcoded(z, p):
     x, y, yaw_car, steering_rate = (z[i] for i in range(2, 6))
-    # target = np.array([])
-    # x_target, y_target, yaw_target = 0.9, 0.0, 0.0
-    # x_target, y_target, yaw_target = 0.682, -0.2, 0.0
 
     x_target, y_target, yaw_target = 0.9, -0.9, 0.0
     target = casadi.SX((x_target, y_target, yaw_target))
-
-    # target = casadi.SX(p[0:3])
-    # x_target, y_target, yaw_target = target[0], target[1], target[2]
-
-    # head_to_target = dubins_car_batched.get_heading(self.lib, states, self.lib.unsqueeze(target, 0))
-    # alpha = head_to_target - yaw_car
-    # ld = dubins_car_batched.get_distance(self.lib, states, self.lib.unsqueeze(target, 0))
-    # crossTrackError = self.lib.sin(alpha) * ld
-
-    # car_in_bounds = dubins_car_batched._car_in_bounds(self.lib, x, y)
-    # car_at_target = dubins_car_batched._car_at_target(self.lib, x, y, x_target, y_target)
 
     obstacles = np.array(dubins_obstacles())
     obstacles_cost = 0.0
