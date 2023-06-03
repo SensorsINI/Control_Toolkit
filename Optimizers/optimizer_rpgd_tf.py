@@ -8,6 +8,7 @@ from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+from line_profiler_pycharm import profile
 
 logger = get_logger(__name__)
 
@@ -175,7 +176,13 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = tf.concat([Q[:, 1:, :], Q[:, -1:, :]], axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
 
+    @profile
     def step(self, s: np.ndarray, time=None):
+
+        if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+            self.cost_function.cost_function.controller.target_point = self.lib.to_tensor([-0.9, 0.9, 0], dtype=self.lib.float32)
+
+
         if self.optimizer_logging:
             self.logging_values = {"s_logged": s.copy()}
             

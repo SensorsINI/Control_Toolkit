@@ -99,7 +99,7 @@ def acrobot_dynamics(s, u, p):
 
     return sD
 
-def continuous_mountaincar(s,u,p):
+def continuous_mountaincar(s, u, p):
     power = 0.0015
     force = u
     min_position = -1.2

@@ -25,10 +25,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(".", "forces")))
 from forces import forcespro
 import forcespro.nlp
 import numpy as np
+import pandas as pd
 from forces import get_userid
 import casadi
 import os
 import pickle
+from line_profiler_pycharm import profile
 import matplotlib.pyplot as plt
 import Control_Toolkit.others.dynamics_forces_interface
 import Control_Toolkit.others.cost_forces_interface
@@ -85,7 +87,7 @@ class optimizer_nlp_forces(template_optimizer):
         self.initial_strategy = getattr(Control_Toolkit.others.initial_guess_forces_interface, initial_guess)
         self.dynamics = getattr(Control_Toolkit.others.dynamics_forces_interface, env_pars['dynamics'])
         self.cost = getattr(Control_Toolkit.others.cost_forces_interface, env_pars['cost']) if env_pars[
-                                                                                             'cost'] is not None else None
+                                                                                                   'cost'] is not None else None
         self.generate_new_solver = generate_new_solver
         self.terminal_constraint_at_target = terminal_constraint_at_target
         self.terminal_set_width = terminal_set_width
@@ -116,8 +118,6 @@ class optimizer_nlp_forces(template_optimizer):
         self.environment = None     #Bad practice, only for debug
         self.step_counter = 0
         self.logs = np.zeros((4,0))
-        self.rpgd_helper = True
-        # self.rpgd_helper = False
 
         # reset optimizer
         self.optimizer_reset()
@@ -134,6 +134,9 @@ class optimizer_nlp_forces(template_optimizer):
         if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
             N_obst = self.cost_function.cost_function.controller.obstacle_positions.shape[0]
             model.npar = 3 + 4*N_obst
+        if self.cost_function.cost_function.controller.environment_name == 'dubins_car_batched':
+            N_obst = self.cost_function.cost_function.controller.obstacle_positions.shape[0]
+            model.npar = 3 + 3*N_obst
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
         # model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
@@ -173,12 +176,12 @@ class optimizer_nlp_forces(template_optimizer):
         # Solver options
         # Documented at: https://forces.embotech.com/Documentation/solver_options/index.html?highlight=erk2#high-level-interface-options
         codeoptions = forcespro.CodeOptions()
-        codeoptions.maxit = 1000  # Maximum number of iterations
+        codeoptions.maxit = 100  # Maximum number of iterations
         codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.parallel = 1
-        codeoptions.solvemethod = 'PDIP_NLP'
-        # codeoptions.solvemethod = 'SQP_NLP'
+        # codeoptions.solvemethod = 'PDIP_NLP'
+        codeoptions.solvemethod = 'SQP_NLP'
         codeoptions.nlp.hessian_approximation = 'gauss-newton' if str(type(model.LSobjective)) == "<class 'function'>" else 'bfgs'
         # codeoptions.nlp.hessian_approximation = 'bfgs' # Works with both LSobjective and objective
         codeoptions.forcenonconvex = 1
@@ -214,18 +217,21 @@ class optimizer_nlp_forces(template_optimizer):
         # Save codeoptions
         self.codeoptions = codeoptions
 
+        gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
         if self.generate_new_solver:
             # Generate ForcesPRO solver
             self.solver = model.generate_solver(codeoptions)
         else:
             # Read already generated solver
-            gympath = '/'.join(os.path.abspath(__file__).split('/')[:-3])
             self.solver = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver'))
             pass
+        self.solver_hardcoded = forcespro.nlp.Solver.from_directory(os.path.join(gympath, 'FORCES_NLP_solver_bkp'))
 
         # Open loop is useful for debug purposes
         self.open_loop = False
         # self.open_loop = True
+        self.rpgd_helper = True
+        # self.rpgd_helper = False
 
         # Specify fixed parameters of the problem
         self.problem = {}
@@ -266,28 +272,34 @@ class optimizer_nlp_forces(template_optimizer):
         x0 = np.ndarray((0,))
         s = s0
         u = control_strategy(s, target)
-        u = np.ones(self.nu) * u
+        if type(u) == float or u.shape[0] < self.nu:
+            u = np.ones(self.nu) * u
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
             new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
             u = control_strategy(new_x, target)
-            u = np.ones(self.nu)*u
+            if type(u) == float or u.shape[0] < self.nu:
+                u = np.ones(self.nu) * u
             x0 = np.hstack((x0, u, new_x))
 
         return x0
 
     def initial_trajectory_warmstart(self, output):
         rollout = self.solution_to_rollout(output)
-        new_x = self.solver.dynamics(rollout[-1, :], p=np.zeros((self.nx+self.nu)), stage=0)[0]
+        new_x = self.solver.dynamics(rollout[-1, :], p=self.problem['all_parameters'][0, :], stage=0)[0]
         new_rollout = np.vstack((rollout[1:,:], np.hstack((rollout[-1:, :self.nu], new_x.transpose()))))
         return new_rollout.flatten()
 
     def trajectory_from_suboptimizer(self, s0):
+        inputs = self.suboptimizer.best_input_trajectory.numpy()
         x0 = np.ndarray((0,))
         s = s0
-        u = self.suboptimizer.best_input_trajectory[0,:].numpy()
+        try:
+            u = inputs[0, :]
+        except Exception:
+            u = inputs[0]
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N - 1):
@@ -295,9 +307,12 @@ class optimizer_nlp_forces(template_optimizer):
             new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.model.npar,)), stage=0)[
                 0].squeeze()
             # new_x = self.environment.step_dynamics(s[np.newaxis, :], u[np.newaxis,:], dt=self.dt)
-            u = self.suboptimizer.best_input_trajectory[0, :].numpy()
+            try:
+                u = inputs[i, :]
+            except Exception:
+                u = inputs[i]
             x0 = np.hstack((x0, u, new_x))
-
+            pass
         return x0
 
     def compare_dynamics(self):
@@ -320,12 +335,13 @@ class optimizer_nlp_forces(template_optimizer):
         output = dict(zip(keys, values))
         return output
 
+    @profile
     def step(self, s: np.ndarray, time=None):
 
         # self.compare_dynamics()
         if self.rpgd_helper:
             self.suboptimizer.step(s)
-            rpgd_solution = self.trajectory_from_suboptimizer(s)
+            rpgd_solution = self.trajectory_from_suboptimizer(s[self.optimize_over].astype(np.float32))
 
         # Offset angles
         self.offset_angles(s, self.is_angle)
@@ -342,8 +358,18 @@ class optimizer_nlp_forces(template_optimizer):
         except AttributeError:
             pass
 
+        # if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+            # self.cost_function.cost_function.controller.target_point = self.lib.to_tensor([-0.682, -0.2, 0],
+            #                                                                               dtype=self.lib.float32)
+
         p = self.target
         if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+            self.target = self.cost_function.cost_function.controller.target_point.numpy()
+            obst = self.cost_function.cost_function.controller.obstacle_positions
+            obst = np.ndarray.flatten(obst.numpy())
+            p = np.hstack((self.target, obst))
+
+        if self.cost_function.cost_function.controller.environment_name == 'dubins_car_batched':
             self.target = self.cost_function.cost_function.controller.target_point.numpy()
             obst = self.cost_function.cost_function.controller.obstacle_positions
             obst = np.ndarray.flatten(obst.numpy())
@@ -353,10 +379,11 @@ class optimizer_nlp_forces(template_optimizer):
         #     self.cost_function.cost_function.controller.target_point = np.array([0.9, 0.0, 0.0])
 
         # Build initial guess x0
-        x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        # x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
         # x0 = self.initial_trajectory_warmstart(self.open_loop_solution) if self.step_counter > 10 else rpgd_solution
+        x0 = self.initial_trajectory_warmstart(self.open_loop_solution) if self.step_counter > 10 and self.step_counter%5 != 4 else rpgd_solution
         # x0 = rpgd_solution
-        self.problem["x0"]  = x0
+        self.problem["x0"] = x0
 
 
         # Terminal set around target
@@ -381,7 +408,7 @@ class optimizer_nlp_forces(template_optimizer):
             self.solution_obj, self.solution_obj_env = self.test_open_loop_solution(self.problem, output)  # DEBUG
 
             # Solve 2
-            if self.rpgd_helper:
+            if self.rpgd_helper and True:
                 self.problem["x0"] = rpgd_solution
                 self.rpgd_obj, self.rpgd_obj_env =  self.test_initial_condition(self.problem, rpgd_solution)# DEBUG
                 output2, exitflag2, info2 = self.solver.solve(self.problem)
@@ -390,10 +417,12 @@ class optimizer_nlp_forces(template_optimizer):
                                                                     self.solution_obj,
                                                                     self.solution2_obj,
                                                                     self.rpgd_obj])[:,np.newaxis]))
+                # self.logs = pd.DataFrame(self.logs)
+                # output = output2
 
             # Plot
             L = 20
-            if self.step_counter % L == (L - 1) and self.rpgd_helper:
+            if self.step_counter % L == (L - 1) and self.rpgd_helper and False:
                 # pass
                 # fig = plt.figure(2)
                 # times = np.arange(0, self.step_counter + 1) * self.dt
@@ -406,7 +435,7 @@ class optimizer_nlp_forces(template_optimizer):
                 # plt.title('Plot of a Numpy Vector')
                 # plt.show()
                 # fig.savefig('plot.pdf', dpi=fig.dpi)
-                with open('data.npy', 'wb') as f:
+                with open('/home/ennio/PycharmProjects/scratch/data.npy', 'wb') as f:
                     np.save(f, self.logs)
                 pass
             self.step_counter += 1
@@ -445,6 +474,12 @@ class optimizer_nlp_forces(template_optimizer):
 
         return u.astype(np.float32)
 
+    def augment_state(self, z):
+        k = 0
+        new_z = np.zeros(z.shape[0]+k)
+        new_z[:self.nu] = z[:self.nu]
+        new_z[self.nu:self.nu + self.nx] = z[self.nu: self.nu + self.nx]
+        return new_z
 
     def test_initial_condition(self, problem, x0):
         # x0 = problem['x0']
@@ -458,8 +493,8 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
-            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
-                                              np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0,0]
+            obj_env = self.cost_function.cost_function._get_stage_cost(np.float32(self.augment_state(z[self.nu:]))[np.newaxis, np.newaxis],
+                                                        np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0,0]
             assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
             assert not (np.any(np.isnan(np.sum(jacc))) or np.any(
                 np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
@@ -473,7 +508,7 @@ class optimizer_nlp_forces(template_optimizer):
             total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
         return total_obj, total_obj_env
-        print('Did not encounter NaNs')
+        # print('Did not encounter NaNs')
 
     def test_open_loop_solution(self, problem, output):
         pars = problem['all_parameters']
@@ -486,14 +521,21 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
-            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
-                                                        np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[
-                0, 0]
+            obj_hardcoded, gradobj_hardcoded = self.solver_hardcoded.objective(z, p, stage=ss)
+            obj_env = self.cost_function.cost_function._get_stage_cost(np.float32(self.augment_state(z[self.nu:]))[np.newaxis, np.newaxis],
+                                                        np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0, 0]
+            if np.abs(obj - obj_hardcoded)>1e-6:
+                raise Exception('Hardcoded objective ' + str(obj_hardcoded) + '\n'+
+                                ' is different from objective by parameters ' + str(obj) + '\n')
+            if np.linalg.norm(gradobj - gradobj_hardcoded)>1e-6:
+                raise Exception('Hardcoded gradient ' + str(obj_hardcoded) + '\n' +
+                                ' is different from gradient by parameters ' + str(obj) + '\n')
+
             total_obj += obj
             total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
         return total_obj, total_obj_env
-        print('Did not encounter NaNs')
+        # print('Did not encounter NaNs')
 
     def optimizer_reset(self):
         pass

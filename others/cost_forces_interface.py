@@ -16,7 +16,9 @@ config = yaml.load(
 
 
 def pendulum(z, p):
-    return -casadi.cos(z[1]) + 0.05 * z[0] ** 2
+    return -casadi.cos(z[1]) \
+        + 0.001 * z[0] ** 2
+    # + 0.1*z[2]**2
 
 
 def pendulum_square_norm(z, p):
@@ -25,8 +27,11 @@ def pendulum_square_norm(z, p):
 
 def continuous_mountaincar(z, p):
     # z[1] = casadi.fmax(z[1], -0.5)
-    z[1] = casadi.if_else(casadi.le(z[1], -0.5), -0.5, z[1])
-    return -casadi.sin(3 * z[1])  # / ((z[1] - 1.25) ** 2)
+    # z[1] = casadi.if_else(casadi.le(z[1], -0.5), -0.5, z[1])
+    # cost = -casadi.sin(3 * z[1]) + 0.1*(z[0]**2) # / ((z[1] - 1.25) ** 2)
+    cost = -casadi.sin(np.pi * z[1]) + 0.1 * z[0] ** 2  # / ((z[1] - 1.25) ** 2)
+    return casadi.if_else(casadi.lt(z[1], 0.45), cost, cost + 100.0)
+    # return
 
 
 def continuous_mountaincar_approximated(z, p):
@@ -72,7 +77,6 @@ def obstacles():
     return obst
 
 
-
 def obstacle_avoidance(z, p):
     # p = [target] + [o_x, o_y, o_z, o_r] * n_obstacles
     target = p[0:3]
@@ -84,7 +88,7 @@ def obstacle_avoidance(z, p):
         radius = obst[i + 3]
         # d = casadi.norm_2(z[3:6] - obst[i:i+3])
         d = casadi.sumsqr(z[3:6] - obst[i:i + 3])
-        if radius > 0.21:
+        if radius > 0.15:
             obstacle_cost += 1.0 - (casadi.fmin(1.0, 1.0 * d / radius))
         # obstacle_cost += casadi.le(casadi.sumsqr(obst[i:i+3] - z[3:6]), radius)
     # target_cost = casadi.norm_2(z[3:6] - target)
@@ -110,11 +114,66 @@ def dubins_obstacles():
             [0.41435724, 0.4362622, 0.05848365]]
 
 
+def dubins_obstacles2():
+    return [[-0.6, +0.8, 0.2]
+        , [-0.6, +0.6, 0.2]
+        , [-0.6, +0.4, 0.2]
+        , [-0.6, +0.2, 0.2]
+        , [-0.6, -0.4, 0.2]
+        , [-0.6, -0.6, 0.2]
+        , [-0.6, -0.8, 0.2]
+        , [-0.2, -0.4, 0.2]
+        , [-0.2, -0.6, 0.2]
+        , [-0.2, -0.8, 0.2]
+        , [+0.2, +0.6, 0.2]
+        , [+0.2, +0.0, 0.2]
+        , [+0.2, -0.2, 0.2]
+        , [+0.2, -0.4, 0.2]
+        , [+0.2, -0.6, 0.2]
+        , [+0.2, -0.8, 0.2]]
+
+def dubins_obstacles3():
+    return [[-0.8, +0.2, 0.1]
+  ,[-0.8, -0.2, 0.1]
+  ,[-0.7, +0.2, 0.1]
+  ,[-0.7, -0.2, 0.1]
+  ,[-0.6, +0.2, 0.1]
+  ,[-0.6, -0.2, 0.1]
+  ,[-0.5, +0.2, 0.1]
+  ,[-0.5, -0.2, 0.1]
+  ,[-0.4, +0.2, 0.1]
+  ,[-0.4, -0.2, 0.1]
+  ,[-0.1, +0.2, 0.1]
+  ,[-0.1, -0.2, 0.1]
+  ,[+0.0, +0.2, 0.1]
+  ,[+0.0, -0.2, 0.1]
+  ,[+0.1, +0.2, 0.1]
+  ,[+0.1, -0.2, 0.1]
+  ,[+0.2, +0.2, 0.1]
+  ,[+0.2, -0.2, 0.1]
+  ,[+0.3, +0.2, 0.1]
+  ,[+0.3, -0.2, 0.1]
+  ,[+0.4, +0.2, 0.1]
+  ,[+0.4, -0.2, 0.1]
+  ,[+0.5, +0.2, 0.1]
+  ,[+0.5, -0.2, 0.1]
+  ,[+0.6, +0.2, 0.1]
+  ,[+0.6, -0.2, 0.1]
+  ,[+0.6, +0.1, 0.1]
+  ,[+0.6, -0.1, 0.1]
+  ,[+0.6, +0.0, 0.1]]
+
 def dubins_car(z, p):
     x, y, yaw_car, steering_rate = (z[i] for i in range(2, 6))
     # target = np.array([])
-    x_target, y_target, yaw_target = 0.9, 0.0, 0.0
-    target = casadi.SX((x_target, y_target, yaw_target))
+    # x_target, y_target, yaw_target = 0.9, 0.0, 0.0
+    # x_target, y_target, yaw_target = 0.682, -0.2, 0.0
+
+    # x_target, y_target, yaw_target = 0.9, -0.9, 0.0
+    # target = casadi.SX((x_target, y_target, yaw_target))
+
+    target = casadi.SX(p[0:3])
+    x_target, y_target, yaw_target = target[0], target[1], target[2]
 
     # head_to_target = dubins_car_batched.get_heading(self.lib, states, self.lib.unsqueeze(target, 0))
     # alpha = head_to_target - yaw_car
@@ -131,8 +190,8 @@ def dubins_car(z, p):
         radius = obstacles[i, 2]
         # d = casadi.norm_2(z[3:6] - obst[i:i+3])
         d = casadi.norm_2(z[2:4] - obstacles[i, :-1])
-        if radius > 0.20:
-            obstacles_cost = casadi.fmax(obstacles_cost, 1.0 - (casadi.fmin(1.0, 1.0 * d / radius))**2)
+        if radius > 0.020:
+            obstacles_cost = casadi.fmax(obstacles_cost, 1.0 - (casadi.fmin(1.0, 1.0 * d / radius)) ** 2)
 
     cost = (
         # self.lib.cast(car_in_bounds & car_at_target, self.lib.float32) * (-10.0)
@@ -151,6 +210,59 @@ def dubins_car(z, p):
         # )
         # + self.lib.cast(~car_in_bounds, self.lib.float32)
     )
-    # cost = casadi.if_else(casadi.le(casadi.norm_2(z[2:4]-target[0:2]), 0.01), 0.0 , cost)
+    cost = casadi.if_else(casadi.le(casadi.norm_2(z[2:4] - target[0:2]), 0.01), 0.0, cost)
+    # cost = casadi.le(casadi.norm_2(z[2:4] - target[0:2]), 0.01)*(-1.0)
 
-    return cost - 1.0
+    return cost
+
+def dubins_car_hardcoded(z, p):
+    x, y, yaw_car, steering_rate = (z[i] for i in range(2, 6))
+    # target = np.array([])
+    # x_target, y_target, yaw_target = 0.9, 0.0, 0.0
+    # x_target, y_target, yaw_target = 0.682, -0.2, 0.0
+
+    x_target, y_target, yaw_target = 0.9, -0.9, 0.0
+    target = casadi.SX((x_target, y_target, yaw_target))
+
+    # target = casadi.SX(p[0:3])
+    # x_target, y_target, yaw_target = target[0], target[1], target[2]
+
+    # head_to_target = dubins_car_batched.get_heading(self.lib, states, self.lib.unsqueeze(target, 0))
+    # alpha = head_to_target - yaw_car
+    # ld = dubins_car_batched.get_distance(self.lib, states, self.lib.unsqueeze(target, 0))
+    # crossTrackError = self.lib.sin(alpha) * ld
+
+    # car_in_bounds = dubins_car_batched._car_in_bounds(self.lib, x, y)
+    # car_at_target = dubins_car_batched._car_at_target(self.lib, x, y, x_target, y_target)
+
+    obstacles = np.array(dubins_obstacles())
+    obstacles_cost = 0.0
+
+    for i in range(0, obstacles.shape[0]):
+        radius = obstacles[i, 2]
+        # d = casadi.norm_2(z[3:6] - obst[i:i+3])
+        d = casadi.norm_2(z[2:4] - obstacles[i, :-1])
+        if radius > 0.020:
+            obstacles_cost = casadi.fmax(obstacles_cost, 1.0 - (casadi.fmin(1.0, 1.0 * d / radius)) ** 2)
+
+    cost = (
+        # self.lib.cast(car_in_bounds & car_at_target, self.lib.float32) * (-10.0)
+        # + self.lib.cast(car_in_bounds & (~car_at_target), self.lib.float32) * (
+            0.125 * (
+        # 3 * crossTrackError**2
+            0.0
+            # + casadi.fabs(x_target - x)
+            # + casadi.fabs(y_target - y)
+            + 0.1 * (x_target - x) ** 2
+            + 0.1 * (y_target - y) ** 2
+            # - casadi.cos(casadi.atan((y_target-y)/(x_target-x)))
+            # + 3 * (head_to_target - yaw_car)**2 / MAX_STEER
+            + 5.0 * obstacles_cost
+    )
+        # )
+        # + self.lib.cast(~car_in_bounds, self.lib.float32)
+    )
+    cost = casadi.if_else(casadi.le(casadi.norm_2(z[2:4] - target[0:2]), 0.01), 0.0, cost)
+    # cost = casadi.le(casadi.norm_2(z[2:4] - target[0:2]), 0.01)*(-1.0)
+
+    return cost
