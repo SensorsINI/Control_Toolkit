@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+
+import numpy
+
 from SI_Toolkit.computation_library import TensorType, NumpyLibrary
 
 import numpy as np
@@ -82,6 +85,8 @@ class controller_neural_cascaded(template_controller):
         for key in self.remaining_inputs:
             net_input = np.append(net_input, getattr(self.variable_parameters, key))
 
+        net_inputB = net_input
+
         net_input = normalize_numpy_array(
             net_input, self.netA_info.inputs, self.normalization_infoA
         )
@@ -100,9 +105,31 @@ class controller_neural_cascaded(template_controller):
 
         net_output = denormalize_numpy_array(net_output, self.netA_info.outputs, self.normalization_infoA)
 
-        Q = net_output
+        L = net_output
+        L_app = L.flatten()[0]
+        #L_app = 0.1975
 
-        print(Q)
+        net_inputB = numpy.insert(net_inputB,5,L_app)
+
+        net_inputB = normalize_numpy_array(
+            net_inputB, self.netB_info.inputs, self.normalization_infoB
+        )
+        net_inputB = np.reshape(net_inputB, [-1, 1, len(self.netB_info.inputs)])
+
+        net_inputB = self.lib.to_tensor(net_inputB, dtype=self.lib.float32)
+
+        if self.lib.lib == 'Pytorch':
+            net_inputB = net_inputB.to(self.device)
+
+        net_outputB = self.evaluate_netB(net_inputB)
+
+        if self.lib.lib == 'Pytorch':
+            net_outputB = net_outputB.detach().numpy()
+
+        net_outputB = denormalize_numpy_array(net_outputB, self.netB_info.outputs, self.normalization_infoB)
+
+        Q = net_outputB
+        #print('L: ', L_app, 'Q: ', Q)
 
         return Q
 
