@@ -10,11 +10,60 @@ from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # FOR VISUALIZING TRAJECTORIES--------------------------------------------
-from Control_Toolkit.others.trajectory_visualize import TrajectoriesVizualizer
-
+from Control_Toolkit.others.trajectory_visualize import TrajectoryVisualizer
 # ------------------------------------------------------------------------
 
 logger = get_logger(__name__)
+
+
+def add_shortest_distance(tensor):
+    # Compute pairwise distances
+    distances = tf.norm(tensor[:, tf.newaxis, :] - tensor, axis=-1)
+
+    # Set the diagonal elements to infinity to exclude self-distances
+    distances = tf.linalg.set_diag(distances, tf.fill(distances.shape[:-1], float('inf')))
+
+    # Find the shortest neighbor distance for each point
+    shortest_distances = tf.reduce_min(distances, axis=1)
+
+    # Add the shortest distances as the third column to the tensor
+    tensor_with_distance = tf.concat([tensor, shortest_distances[:, tf.newaxis]], axis=-1)
+
+    return tensor_with_distance
+
+
+'''class KindaParticleFilter:
+    """
+    Class to emulate the functionality of importance sampling.
+    """
+    def __init__(self,
+                 num_inputs: int,
+                 num_rollouts: int,
+                 horizon: int,
+                 kpf_sample_stdev: float,
+                 kpf_sample_mean: float,
+                 ):
+        """
+        Initialize the KPF class.
+
+        :param num_inputs:      steering angle, throttle
+        :param num_rollouts:    self-explanatory :)
+        :param horizon:         "
+        """
+        self.num_inputs = num_inputs
+        self.num_particles = num_rollouts
+        self.horizon = horizon
+        self.dimensions = (self.num_particles, self.horizon, self.num_inputs)
+
+        # Initialize weights of size num_rollouts
+        self.weights = np.empty(self.num_particles)
+        self.weights.fill(1./self.num_particles)
+
+        # Initialize particles / control inputs (num_rollouts, horizon, num_states)
+        self.input_particles = np.random.normal(loc=kpf_sample_mean, scale=kpf_sample_stdev, size=self.dimensions)
+
+    def update(self, rollout_t):
+        pass'''
 
 
 class optimizer_rpgd_pfi(template_optimizer):
@@ -48,6 +97,9 @@ class optimizer_rpgd_pfi(template_optimizer):
             adam_epsilon: float,
             optimizer_logging: bool,
             visualize: bool,
+            view_unoptimized: bool,
+            kpf_sample_stdev: float,
+            kpf_sample_mean: float,
     ):
         super().__init__(
             predictor=predictor,
@@ -99,10 +151,22 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         self.optimizer_reset()
 
+        # VISUALS:
         self.visualize = visualize
+        self.view_unoptimized = view_unoptimized
         if self.visualize:
-            self.TV = TrajectoriesVizualizer()
+            self.TV = TrajectoryVisualizer()
 
+        # Kinda Particle Filter:
+        self.kpf_dimensions = (self.num_rollouts, self.mpc_horizon, self.num_control_inputs)
+        # Initialize weights of size num_rollouts
+        self.kpf_weights = np.empty(self.num_rollouts)
+        self.kpf_weights.fill(1. / self.num_rollouts)
+        # Initialize particles / control inputs (num_rollouts x horizon x num_states)
+        self.kpf_input_particles = np.random.normal(loc=kpf_sample_mean,
+                                                    scale=kpf_sample_stdev,
+                                                    size=self.kpf_dimensions,
+                                                    )
 
     def configure(self, dt: float, predictor_specification: str, **kwargs):
         self.predictor_single_trajectory.configure(
@@ -140,6 +204,14 @@ class optimizer_rpgd_pfi(template_optimizer):
             rollout_trajectory, Q, self.u
         )
         return traj_cost, rollout_trajectory
+
+    def kpf_step(self, rt):
+        # Calculate the output (endpoints)
+        output = TrajectoryVisualizer.calculate_output(rt)
+        # Add the shortest neighbor distances to each point
+        output_with_distance = add_shortest_distance(output)
+        for i in range(self.num_rollouts):
+            self.kpf_weights[i] = output_with_distance[]
 
     @CompileTF
     def grad_step(
@@ -218,6 +290,19 @@ class optimizer_rpgd_pfi(template_optimizer):
         else:
             iters = self.outer_its
 
+        # VISUALIZE UNOPTIMIZED TRAJECTORIES --------------------
+        # Calculate unoptimized trajectories:
+        unoptimized_Q = None
+        unoptimized_rollout_trajectories = None
+        if self.visualize and self.view_unoptimized:
+            (
+                unoptimized_Q,
+                EMPTY_IDX,
+                EMPTY_J,
+                unoptimized_rollout_trajectories,
+            ) = self.get_action(s, self.Q_tf)
+        # --------------------------------------------
+
         # optimize control sequences with gradient based optimization
         # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
         for _ in range(0, iters):
@@ -245,9 +330,13 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
         self.u = self.u_nom[0, 0, :].numpy()
 
+        # KPF --------------------
+        self.kpf_step(self.rollout_trajectories)
+        # ------------------------
+
         # VISUALIZE TRAJECTORIES --------------------
         if self.visualize:
-            self.TV.plot_update(self.rollout_trajectories, Qn)
+            self.TV.plot_update(self.rollout_trajectories, Qn, unoptimized_rollout_trajectories, unoptimized_Q)
         # --------------------------------------------
 
         if self.optimizer_logging:
