@@ -331,7 +331,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.u = self.u_nom[0, 0, :].numpy()
 
         # KPF --------------------
-        self.kpf_step(self.rollout_trajectories)
+        """self.kpf_step(self.rollout_trajectories)"""
         # ------------------------
 
         # VISUALIZE TRAJECTORIES --------------------
