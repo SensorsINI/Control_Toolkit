@@ -55,7 +55,15 @@ class controller_neural_imitator(template_controller):
             else:
                 break  # state inputs must be adjacent in the current implementation
 
-        if self.net_info.library == 'Pytorch':
+        self.hls4ml = self.config_controller["hls4ml"]
+        if self.hls4ml:
+            if self.lib.lib != 'Numpy':
+                raise ValueError('hls4ml works only if computational library is Numpy')
+            # Convert network to HLS form
+            from SI_Toolkit_ASF.hls.hls4ml_functions import convert_model_with_hls4ml
+            self.net, _ = convert_model_with_hls4ml(self.net)
+            self.net.compile()
+        elif self.net_info.library == 'Pytorch':
             from SI_Toolkit.computation_library import PyTorchLibrary
             self._computation_library = PyTorchLibrary
         elif self.net_info.library == 'TF':
@@ -103,7 +111,10 @@ class controller_neural_imitator(template_controller):
 
         net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
 
-        net_output = self.net(net_input)
+        if self.lib.lib == 'Numpy':  # Covers just the case for hls4ml, when the model is hls model
+            net_output = self.net.predict(net_input)
+        else:
+            net_output = self.net(net_input)
 
         net_output = self.denormalize_outputs(net_output)
 
