@@ -76,14 +76,8 @@ class template_controller(ABC):
 
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
-        
-        # Set properties like target positions on this controller
-        for p, v in initial_environment_attributes.items():
-            if type(v) in {np.ndarray, float, int, bool}:
-                data_type = getattr(v, "dtype", self.lib.float32)
-                data_type = self.lib.int32 if data_type == int else self.lib.float32
-                v = self.lib.to_variable(v, data_type)
-            setattr(self.variable_parameters, p, v)
+
+        self.set_attributes()
                 
         # Initialize control variable
         self.u = 0.0
@@ -194,3 +188,11 @@ class template_controller(ABC):
                         var.numpy().copy() if hasattr(var, "numpy") else var.copy()
                     )
 
+    def set_attributes(self):
+        # Set properties like target positions on this controller
+        for p, v in self.initial_environment_attributes.items():
+            if type(v) in {np.ndarray, float, int, bool}:
+                data_type = getattr(v, "dtype", self.lib.float32)
+                data_type = self.lib.int32 if data_type == int else self.lib.float32
+                v = self.lib.to_variable(v, data_type)
+            setattr(self.variable_parameters, p, v)
