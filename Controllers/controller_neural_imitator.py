@@ -57,8 +57,7 @@ class controller_neural_imitator(template_controller):
 
         self.hls4ml = self.config_controller["hls4ml"]
         if self.hls4ml:
-            if self.lib.lib != 'Numpy':
-                raise ValueError('hls4ml works only if computational library is Numpy')
+            self._computation_library = NumpyLibrary
             # Convert network to HLS form
             from SI_Toolkit_ASF.hls.hls4ml_functions import convert_model_with_hls4ml
             self.net, _ = convert_model_with_hls4ml(self.net)
@@ -69,6 +68,7 @@ class controller_neural_imitator(template_controller):
         elif self.net_info.library == 'TF':
             from SI_Toolkit.computation_library import TensorFlowLibrary
             self._computation_library = TensorFlowLibrary
+        self.set_attributes()
 
         if self.lib.lib == 'Pytorch':
             from SI_Toolkit.Functions.Pytorch.Network import get_device
@@ -128,7 +128,7 @@ class controller_neural_imitator(template_controller):
             net_output = self.net.predict(net_input)
         else:
             net_output = self.net(net_input)
-        # self.net_inputs_buffer.append(self.lib.squeeze(net_input))
+        # self.net_inputs_buffer.append(self.lib.squeeze(self.lib.to_tensor(net_input, self.lib.float32)))
         # self.net_outputs_buffer.append(self.lib.squeeze(net_output))
 
         net_output = self.denormalize_outputs(net_output)
