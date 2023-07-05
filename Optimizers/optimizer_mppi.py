@@ -17,8 +17,6 @@ class optimizer_mppi(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -31,6 +29,7 @@ class optimizer_mppi(template_optimizer):
         SQRTRHOINV: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         """Instantiate MPPI optimizer, see
         Williams et al. 2017, 'Model Predictive Path Integral Control: From Theory to Parallel Computation'
@@ -75,8 +74,6 @@ class optimizer_mppi(template_optimizer):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -103,14 +100,32 @@ class optimizer_mppi(template_optimizer):
         else:
             self.mppi_output = self.return_restricted
 
-        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
+        self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.Interpolator = None
 
         self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
+
+        self.calculate_optimal_trajectory = calculate_optimal_trajectory
+        self.optimal_trajectory = None
+        self.optimal_control_sequence = None
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
 
-        self.optimizer_reset()
     
-    def configure(self, dt: float, predictor_specification: str, **kwargs):
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  dt: float,
+                  predictor_specification: str,
+                  **kwargs):
+
+        super().configure(
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            default_configure=False,
+        )
+
+        self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points, self.num_control_inputs, self.lib)
+
         self.SQRTRHODTINV = self.lib.to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), self.lib.float32)
         del self._SQRTRHOINV
         
@@ -118,6 +133,8 @@ class optimizer_mppi(template_optimizer):
             batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
         )
+
+        self.optimizer_reset()
         
     def return_all(self, u, u_nom, rollout_trajectory, traj_cost, u_run):
         return u, u_nom, rollout_trajectory, traj_cost, u_run
@@ -198,7 +215,9 @@ class optimizer_mppi(template_optimizer):
             self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
 
-        if False:
+        self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
+
+        if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
         return self.u

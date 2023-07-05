@@ -18,8 +18,6 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -38,12 +36,11 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         adam_epsilon: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -66,20 +63,37 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         self.optim_steps = optim_steps
 
         # Setup prototype control sequence
-        self.Q_opt = tf.Variable(tf.zeros([1,self.mpc_horizon,self.num_control_inputs], dtype=tf.float32))
+        self.Q_opt = None
         
         # Setup Adam optimizer
         mppi_LR = tf.constant(mppi_LR, dtype=tf.float32)
         self.opt = tf.keras.optimizers.Adam(learning_rate=mppi_LR, beta_1=adam_beta_1, beta_2=adam_beta_2, epsilon=adam_epsilon)
 
-        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points,
-                                         self.num_control_inputs, self.lib)
-        
-        self.optimizer_reset()
+        self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.Interpolator = None
     
-    def configure(self, dt: float, **kwargs):
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  dt: float,
+                  **kwargs):
+
+        super().configure(
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            default_configure=False,
+        )
+
+        # Setup prototype control sequence
+        self.Q_opt = tf.Variable(tf.zeros([1, self.mpc_horizon, self.num_control_inputs], dtype=tf.float32))
+
+        self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points,
+                                         self.num_control_inputs, self.lib)
+
         self.SQRTRHODTINV = self._SQRTRHOINV * (1.0 / np.sqrt(dt))
         del self._SQRTRHOINV
+
+        self.optimizer_reset()
         
     #mppi correction for importance sampling
     def mppi_correction_cost(self, u, delta_u):

@@ -1,6 +1,6 @@
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
-from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.others.globals_and_utils import get_logger
+from types import SimpleNamespace
 
 logger = get_logger(__name__)
 
@@ -13,9 +13,22 @@ class cost_function_base:
     MAX_COST = 0.0
     COST_RANGE = MAX_COST - MIN_COST
     
-    def __init__(self, controller: template_controller, ComputationLib: "type[ComputationLibrary]") -> None:
-        self.controller = controller
+    def __init__(self, variable_parameters: SimpleNamespace, ComputationLib: "type[ComputationLibrary]") -> None:
+        self.variable_parameters = variable_parameters
         self.set_computation_library(ComputationLib)
+
+        self.batch_size = None
+        self.horizon = None
+
+
+    def configure(
+            self,
+            batch_size: int,
+            horizon: int,
+    ):
+        self.batch_size = batch_size
+        self.horizon = horizon
+
     
     def get_terminal_cost(self, terminal_states: TensorType) -> TensorType:
         """Compute a batch of terminal costs for a batch of terminal states.
