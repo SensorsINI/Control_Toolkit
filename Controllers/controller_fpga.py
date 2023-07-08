@@ -20,18 +20,33 @@ from SI_Toolkit.Functions.General.Initialization import (get_net,
 from SI_Toolkit.Functions.TF.Compile import CompileAdaptive
 
 
-class controller_neural_imitator(template_controller):
+class controller_fpga(template_controller):
     _computation_library = NumpyLibrary
 
     def configure(self):
 
-        self.input_at_input = False
-        SERIAL_PORT = get_serial_port(serial_port_number=1)
-        SERIAL_BAUD = 230400
+
+        SERIAL_PORT = get_serial_port(serial_port_number=3)
+        SERIAL_BAUD = 115200
 
         self.InterfaceInstance = Interface()
         self.InterfaceInstance.open(SERIAL_PORT, SERIAL_BAUD)
 
+        NET_NAME = self.config_controller["net_name"]
+        PATH_TO_MODELS = self.config_controller["PATH_TO_MODELS"]
+
+        self.input_at_input = self.config_controller["input_at_input"]
+
+        a = SimpleNamespace()
+        self.batch_size = 1  # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
+
+        a.path_to_models = PATH_TO_MODELS
+        a.net_name = NET_NAME
+
+        # Create a copy of the network suitable for inference (stateful and with sequence length one)
+        self.net, self.net_info = \
+            get_net(a, time_series_length=1,
+                    batch_size=self.batch_size, stateful=True)
 
         self.normalization_info = get_norm_info_for_net(self.net_info)
         self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
@@ -168,17 +183,21 @@ class Interface:
         return self._receive_reply(CMD_PING, 4, PING_TIMEOUT) == msg
 
     def send_net_input(self, net_input):
-        self.clear_read_buffer()
-        msg = [SERIAL_SOF, net_input]
-        msg.append(self._crc(msg))
-        self.device.write(bytearray(msg))
+        self.device.reset_output_buffer()
+        # self.clear_read_buffer()
+        # msg = [SERIAL_SOF, net_input]
+        # msg.append(self._crc(msg))
+        bytes_written = self.device.write(bytearray(net_input))
+        # print(bytes_written)
         self.device.flush()
 
     def receive_net_output(self):
-        self.clear_read_buffer()
-        reply = self._receive_reply(17, READ_STATE_TIMEOUT)
-        net_output = struct.unpack('=3hBIH', bytes(reply[3:16]))
-
+        # self.clear_read_buffer()
+        # reply = self._receive_reply(4, READ_STATE_TIMEOUT)
+        net_output = self.device.read(size=4)
+        # net_output = struct.unpack('=3hBIH', bytes(net_output[3:16]))
+        net_output = struct.unpack('<f', net_output)
+        # net_output=reply
         return net_output
 
     def _receive_reply(self, cmdLen, timeout=None, crc=True):
