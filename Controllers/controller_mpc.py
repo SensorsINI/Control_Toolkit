@@ -37,33 +37,55 @@ class controller_mpc(template_controller):
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
         self.cost_function = CostFunctionWrapper()
-        self.cost_function.configure(self, cost_function_specification=cost_function_specification)
         
         # Create predictor
         self.predictor = PredictorWrapper()
-        
+
+        # The logic of initializing and configuring:
+        # predictor to be configured needs num_rollout (=batch size) and mpc horizon
+        # which is an attribute of optimizer
+        # -> predictor configure goes after initializing optimizer
+        # optimizer to be fully functional needs num_states and num_control_inputs
+        # which is an attribute of system model, hence predictor
+        # -> optimizer configure goes after
+        # Hence splitting __init__ method into propoer init and configure
+        # Allows to solve the chicken-and-egg problem.
+
         # MPC Controller always has an optimizer
         Optimizer = import_optimizer_by_name(optimizer_name)
         self.optimizer: template_optimizer = Optimizer(
             predictor=self.predictor,
             cost_function=self.cost_function,
-            num_states=self.num_states,
-            num_control_inputs=self.num_control_inputs,
             control_limits=self.control_limits,
             optimizer_logging=self.controller_logging,
             computation_library=self.computation_library,
+            calculate_optimal_trajectory=self.config_controller.get('calculate_optimal_trajectory'),
             **config_optimizer,
         )
-        # Some optimizers require additional controller parameters (e.g. predictor_specification or dt) to be fully configured.
-        # Do this here. If the optimizer does not require any additional parameters, it will ignore them.
-        self.optimizer.configure(dt=self.config_controller["dt"], predictor_specification=predictor_specification)
-        
+
         self.predictor.configure(
             batch_size=self.optimizer.num_rollouts,
             horizon=self.optimizer.mpc_horizon,
             dt=self.config_controller["dt"],
             computation_library=self.computation_library,
-            predictor_specification=predictor_specification
+            variable_parameters=self.variable_parameters,
+            predictor_specification=predictor_specification,
+        )
+
+        self.cost_function.configure(
+            batch_size=self.optimizer.num_rollouts,
+            horizon=self.optimizer.mpc_horizon,
+            variable_parameters=self.variable_parameters,
+            environment_name=self.environment_name,
+            computation_library=self.computation_library,
+            cost_function_specification=cost_function_specification
+        )
+
+        self.optimizer.configure(
+            dt=self.config_controller["dt"],
+            predictor_specification=predictor_specification,
+            num_states=self.predictor.num_states,
+            num_control_inputs=self.predictor.num_control_inputs,
         )
 
         self.online_learning_activated = self.config_controller['online_learning_activated']

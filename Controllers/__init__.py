@@ -9,6 +9,8 @@ from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
 
+from types import SimpleNamespace
+
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
 logger = get_logger(__name__)
 
@@ -32,8 +34,6 @@ class template_controller(ABC):
         self,
         dt: float,
         environment_name: str,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         initial_environment_attributes: "dict[str, TensorType]",
     ):
@@ -68,20 +68,22 @@ class template_controller(ABC):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
                 logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
-        self.lib = self.computation_library  # Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library
 
         # Environment-related parameters
         self.environment_name = environment_name
         self.initial_environment_attributes = initial_environment_attributes
-        
-        self.num_states = num_states
-        self.num_control_inputs = num_control_inputs
+        self.variable_parameters = SimpleNamespace()
+
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
         
         # Set properties like target positions on this controller
-        for property, new_value in initial_environment_attributes.items():
-            setattr(self, property, self.computation_library.to_variable(new_value, self.computation_library.float32))
+        for p, v in initial_environment_attributes.items():
+            if type(v) in {np.ndarray, float, int, bool}:
+                data_type = getattr(v, "dtype", self.lib.float32)
+                data_type = self.lib.int32 if data_type == int else self.lib.float32
+                v = self.lib.to_variable(v, data_type)
+            setattr(self.variable_parameters, p, v)
                 
         # Initialize control variable
         self.u = 0.0
@@ -105,7 +107,17 @@ class template_controller(ABC):
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
         for property, new_value in updated_attributes.items():
-            self.computation_library.assign(getattr(self, property), self.lib.to_tensor(new_value, self.lib.float32))
+            attr = getattr(self.variable_parameters, property)
+            self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            # This try-except was causing silent error! I comment it out on 1.05.2023
+            # If you see this comment after 1.08.2023 and this change is not causing problems
+            # Delete this comment with the commented lines below
+            # try:
+            #     # Assume the variable is an attribute type and assign
+            #     attr = getattr(self.variable_parameters, property)
+            #     self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
+            # except:
+            #     setattr(self.variable_parameters, property, new_value)
     
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
@@ -151,6 +163,11 @@ class template_controller(ABC):
         if self._computation_library == None:
             raise NotImplementedError("Controller class needs to specify its computation library")
         return self._computation_library
+
+    @property
+    def lib(self) -> "type[ComputationLibrary]":
+        """Shortcut to make easy using functions from computation library, this is also used by CompileAdaptive to recognize library"""
+        return self.computation_library
     
     @property
     def has_optimizer(self):
@@ -176,3 +193,4 @@ class template_controller(ABC):
                     self.logs[name].append(
                         var.numpy().copy() if hasattr(var, "numpy") else var.copy()
                     )
+

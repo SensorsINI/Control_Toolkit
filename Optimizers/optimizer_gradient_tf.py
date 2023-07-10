@@ -16,8 +16,6 @@ class optimizer_gradient_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -34,12 +32,11 @@ class optimizer_gradient_tf(template_optimizer):
         warmup: bool,
         warmup_iterations: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -68,15 +65,25 @@ class optimizer_gradient_tf(template_optimizer):
         self.first_iter_count = self.gradient_steps
         if self.warmup:
             self.first_iter_count = self.warmup_iterations
-        
-        self.optimizer_reset()
+    
+    def _predict_and_cost(self, s, Q):
+        # rollout trajectories and retrieve cost
+        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        traj_cost = self.cost_function.get_trajectory_cost(
+            rollout_trajectory, Q, self.u
+        )
+        return traj_cost, rollout_trajectory
+    
+    @CompileTF
+    def predict_and_cost(self, s, Q):
+        return self._predict_and_cost(s, Q)
 
     @CompileTF
     def gradient_optimization(self, s: tf.Tensor, Q_tf: tf.Variable, optim):
         # rollout the trajectories and get cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q_tf)
-            traj_cost, _ = self.predict_and_cost(s, Q_tf)
+            traj_cost, _ = self._predict_and_cost(s, Q_tf)
         #retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q_tf)
         dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
@@ -85,18 +92,9 @@ class optimizer_gradient_tf(template_optimizer):
         # clip
         Q = tf.clip_by_value(Q_tf, self.action_low, self.action_high) 
     
-        # traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
+        # traj_cost, rollout_trajectory = self._predict_and_cost(s, Q)
         return Q
     
-    @CompileTF
-    def predict_and_cost(self, s, Q):
-        # rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
-        traj_cost = self.cost_function.get_trajectory_cost(
-            rollout_trajectory, Q, self.u
-        )
-        return traj_cost, rollout_trajectory
-
     # step function to find control
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:

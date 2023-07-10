@@ -42,6 +42,11 @@ class CustomFormatter(logging.Formatter):
 
 
 def get_logger(name):
+    """ Get instance of standard logger, giving it a name
+    :param name: your name, e.g. __name__
+    :returns: the logger
+
+    """
     # logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     logger = logging.getLogger(name)
     logger.setLevel(LOGGING_LEVEL)
@@ -136,6 +141,7 @@ def import_controller_by_name(controller_name: str) -> type:
     # Search for the controller in the Controllers folders
     controller_relative_paths = (
         glob.glob(f"{os.path.join('Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
+        + glob.glob(f"{os.path.join('**', 'Control_Toolkit_ASF', 'Controllers', controller_full_name)}.py")
         + glob.glob(f"{os.path.join('**', 'Control_Toolkit', 'Controllers', controller_full_name)}.py", recursive=True)
     )
     
@@ -167,6 +173,7 @@ def get_available_controller_names() -> "list[str]":
     """
     controller_files = (
         glob.glob(f"Control_Toolkit_ASF/Controllers/controller_*.py")
+        + glob.glob(f"**/Control_Toolkit_ASF/Controllers/controller_*.py")
         + glob.glob(f"**/Control_Toolkit/Controllers/controller_*.py", recursive=True)
     )
     controller_names = ['manual-stabilization']

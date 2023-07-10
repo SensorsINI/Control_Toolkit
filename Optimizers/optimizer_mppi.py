@@ -17,8 +17,6 @@ class optimizer_mppi(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
@@ -29,15 +27,53 @@ class optimizer_mppi(template_optimizer):
         num_rollouts: int,
         NU: float,
         SQRTRHOINV: float,
-        GAMMA: float,
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
+        """Instantiate MPPI optimizer, see
+        Williams et al. 2017, 'Model Predictive Path Integral Control: From Theory to Parallel Computation'
+
+        :param predictor: Predictor to compute trajectory rollouts with. Instance of a wrapper class, which at this time can have unspecified parameters.
+        :type predictor: PredictorWrapper
+        :param cost_function: Instance containing the objective functions to minimize.
+        :type cost_function: CostFunctionWrapper
+        :param num_states: Length of the system's state vector.
+        :type num_states: int
+        :param num_control_inputs: Length of the system's input vector.
+        :type num_control_inputs: int
+        :param control_limits: Bounds on the input, one array each for lower/upper.
+        :type control_limits: Tuple[np.ndarray, np.ndarray]
+        :param computation_library: The numerical package to use for optimization. One of our custom 'computation library' classes.
+        :type computation_library: type[ComputationLibrary]
+        :param seed: Random seed for reproducibility. Manage the seed lifecycle and (re-)use outside of this class.
+        :type seed: int
+        :param cc_weight: Positive scalar weight placed on the MPPI-specific quadratic control cost term.
+        :type cc_weight: float
+        :param R: Weight of quadratic cost term.
+        :type R: float
+        :param LBD: Positive parameter defining greediness of the optimizer in the weighted sum of rollouts. 
+        If lambda is strongly positive, all trajectories get roughly the same weight even if one has much lower cost than the other. 
+        As lambda approaches 0, the relative importance of the most low-cost trajectories when determining the weighted average increases.
+        :type LBD: float
+        :param mpc_horizon: Length of the MPC horizon in steps. dt is implicitly given by the predictor provided.
+        :type mpc_horizon: int
+        :param num_rollouts: Number of parallel rollouts. Generally, MPPI's control performance improves when this value increases. Typical range is 5e2-5e3.
+        :type num_rollouts: int
+        :param NU: Adjustment of exploration variance. Increase to increase input exploration.
+        :type NU: float
+        :param SQRTRHOINV: Positive scalar. Has an effect on the sampling variance. An increase results in wider sampling of inputs around the nominal plan.
+        :type SQRTRHOINV: float
+        :param period_interpolation_inducing_points: Positive distance in number of steps between two inducing points along the MPC horizon.
+        If set to 1, this means independent sampling of each input.
+        If larger than 1, inputs between inducing points are obtained by linear interpolation.
+        :type period_interpolation_inducing_points: int
+        :param optimizer_logging: Whether to store rollouts, evaluated trajectory costs, etc. in a 'logging_values' variable. Consumes extra memory if True.
+        :type optimizer_logging: bool
+        """
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -56,7 +92,6 @@ class optimizer_mppi(template_optimizer):
         self.LBD = LBD
         self.NU = self.lib.to_tensor(NU, self.lib.float32)
         self._SQRTRHOINV = SQRTRHOINV
-        self.GAMMA = GAMMA
 
         self.update_internal_state = self.update_internal_state_of_RNN  # FIXME: There is one unnecessary operation in this function in case it is not an RNN.
 
@@ -65,14 +100,32 @@ class optimizer_mppi(template_optimizer):
         else:
             self.mppi_output = self.return_restricted
 
-        self.Interpolator = Interpolator(self.mpc_horizon, period_interpolation_inducing_points, self.num_control_inputs, self.lib)
+        self.period_interpolation_inducing_points = period_interpolation_inducing_points
+        self.Interpolator = None
 
         self.predict_and_cost = CompileAdaptive(self._predict_and_cost)
+
+        self.calculate_optimal_trajectory = calculate_optimal_trajectory
+        self.optimal_trajectory = None
+        self.optimal_control_sequence = None
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
 
-        self.optimizer_reset()
     
-    def configure(self, dt: float, predictor_specification: str, **kwargs):
+    def configure(self,
+                  num_states: int,
+                  num_control_inputs: int,
+                  dt: float,
+                  predictor_specification: str,
+                  **kwargs):
+
+        super().configure(
+            num_states=num_states,
+            num_control_inputs=num_control_inputs,
+            default_configure=False,
+        )
+
+        self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points, self.num_control_inputs, self.lib)
+
         self.SQRTRHODTINV = self.lib.to_tensor(np.array(self._SQRTRHOINV) * (1 / np.sqrt(dt)), self.lib.float32)
         del self._SQRTRHOINV
         
@@ -80,6 +133,8 @@ class optimizer_mppi(template_optimizer):
             batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
         )
+
+        self.optimizer_reset()
         
     def return_all(self, u, u_nom, rollout_trajectory, traj_cost, u_run):
         return u, u_nom, rollout_trajectory, traj_cost, u_run
@@ -151,16 +206,18 @@ class optimizer_mppi(template_optimizer):
         s = self.lib.to_tensor(s, self.lib.float32)
         s = self.check_dimensions_s(s)
 
-        self.u, self.u_nom, rollout_trajectory, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
+        self.u, self.u_nom, self.rollout_trajectories, traj_cost, u_run = self.predict_and_cost(s, self.u_nom, self.rng, self.u)
         self.u = self.lib.to_numpy(self.lib.squeeze(self.u))
-        
+
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.lib.to_numpy(u_run)
             self.logging_values["J_logged"] = self.lib.to_numpy(traj_cost)
-            self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(rollout_trajectory)
+            self.logging_values["rollout_trajectories_logged"] = self.lib.to_numpy(self.rollout_trajectories)
             self.logging_values["u_logged"] = self.u
 
-        if False:
+        self.optimal_control_sequence = self.lib.to_numpy(self.u_nom)
+
+        if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s, self.u_nom))
 
         return self.u

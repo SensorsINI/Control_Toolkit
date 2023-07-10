@@ -16,20 +16,17 @@ class optimizer_random_action_tf(template_optimizer):
         self,
         predictor: PredictorWrapper,
         cost_function: CostFunctionWrapper,
-        num_states: int,
-        num_control_inputs: int,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         computation_library: "type[ComputationLibrary]",
         seed: int,
         mpc_horizon: int,
         num_rollouts: int,
         optimizer_logging: bool,
+        calculate_optimal_trajectory: bool,
     ):
         super().__init__(
             predictor=predictor,
             cost_function=cost_function,
-            num_states=num_states,
-            num_control_inputs=num_control_inputs,
             control_limits=control_limits,
             optimizer_logging=optimizer_logging,
             seed=seed,
@@ -37,8 +34,6 @@ class optimizer_random_action_tf(template_optimizer):
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
-        
-        self.optimizer_reset()
     
     @CompileTF
     def predict_and_cost(self, s, Q):
