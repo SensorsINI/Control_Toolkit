@@ -59,7 +59,7 @@ class controller_neural_imitator(template_controller):
         if self.hls4ml:
             self._computation_library = NumpyLibrary
             # Convert network to HLS form
-            from SI_Toolkit_ASF.hls.hls4ml_functions import convert_model_with_hls4ml
+            from SI_Toolkit.HLS4ML.hls4ml_functions import convert_model_with_hls4ml
             self.net, _ = convert_model_with_hls4ml(self.net)
             self.net.compile()
         elif self.net_info.library == 'Pytorch':
