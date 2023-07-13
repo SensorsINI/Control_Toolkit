@@ -88,8 +88,8 @@ class controller_mpc(template_controller):
             num_control_inputs=self.predictor.num_control_inputs,
         )
 
-        self.online_learning_activated = self.config_controller['online_learning_activated']
-        self.online_learning = OnlineLearning(self.predictor)
+        self.online_learning_activated = self.config_controller.get('online_learning_activated')
+        self.online_learning = OnlineLearning(self.predictor, self.config_controller['dt'])
 
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
@@ -101,6 +101,7 @@ class controller_mpc(template_controller):
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
         if self.online_learning_activated:
+            s = np.delete(s, 2) # Remove pose_theta
             self.online_learning.step(s,
                                       u,
                                       time,
