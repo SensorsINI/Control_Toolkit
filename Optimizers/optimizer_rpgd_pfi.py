@@ -103,6 +103,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         view_unoptimized: bool,
         kpf_sample_stdev: float,
         kpf_sample_mean: float,
+        kpf_resample_ratio: float,
     ):
         super().__init__(
             predictor=predictor,
@@ -174,7 +175,9 @@ class optimizer_rpgd_pfi(template_optimizer):
         # self.kpf_dimensions = (self.num_rollouts, self.mpc_horizon, self.num_control_inputs)
         # Initialize weights of size num_rollouts
         self.kpf_weights = np.empty(self.num_rollouts)
+        self.kpf_dimensions = None
         self.kpf_weights.fill(1. / self.num_rollouts)
+        self.kpf_resample_ratio = kpf_resample_ratio
 
     def configure(self,
                   num_states: int,
@@ -224,6 +227,10 @@ class optimizer_rpgd_pfi(template_optimizer):
         Qn = self.Interpolator.interpolate(Qn)
 
         return Qn
+
+    def kpf_resample(self, ):
+
+
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -381,19 +388,25 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
-        # The algorithm not only warmstrats the initial guess, but also the intial optimizer weights
+        # The algorithm not only warmstarts the initial guess, but also the initial optimizer weights
         adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
-            # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
+            """# if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
+            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs"""
+
+            # KPF STEP ------------------------------------------
+            Qres =
+            # --------------------------------------------------
+
             Qn = tf.concat([Qres, Q_keep], axis=0)
             self.trajectory_ages = tf.concat([
                 tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, best_idx),
             ], axis=0)
+
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
@@ -454,7 +467,6 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         if self.calculate_optimal_trajectory:
             self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s[:1, :], self.u_nom))
-
 
         return self.u
 

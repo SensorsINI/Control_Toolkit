@@ -86,7 +86,7 @@ class TrajectoryVisualizer:
         relative_rollout_trajectories = end_rollout_trajectories - car_position
 
         # reshape
-        final = np.reshape(relative_rollout_trajectories, (32, 2))
+        final = np.reshape(relative_rollout_trajectories, (rt_dim1, 2))
 
         # normalize angle with yaw angle (3rd state)
         rotated_final = rotate_points(final, np.pi/2 - rollout_trajectories[0, 0, 2])
