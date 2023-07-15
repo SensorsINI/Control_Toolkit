@@ -13,6 +13,10 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 from Control_Toolkit.others.trajectory_visualize import TrajectoryVisualizer
 # ------------------------------------------------------------------------
 
+# FOR KPF-----------------------------------------------------------------
+from scipy.spatial.distance import cdist
+# ------------------------------------------------------------------------
+
 logger = get_logger(__name__)
 
 
@@ -103,7 +107,8 @@ class optimizer_rpgd_pfi(template_optimizer):
         view_unoptimized: bool,
         kpf_sample_stdev: float,
         kpf_sample_mean: float,
-        kpf_resample_ratio: float,
+        kpf_keep_ratio: float,
+        kpf_keep_best: int,
     ):
         super().__init__(
             predictor=predictor,
@@ -174,10 +179,11 @@ class optimizer_rpgd_pfi(template_optimizer):
         # Now done below due to num_control_inputs not being initialized
         # self.kpf_dimensions = (self.num_rollouts, self.mpc_horizon, self.num_control_inputs)
         # Initialize weights of size num_rollouts
-        self.kpf_weights = np.empty(self.num_rollouts)
+        self.kpf_weights = np.empty(self.num_rollouts).fill(1. / self.num_rollouts)
         self.kpf_dimensions = None
-        self.kpf_weights.fill(1. / self.num_rollouts)
-        self.kpf_resample_ratio = kpf_resample_ratio
+        self.kpf_keep_ratio = kpf_keep_ratio
+        self.kpf_keep_number = int(max(int(num_rollouts * self.kpf_keep_ratio), 1))
+        self.kpf_keep_best = kpf_keep_best
 
     def configure(self,
                   num_states: int,
@@ -228,10 +234,6 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         return Qn
 
-    def kpf_resample(self, ):
-
-
-
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
@@ -271,9 +273,11 @@ class optimizer_rpgd_pfi(template_optimizer):
         # Rollout trajectories and retrieve cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
 
+        # CHANGED FOR KPF---------------------------------------------------
         # sort the costs and find best k costs
         sorted_cost = tf.argsort(traj_cost)
         best_idx = sorted_cost[: self.opt_keep_k]
+        # ------------------------------------------------------------------
 
         # # Unnecessary Part
         # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
@@ -308,7 +312,6 @@ class optimizer_rpgd_pfi(template_optimizer):
             [Q[:, self.shift_previous:, :], self.lib.tile(Q[:, -1:, :], (1, self.shift_previous, 1))]
             , axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
-
     def _predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
@@ -368,10 +371,6 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
         self.u = self.u_nom[0, 0, :].numpy()
 
-        # KPF --------------------
-        """self.kpf_step(self.rollout_trajectories)"""
-        # ------------------------
-
         # VISUALIZE TRAJECTORIES --------------------
         if self.visualize:
             self.TV.plot_update(self.rollout_trajectories, Qn, unoptimized_rollout_trajectories, unoptimized_Q)
@@ -397,15 +396,52 @@ class optimizer_rpgd_pfi(template_optimizer):
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs"""
 
-            # KPF STEP ------------------------------------------
-            Qres =
-            # --------------------------------------------------
+            # KPF STEP ----------------------------------------------------------------------------------------------------------------
+            rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
+
+            # becomes (n_rollouts x n_output_states)
+            reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
+            end_rollout_trajectories = np.squeeze(reshaped_rt, axis=1)
+
+            # calculate the distances
+            distances = cdist(end_rollout_trajectories, end_rollout_trajectories)
+            np.fill_diagonal(distances, np.inf)
+            nearest_distances = np.min(distances, axis=1)
+
+            # find indices of furthest (best) points according to predefined kpf_keep_number
+            furthest_indices = np.argpartition(nearest_distances, -self.kpf_keep_number)[-self.kpf_keep_number:]
+            furthest_indices = tf.convert_to_tensor(furthest_indices)
+            furthest_indices = tf.cast(furthest_indices, tf.int32)
+
+            # combine the best and furthest indices, remove duplicate indices
+            total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
+            total_keep_idx, useless_idx = tf.unique(total_keep_idx)
+            total_keep_idx = tf.convert_to_tensor(total_keep_idx)
+
+
+            """# update weights and normalize
+            self.kpf_weights = nearest_distances/np.sum(nearest_distances)
+
+            # calculate CDF of weights
+            weights_cdf = np.cumsum(self.kpf_weights)
+
+            # resample randomly
+            random_array = np.random.rand(self.num_rollouts - self.kpf_keep_number)
+            resample_index = np.empty()
+            # Q_random = self.sample_actions(self.rng, self.num_rollouts - self.opt_keep_k)
+            for i in range(self.num_rollouts - self.kpf_keep_number - 1):
+                pass"""
+
+            Qres = self.sample_actions(self.rng, self.num_rollouts - len(total_keep_idx))
+            Q_keep = tf.gather(Qn, total_keep_idx)
 
             Qn = tf.concat([Qres, Q_keep], axis=0)
+
             self.trajectory_ages = tf.concat([
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
-                tf.gather(self.trajectory_ages, best_idx),
-            ], axis=0)
+                tf.zeros(self.num_rollouts - len(total_keep_idx), dtype=tf.int32),
+                tf.gather(self.trajectory_ages, total_keep_idx),
+            ], axis=0)  # total_keep_idx WAS BEST_IDX; len(...) WAS OPT_KEEP_K BEFORE!!!!!!
+            # --------------------------------------------------------------------------------------------------------------------
 
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
