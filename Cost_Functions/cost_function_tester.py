@@ -48,9 +48,13 @@ class CostFunctionTester:
 
     def plot(self):
         plt.figure()
+        color_index = 0
+        colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray',
+                  'tab:olive', 'tab:cyan', 'b', 'k', 'r']
         for k in self.buffers.__dict__:
             feature = self.lib.to_numpy(self.lib.stack(self.buffers.__dict__[k]))
-            plt.plot(feature, label=k)
+            plt.plot(feature, label=k, color=colors[color_index])
+            color_index = color_index + 1
 
         plt.legend()
         plt.show()

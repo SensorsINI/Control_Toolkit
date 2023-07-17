@@ -184,6 +184,8 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_keep_ratio = kpf_keep_ratio
         self.kpf_keep_number = int(max(int(num_rollouts * self.kpf_keep_ratio), 1))
         self.kpf_keep_best = kpf_keep_best
+        self.kpf_sample_mean = kpf_sample_mean
+        self.kpf_sample_stdev = kpf_sample_stdev
 
     def configure(self,
                   num_states: int,
@@ -215,8 +217,8 @@ class optimizer_rpgd_pfi(template_optimizer):
         if self.SAMPLING_DISTRIBUTION == "normal":
             Qn = rng_gen.normal(
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
-                mean=self.sample_mean,
-                stddev=self.sample_stdev,
+                mean=self.kpf_sample_mean,  # Was sample mean before!
+                stddev=self.kpf_sample_stdev,  # Was sample stdev before!
                 dtype=tf.float32,
             )
         elif self.SAMPLING_DISTRIBUTION == "uniform":
@@ -242,14 +244,14 @@ class optimizer_rpgd_pfi(template_optimizer):
         )
         return traj_cost, rollout_trajectory
 
-    def kpf_step(self, rt):
+    """def kpf_step(self, rt):
         # Calculate the output (endpoints)
         output = TrajectoryVisualizer.calculate_output(rt)
         # Add the shortest neighbor distances to each point
         output_with_distance = add_shortest_distance(output)
         for i in range(self.num_rollouts):
             pass
-            # self.kpf_weights[i] = output_with_distance[]
+            # self.kpf_weights[i] = output_with_distance[]"""
 
     @CompileTF
     def grad_step(
@@ -338,8 +340,8 @@ class optimizer_rpgd_pfi(template_optimizer):
         if self.visualize and self.view_unoptimized:
             (
                 unoptimized_Q,
-                EMPTY_IDX,
-                EMPTY_J,
+                _,
+                _,
                 unoptimized_rollout_trajectories,
             ) = self.get_action(s, self.Q_tf)
         # --------------------------------------------
