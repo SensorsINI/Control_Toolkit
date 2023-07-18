@@ -401,14 +401,33 @@ class optimizer_rpgd_pfi(template_optimizer):
             # KPF STEP ----------------------------------------------------------------------------------------------------------------
             rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
 
+
+            # METHOD 1 - trajectory similarity using kernels
             # becomes (n_rollouts x n_output_states)
+            squeezed_rt = np.reshape(self.rollout_trajectories, (rt_dim1, rt_dim2 * rt_dim3))
+            distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
+
+            # width of Gaussian kernel and distances
+            sigma = 10.0
+            g_distances = np.exp(-distances**2 / (2 * sigma**2))
+
+            np.fill_diagonal(g_distances, np.inf)
+            g_distances = 1 - g_distances
+            nearest_distances = None
+            # ------------------------------------------------------------------------------------------
+
+
+            # METHOD 2 - calculate the distances between endpoints
+            """# becomes (n_rollouts x n_output_states)
             reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
             end_rollout_trajectories = np.squeeze(reshaped_rt, axis=1)
-
-            # calculate the distances
             distances = cdist(end_rollout_trajectories, end_rollout_trajectories)
             np.fill_diagonal(distances, np.inf)
-            nearest_distances = np.min(distances, axis=1)
+            nearest_distances = np.min(distances, axis=1)"""
+            # ------------------------------------------------------------------------------------------
+
+            # get threshold distance for resampling
+            threshold_distance = tf.cast(tf.reduce_max(nearest_distances), dtype=tf.float32)
 
             # find indices of furthest (best) points according to predefined kpf_keep_number
             furthest_indices = np.argpartition(nearest_distances, -self.kpf_keep_number)[-self.kpf_keep_number:]
@@ -417,30 +436,53 @@ class optimizer_rpgd_pfi(template_optimizer):
 
             # combine the best and furthest indices, remove duplicate indices
             total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
-            total_keep_idx, useless_idx = tf.unique(total_keep_idx)
+            total_keep_idx, _ = tf.unique(total_keep_idx)
             total_keep_idx = tf.convert_to_tensor(total_keep_idx)
 
+            num_resample = self.num_rollouts - len(total_keep_idx)
 
-            """# update weights and normalize
-            self.kpf_weights = nearest_distances/np.sum(nearest_distances)
+
+            # TOO TOO TOO SLOW - ALTERNATIVE 1: resample until distance threshold passed reached
+            """Qres = tf.zeros((0, self.mpc_horizon, self.num_control_inputs))
+            for i in range(num_resample):
+                intermediate = self.sample_actions(self.rng, 1)
+                intermediate_rt = self.predict_and_cost(s, intermediate)[1][0]
+                while intermediate_rt[-1, 5]**2 + intermediate_rt[-1, 6]**2 < threshold_distance**2:
+                    intermediate = self.sample_actions(self.rng, 1)
+                    intermediate_rt = self.predict_and_cost(s, intermediate)[1][0]
+                Qres = tf.concat([Qres, intermediate], axis=0)"""
+            # -----------------------------------------------------------------------------------------------
+
+
+            # ALTERNATIVE 2: for simple resampling:
+            """Qres = self.sample_actions(self.rng, self.num_rollouts - len(total_keep_idx))"""
+            # -----------------------------------------------------------------------------------------------
+
+
+            # ALTERNATIVE 3: smart KPF resampling using weights
+            # update weights and normalize
+            self.kpf_weights = nearest_distances / np.sum(nearest_distances)
 
             # calculate CDF of weights
             weights_cdf = np.cumsum(self.kpf_weights)
 
             # resample randomly
-            random_array = np.random.rand(self.num_rollouts - self.kpf_keep_number)
-            resample_index = np.empty()
+            random_array = np.random.rand(num_resample)
+            resample_indices = np.empty(num_resample, dtype=np.int32)
             # Q_random = self.sample_actions(self.rng, self.num_rollouts - self.opt_keep_k)
-            for i in range(self.num_rollouts - self.kpf_keep_number - 1):
-                pass"""
+            for i in range(num_resample):
+                resample_indices[i] = np.searchsorted(weights_cdf, random_array[i], side='left')
 
-            Qres = self.sample_actions(self.rng, self.num_rollouts - len(total_keep_idx))
+            Qres = tf.gather(Qn, resample_indices)
+            # -----------------------------------------------------------------------------------------------
+
+
             Q_keep = tf.gather(Qn, total_keep_idx)
 
             Qn = tf.concat([Qres, Q_keep], axis=0)
 
             self.trajectory_ages = tf.concat([
-                tf.zeros(self.num_rollouts - len(total_keep_idx), dtype=tf.int32),
+                tf.zeros(num_resample, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, total_keep_idx),
             ], axis=0)  # total_keep_idx WAS BEST_IDX; len(...) WAS OPT_KEEP_K BEFORE!!!!!!
             # --------------------------------------------------------------------------------------------------------------------
