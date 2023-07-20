@@ -15,6 +15,7 @@ from Control_Toolkit.others.trajectory_visualize import TrajectoryVisualizer
 
 # FOR KPF-----------------------------------------------------------------
 from scipy.spatial.distance import cdist
+import matplotlib.pyplot as plt
 # ------------------------------------------------------------------------
 
 logger = get_logger(__name__)
@@ -408,12 +409,12 @@ class optimizer_rpgd_pfi(template_optimizer):
             distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
 
             # width of Gaussian kernel and distances
-            sigma = 10.0
-            g_distances = np.exp(-distances**2 / (2 * sigma**2))
-
+            sigma = 5.0
+            g_distances = 1 - np.exp(-distances**2 / (2 * sigma**2))
             np.fill_diagonal(g_distances, np.inf)
-            g_distances = 1 - g_distances
-            nearest_distances = None
+
+            # find the closest similarity to any neighbor, use that as a divergence metric
+            divergence_metric = np.min(g_distances, axis=1)
             # ------------------------------------------------------------------------------------------
 
 
@@ -423,14 +424,15 @@ class optimizer_rpgd_pfi(template_optimizer):
             end_rollout_trajectories = np.squeeze(reshaped_rt, axis=1)
             distances = cdist(end_rollout_trajectories, end_rollout_trajectories)
             np.fill_diagonal(distances, np.inf)
-            nearest_distances = np.min(distances, axis=1)"""
+            divergence_metric = np.min(distances, axis=1)"""
             # ------------------------------------------------------------------------------------------
 
             # get threshold distance for resampling
-            threshold_distance = tf.cast(tf.reduce_max(nearest_distances), dtype=tf.float32)
+            # threshold_distance = tf.cast(tf.reduce_max(worst_values), dtype=tf.float32)
 
             # find indices of furthest (best) points according to predefined kpf_keep_number
-            furthest_indices = np.argpartition(nearest_distances, -self.kpf_keep_number)[-self.kpf_keep_number:]
+            # divergence_metric decreases with more similarity
+            furthest_indices = np.argpartition(divergence_metric, -self.kpf_keep_number)[-self.kpf_keep_number:]
             furthest_indices = tf.convert_to_tensor(furthest_indices)
             furthest_indices = tf.cast(furthest_indices, tf.int32)
 
@@ -461,20 +463,128 @@ class optimizer_rpgd_pfi(template_optimizer):
 
             # ALTERNATIVE 3: smart KPF resampling using weights
             # update weights and normalize
-            self.kpf_weights = nearest_distances / np.sum(nearest_distances)
+            self.kpf_weights = divergence_metric / np.sum(divergence_metric)
 
             # calculate CDF of weights
             weights_cdf = np.cumsum(self.kpf_weights)
 
             # resample randomly
-            random_array = np.random.rand(num_resample)
+            """random_array = np.random.rand(num_resample)
             resample_indices = np.empty(num_resample, dtype=np.int32)
             # Q_random = self.sample_actions(self.rng, self.num_rollouts - self.opt_keep_k)
             for i in range(num_resample):
                 resample_indices[i] = np.searchsorted(weights_cdf, random_array[i], side='left')
 
-            Qres = tf.gather(Qn, resample_indices)
+            Qres = tf.gather(Qn, resample_indices)"""
+
+            Qres = self.sample_actions(
+                self.rng, num_resample
+            )
             # -----------------------------------------------------------------------------------------------
+
+
+            # VISUALIZE DISTRIBUTION WITH WEIGHTS ---------------------------------------
+            if True:
+                # Define the limits for the 2D space visualization (replace these with your actual values)
+                ac_min, ac_max = self.action_low[0], self.action_high[0]
+                tc_min, tc_max = self.action_low[1], self.action_high[1]
+                y_min = 0
+                y_max = np.max(self.kpf_weights)
+
+                num_timesteps = self.mpc_horizon
+
+                # Create a figure and two subplots (one for AC control input and one for TC control input)
+                fig, (ax_ac, ax_tc) = plt.subplots(1, 2, figsize=(10, 5))
+
+                # Set the x-axis limits and labels for both subplots
+                ax_ac.set_xlim(ac_min, ac_max)
+                ax_ac.set_xlabel('Angular Control (AC)')
+                ax_tc.set_xlim(tc_min, tc_max)
+                ax_tc.set_xlabel('Translational Control (TC)')
+
+                # Set the y-axis limits and labels for both subplots
+                ax_ac.set_ylim(y_min, y_max)
+                ax_ac.set_ylabel('Weight')
+                ax_tc.set_ylim(y_min, y_max)
+                ax_tc.set_ylabel('Weight')
+
+                for timestep in range(num_timesteps):
+                    # Get control inputs and weights for the current timestep
+                    control_inputs = Qn[:, timestep, :]
+                    weights = self.kpf_weights
+
+                    # Extract AC and TC control inputs and corresponding weights
+                    ac_control_inputs = control_inputs[:, 0]
+                    tc_control_inputs = control_inputs[:, 1]
+
+                    # Update the bar plots for AC and TC control inputs with corresponding weights on the y-axes
+                    ax_ac.bar(ac_control_inputs, weights, width=0.01, label=f'Timestep {timestep + 1}', align='center',
+                              alpha=0.5)
+                    ax_ac.scatter(ac_control_inputs, weights, color='black', s=10, zorder=2)
+
+                    ax_tc.bar(tc_control_inputs, weights, width=0.01, label=f'Timestep {timestep + 1}', align='center',
+                              alpha=0.5)
+                    ax_tc.scatter(tc_control_inputs, weights, color='black', s=10, zorder=2)
+
+                    # Update the plot titles for both subplots
+                    ax_ac.set_title('AC Control Input vs. Weight')
+                    ax_tc.set_title('TC Control Input vs. Weight')
+
+                    # Show the plot
+                    plt.waitforbuttonpress()  # Add a pause to show the plot for a short time
+
+                    # Clear the subplots for the next timestep
+                    ax_ac.clear()
+                    ax_tc.clear()
+
+                # Close the figure after all timesteps are shown
+                plt.close(fig)
+
+                """x_min, x_max = self.action_low[0], self.action_high[0]
+                y_min, y_max = self.action_low[1], self.action_high[1]
+                num_timesteps = self.mpc_horizon
+                
+                # Create a color map for the weights (blue to red)
+                cmap = plt.cm.get_cmap('RdYlBu')
+
+                # Create a figure and axis
+                fig, ax = plt.subplots()
+
+                # Set the axis limits and labels
+                ax.set_xlim(x_min, x_max)
+                ax.set_ylim(y_min, y_max)
+                ax.set_xlabel('Angular Control')
+                ax.set_ylabel('Translational Control')
+
+                # Set plot title and color bar
+                ax.set_title('Timestep: 0')
+
+                # Plot empty scatter points for initialization
+                sc = ax.scatter([], [], c=[], cmap=cmap, vmin=np.min(self.kpf_weights),
+                                vmax=np.max(self.kpf_weights))
+
+                # Create the color bar
+                cbar = plt.colorbar(sc, ax=ax)
+                cbar.set_label('Weight (More similar - red, Less similar - blue)')
+
+                for timestep in range(num_timesteps):
+                    # Get control inputs and weights for the current timestep
+                    control_inputs = Qn[:, timestep, :]
+                    weights = self.kpf_weights
+
+                    # Update the scatter plot data with control_inputs and colors
+                    sc.set_offsets(control_inputs)
+                    sc.set_array(weights)
+
+                    # Update the plot title
+                    ax.set_title(f'Timestep: {timestep + 1}')
+
+                    # Show the plot
+                    plt.waitforbuttonpress()  # Add a pause to show the plot for a short time
+
+                # Close the figure after all timesteps are shown
+                plt.close(fig)"""
+            # ---------------------------------------------------------------------------
 
 
             Q_keep = tf.gather(Qn, total_keep_idx)
@@ -484,7 +594,7 @@ class optimizer_rpgd_pfi(template_optimizer):
             self.trajectory_ages = tf.concat([
                 tf.zeros(num_resample, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, total_keep_idx),
-            ], axis=0)  # total_keep_idx WAS BEST_IDX; len(...) WAS OPT_KEEP_K BEFORE!!!!!!
+            ], axis=0)  # total_keep_idx WAS BEST_IDX; num_resample WAS OPT_KEEP_K BEFORE!!!!!!
             # --------------------------------------------------------------------------------------------------------------------
 
             # Updating the weights of adam:
