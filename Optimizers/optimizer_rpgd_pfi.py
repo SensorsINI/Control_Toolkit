@@ -11,65 +11,35 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # FOR VISUALIZING TRAJECTORIES--------------------------------------------
 from Control_Toolkit.others.trajectory_visualize import TrajectoryVisualizer
+from Control_Toolkit.others.standalone_visualizers import *
 # ------------------------------------------------------------------------
 
 # FOR KPF-----------------------------------------------------------------
 from scipy.spatial.distance import cdist
-import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+import tensorflow_probability as tfp
 # ------------------------------------------------------------------------
 
 logger = get_logger(__name__)
 
+@CompileTF
+def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
+    # Sort the x and y using TensorFlow operations
+    x_sorted_indices = tf.argsort(x_val)
+    x_sorted = tf.gather(x_val, x_sorted_indices)
+    y_sorted = tf.gather(y_val, x_sorted_indices)
 
-def add_shortest_distance(tensor):
-    # Compute pairwise distances
-    distances = tf.norm(tensor[:, tf.newaxis, :] - tensor, axis=-1)
+    # Linear interpolation using TensorFlow operations
+    x_interp = tf.linspace(x_min, x_max, num_interp_pts)
+    y_interp = tfp.math.interp_regular_1d(x_interp, x_sorted, y_sorted)
 
-    # Set the diagonal elements to infinity to exclude self-distances
-    distances = tf.linalg.set_diag(distances, tf.fill(distances.shape[:-1], float('inf')))
+    # pdf using TensorFlow operations
+    y_pdf = y_interp / tf.reduce_sum(y_interp)
 
-    # Find the shortest neighbor distance for each point
-    shortest_distances = tf.reduce_min(distances, axis=1)
+    # cdf using TensorFlow operations
+    y_cdf = tf.math.cumsum(y_pdf)
 
-    # Add the shortest distances as the third column to the tensor
-    tensor_with_distance = tf.concat([tensor, shortest_distances[:, tf.newaxis]], axis=-1)
-
-    return tensor_with_distance
-
-
-'''class KindaParticleFilter:
-    """
-    Class to emulate the functionality of importance sampling.
-    """
-    def __init__(self,
-                 num_inputs: int,
-                 num_rollouts: int,
-                 horizon: int,
-                 kpf_sample_stdev: float,
-                 kpf_sample_mean: float,
-                 ):
-        """
-        Initialize the KPF class.
-
-        :param num_inputs:      steering angle, throttle
-        :param num_rollouts:    self-explanatory :)
-        :param horizon:         "
-        """
-        self.num_inputs = num_inputs
-        self.num_particles = num_rollouts
-        self.horizon = horizon
-        self.dimensions = (self.num_particles, self.horizon, self.num_inputs)
-
-        # Initialize weights of size num_rollouts
-        self.weights = np.empty(self.num_particles)
-        self.weights.fill(1./self.num_particles)
-
-        # Initialize particles / control inputs (num_rollouts, horizon, num_states)
-        self.input_particles = np.random.normal(loc=kpf_sample_mean, scale=kpf_sample_stdev, size=self.dimensions)
-
-    def update(self, rollout_t):
-        pass'''
-
+    return x_interp, y_pdf, y_cdf
 
 class optimizer_rpgd_pfi(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
@@ -110,6 +80,11 @@ class optimizer_rpgd_pfi(template_optimizer):
         kpf_sample_mean: float,
         kpf_keep_ratio: float,
         kpf_keep_best: int,
+        visualize_color_coded: bool,
+        visualize_control_distributions: bool,
+        visualize_per: int,
+        kpf_g_sigma: float,
+        kpf_cdf_interp_num: int,
     ):
         super().__init__(
             predictor=predictor,
@@ -172,9 +147,11 @@ class optimizer_rpgd_pfi(template_optimizer):
         # VISUALS:
         self.visualize = visualize
         self.view_unoptimized = view_unoptimized
-
         if self.visualize:
             self.TV = TrajectoryVisualizer()
+        self.visualize_color_coded = visualize_color_coded
+        self.visualize_control_distributions = visualize_control_distributions
+        self.visualize_per = visualize_per
 
         # Kinda Particle Filter:
         # Now done below due to num_control_inputs not being initialized
@@ -187,6 +164,9 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_keep_best = kpf_keep_best
         self.kpf_sample_mean = kpf_sample_mean
         self.kpf_sample_stdev = kpf_sample_stdev
+        self.kpf_g_sigma = kpf_g_sigma
+        self.kpf_cdf_interp_num = kpf_cdf_interp_num
+
 
     def configure(self,
                   num_states: int,
@@ -214,6 +194,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         self.optimizer_reset()
 
+    @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         if self.SAMPLING_DISTRIBUTION == "normal":
             Qn = rng_gen.normal(
@@ -237,6 +218,80 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         return Qn
 
+
+    @CompileTF
+    def kpf_step(self, best_idx, Qn):
+        rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
+
+        # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
+        # becomes (n_rollouts x n_chosen_output_states)
+        squeezed_rt = tf.reshape(self.rollout_trajectories[:, :, 5:7], (rt_dim1, rt_dim2 * 2))
+        distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
+
+        # width of Gaussian kernel and distances
+        g_distances = 1 - tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
+        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)
+
+        # find the closest similarity to any neighbor, use that as a divergence metric
+        divergence_metric = tf.reduce_min(g_distances, axis=1)
+        # divergence_metric = tf.reduce_mean(g_distances, axis=1)
+        # -------------------------------------------------------------------------------------------------------
+
+        # METHOD 2 - calculate the distances between endpoints--------------------------------------------------
+        """reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
+        end_rollout_trajectories = tf.squeeze(reshaped_rt, axis=1)
+        distances = tf.norm(end_rollout_trajectories[:, None] - end_rollout_trajectories, axis=-1)
+
+        distances = tf.linalg.set_diag(distances, tf.ones(rt_dim1) * np.inf)
+        divergence_metric = tf.reduce_min(distances, axis=1)"""
+
+        # get threshold distance for resampling
+        # threshold_distance = tf.cast(tf.reduce_max(worst_values), dtype=tf.float32)
+        # -------------------------------------------------------------------------------------------------------
+
+        # find indices of furthest (best) points according to predefined kpf_keep_number
+        # divergence_metric decreases with more similarity
+        furthest_indices = tf.math.top_k(-divergence_metric, k=self.kpf_keep_number).indices
+        total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
+        total_keep_idx, _ = tf.unique(total_keep_idx)
+        total_keep_idx = tf.cast(total_keep_idx, tf.int32)
+
+        num_resample = self.num_rollouts - len(total_keep_idx)
+
+        # ALTERNATIVE 1: simple resampling from given distribution--------------------------------------
+        # Qres = self.sample_actions(self.rng, self.num_rollouts - len(total_keep_idx))
+        # -----------------------------------------------------------------------------------------------
+
+        # ALTERNATIVE 2: smart KPF resampling using weights--------------------------------------------------
+        # update weights and normalize
+        kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
+
+        # uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+
+        values = []
+        for i in range(num_resample):
+            for j in range(self.mpc_horizon):
+                for k in range(self.num_control_inputs):
+                    uniform_sample = tf.random.uniform(shape=())
+                    (
+                        sample_x,
+                        _,
+                        cdf_y
+                    ) = get_interp_pdf_cdf(Qn[:, j, k],
+                                           self.action_low[k],
+                                           self.action_high[k],
+                                           self.kpf_weights,
+                                           self.kpf_cdf_interp_num)
+                    inv_sampled_input = np.interp(uniform_sample, cdf_y, sample_x)
+                    values.append(inv_sampled_input)
+
+        Q_kpf_res = tf.convert_to_tensor(values, dtype=tf.float32)
+        Q_kpf_res = tf.reshape(Q_kpf_res, (num_resample, self.mpc_horizon, self.num_control_inputs))
+        # ----------------------------------------------------------------------------------------------------
+
+        return total_keep_idx, Q_kpf_res, num_resample, kpf_weights
+
+
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_tf(s, Q)
@@ -244,15 +299,6 @@ class optimizer_rpgd_pfi(template_optimizer):
             rollout_trajectory, Q, self.u
         )
         return traj_cost, rollout_trajectory
-
-    """def kpf_step(self, rt):
-        # Calculate the output (endpoints)
-        output = TrajectoryVisualizer.calculate_output(rt)
-        # Add the shortest neighbor distances to each point
-        output_with_distance = add_shortest_distance(output)
-        for i in range(self.num_rollouts):
-            pass
-            # self.kpf_weights[i] = output_with_distance[]"""
 
     @CompileTF
     def grad_step(
@@ -315,6 +361,7 @@ class optimizer_rpgd_pfi(template_optimizer):
             [Q[:, self.shift_previous:, :], self.lib.tile(Q[:, -1:, :], (1, self.shift_previous, 1))]
             , axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
+
     def _predict_optimal_trajectory(self, s, u_nom):
         optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
@@ -399,193 +446,34 @@ class optimizer_rpgd_pfi(template_optimizer):
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs"""
 
-            # KPF STEP ----------------------------------------------------------------------------------------------------------------
-            rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
+            # KPF STEP ------------------------------------------------------------------------------------------------
+            (
+                total_keep_idx,
+                Qres,
+                num_resample,
+                self.kpf_weights
+            ) = self.kpf_step(best_idx, Qn)
 
-
-            # METHOD 1 - trajectory similarity using kernels
-            # becomes (n_rollouts x n_output_states)
-            squeezed_rt = np.reshape(self.rollout_trajectories, (rt_dim1, rt_dim2 * rt_dim3))
-            distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
-
-            # width of Gaussian kernel and distances
-            sigma = 5.0
-            g_distances = 1 - np.exp(-distances**2 / (2 * sigma**2))
-            np.fill_diagonal(g_distances, np.inf)
-
-            # find the closest similarity to any neighbor, use that as a divergence metric
-            divergence_metric = np.min(g_distances, axis=1)
+            Qres = self.sample_actions(self.rng, num_resample)
             # ------------------------------------------------------------------------------------------
 
-
-            # METHOD 2 - calculate the distances between endpoints
-            """# becomes (n_rollouts x n_output_states)
-            reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
-            end_rollout_trajectories = np.squeeze(reshaped_rt, axis=1)
-            distances = cdist(end_rollout_trajectories, end_rollout_trajectories)
-            np.fill_diagonal(distances, np.inf)
-            divergence_metric = np.min(distances, axis=1)"""
-            # ------------------------------------------------------------------------------------------
-
-            # get threshold distance for resampling
-            # threshold_distance = tf.cast(tf.reduce_max(worst_values), dtype=tf.float32)
-
-            # find indices of furthest (best) points according to predefined kpf_keep_number
-            # divergence_metric decreases with more similarity
-            furthest_indices = np.argpartition(divergence_metric, -self.kpf_keep_number)[-self.kpf_keep_number:]
-            furthest_indices = tf.convert_to_tensor(furthest_indices)
-            furthest_indices = tf.cast(furthest_indices, tf.int32)
-
-            # combine the best and furthest indices, remove duplicate indices
-            total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
-            total_keep_idx, _ = tf.unique(total_keep_idx)
-            total_keep_idx = tf.convert_to_tensor(total_keep_idx)
-
-            num_resample = self.num_rollouts - len(total_keep_idx)
-
-
-            # TOO TOO TOO SLOW - ALTERNATIVE 1: resample until distance threshold passed reached
-            """Qres = tf.zeros((0, self.mpc_horizon, self.num_control_inputs))
-            for i in range(num_resample):
-                intermediate = self.sample_actions(self.rng, 1)
-                intermediate_rt = self.predict_and_cost(s, intermediate)[1][0]
-                while intermediate_rt[-1, 5]**2 + intermediate_rt[-1, 6]**2 < threshold_distance**2:
-                    intermediate = self.sample_actions(self.rng, 1)
-                    intermediate_rt = self.predict_and_cost(s, intermediate)[1][0]
-                Qres = tf.concat([Qres, intermediate], axis=0)"""
-            # -----------------------------------------------------------------------------------------------
-
-
-            # ALTERNATIVE 2: for simple resampling:
-            """Qres = self.sample_actions(self.rng, self.num_rollouts - len(total_keep_idx))"""
-            # -----------------------------------------------------------------------------------------------
-
-
-            # ALTERNATIVE 3: smart KPF resampling using weights
-            # update weights and normalize
-            self.kpf_weights = divergence_metric / np.sum(divergence_metric)
-
-            # calculate CDF of weights
-            weights_cdf = np.cumsum(self.kpf_weights)
-
-            # resample randomly
-            """random_array = np.random.rand(num_resample)
-            resample_indices = np.empty(num_resample, dtype=np.int32)
-            # Q_random = self.sample_actions(self.rng, self.num_rollouts - self.opt_keep_k)
-            for i in range(num_resample):
-                resample_indices[i] = np.searchsorted(weights_cdf, random_array[i], side='left')
-
-            Qres = tf.gather(Qn, resample_indices)"""
-
-            Qres = self.sample_actions(
-                self.rng, num_resample
-            )
-            # -----------------------------------------------------------------------------------------------
-
-
-            # VISUALIZE DISTRIBUTION WITH WEIGHTS ---------------------------------------
-            if True:
-                # Define the limits for the 2D space visualization (replace these with your actual values)
-                ac_min, ac_max = self.action_low[0], self.action_high[0]
-                tc_min, tc_max = self.action_low[1], self.action_high[1]
-                y_min = 0
-                y_max = np.max(self.kpf_weights)
-
-                num_timesteps = self.mpc_horizon
-
-                # Create a figure and two subplots (one for AC control input and one for TC control input)
-                fig, (ax_ac, ax_tc) = plt.subplots(1, 2, figsize=(10, 5))
-
-                # Set the x-axis limits and labels for both subplots
-                ax_ac.set_xlim(ac_min, ac_max)
-                ax_ac.set_xlabel('Angular Control (AC)')
-                ax_tc.set_xlim(tc_min, tc_max)
-                ax_tc.set_xlabel('Translational Control (TC)')
-
-                # Set the y-axis limits and labels for both subplots
-                ax_ac.set_ylim(y_min, y_max)
-                ax_ac.set_ylabel('Weight')
-                ax_tc.set_ylim(y_min, y_max)
-                ax_tc.set_ylabel('Weight')
-
-                for timestep in range(num_timesteps):
-                    # Get control inputs and weights for the current timestep
-                    control_inputs = Qn[:, timestep, :]
-                    weights = self.kpf_weights
-
-                    # Extract AC and TC control inputs and corresponding weights
-                    ac_control_inputs = control_inputs[:, 0]
-                    tc_control_inputs = control_inputs[:, 1]
-
-                    # Update the bar plots for AC and TC control inputs with corresponding weights on the y-axes
-                    ax_ac.bar(ac_control_inputs, weights, width=0.01, label=f'Timestep {timestep + 1}', align='center',
-                              alpha=0.5)
-                    ax_ac.scatter(ac_control_inputs, weights, color='black', s=10, zorder=2)
-
-                    ax_tc.bar(tc_control_inputs, weights, width=0.01, label=f'Timestep {timestep + 1}', align='center',
-                              alpha=0.5)
-                    ax_tc.scatter(tc_control_inputs, weights, color='black', s=10, zorder=2)
-
-                    # Update the plot titles for both subplots
-                    ax_ac.set_title('AC Control Input vs. Weight')
-                    ax_tc.set_title('TC Control Input vs. Weight')
-
-                    # Show the plot
-                    plt.waitforbuttonpress()  # Add a pause to show the plot for a short time
-
-                    # Clear the subplots for the next timestep
-                    ax_ac.clear()
-                    ax_tc.clear()
-
-                # Close the figure after all timesteps are shown
-                plt.close(fig)
-
-                """x_min, x_max = self.action_low[0], self.action_high[0]
-                y_min, y_max = self.action_low[1], self.action_high[1]
-                num_timesteps = self.mpc_horizon
-                
-                # Create a color map for the weights (blue to red)
-                cmap = plt.cm.get_cmap('RdYlBu')
-
-                # Create a figure and axis
-                fig, ax = plt.subplots()
-
-                # Set the axis limits and labels
-                ax.set_xlim(x_min, x_max)
-                ax.set_ylim(y_min, y_max)
-                ax.set_xlabel('Angular Control')
-                ax.set_ylabel('Translational Control')
-
-                # Set plot title and color bar
-                ax.set_title('Timestep: 0')
-
-                # Plot empty scatter points for initialization
-                sc = ax.scatter([], [], c=[], cmap=cmap, vmin=np.min(self.kpf_weights),
-                                vmax=np.max(self.kpf_weights))
-
-                # Create the color bar
-                cbar = plt.colorbar(sc, ax=ax)
-                cbar.set_label('Weight (More similar - red, Less similar - blue)')
-
-                for timestep in range(num_timesteps):
-                    # Get control inputs and weights for the current timestep
-                    control_inputs = Qn[:, timestep, :]
-                    weights = self.kpf_weights
-
-                    # Update the scatter plot data with control_inputs and colors
-                    sc.set_offsets(control_inputs)
-                    sc.set_array(weights)
-
-                    # Update the plot title
-                    ax.set_title(f'Timestep: {timestep + 1}')
-
-                    # Show the plot
-                    plt.waitforbuttonpress()  # Add a pause to show the plot for a short time
-
-                # Close the figure after all timesteps are shown
-                plt.close(fig)"""
+            # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
+            if self.visualize_color_coded and self.count % self.visualize_per == 0:
+                visualize_color_coded_trajectories(self.rollout_trajectories,
+                                                   self.kpf_weights,
+                                                   self.cost_function.cost_function.variable_parameters.lidar_points,
+                                                   self.cost_function.cost_function.variable_parameters.next_waypoints)
             # ---------------------------------------------------------------------------
 
+            # VISUALIZE DISTRIBUTION WITH WEIGHTS ---------------------------------------
+            if self.visualize_control_distributions and self.count % self.visualize_per == 0:
+                visualize_control_input_distributions(self.action_low,
+                                                      self.action_high,
+                                                      self.kpf_weights,
+                                                      self.mpc_horizon,
+                                                      self.kpf_cdf_interp_num,
+                                                      Qn)
+            # ---------------------------------------------------------------------------
 
             Q_keep = tf.gather(Qn, total_keep_idx)
 
