@@ -130,10 +130,11 @@ class optimizer_nlp_forces(template_optimizer):
         model.nvar = nu + nx  # number of variables
         model.neq = nx  # number of equality constraints
         model.nh = 0  # number of inequality constraint functions
-        model.npar = nu + nx  # number of runtime parameters
-        if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
-            N_obst = self.cost_function.cost_function.controller.obstacle_positions.shape[0]
-            model.npar = 3 + 4*N_obst
+        self.npar = nu + nx
+        model.npar = self.npar  # number of runtime parameters
+        # if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+        #     N_obst = self.cost_function.cost_function.controller.obstacle_positions.shape[0]
+        #     model.npar = 3 + 4*N_obst
         model.xinitidx = range(nu, nu + nx)  # indexes affected by initial condition
         # model.xfinalidx = range(nu, nu + nx) if terminal_constraint_at_target else None
         self.model = model
@@ -174,7 +175,7 @@ class optimizer_nlp_forces(template_optimizer):
         # Documented at: https://forces.embotech.com/Documentation/solver_options/index.html?highlight=erk2#high-level-interface-options
         codeoptions = forcespro.CodeOptions()
         codeoptions.maxit = 1000  # Maximum number of iterations
-        codeoptions.printlevel = 2  # Use printlevel = 2 to print progress (but not for timings)
+        codeoptions.printlevel = 1  # Use printlevel = 2 to print progress (but not for timings)
         codeoptions.optlevel = 2  # 0 no optimization, 1 optimize for size, 2 optimize for speed, 3 optimize for size & speed
         codeoptions.parallel = 1
         codeoptions.solvemethod = 'PDIP_NLP'
@@ -271,31 +272,34 @@ class optimizer_nlp_forces(template_optimizer):
 
         for i in range(self.model.N-1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
-            new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.model.npar,)), stage=0)[0].squeeze()
+            new_x = self.solver.dynamics(x0[-(self.nx+self.nu):], p=np.zeros((self.npar,)), stage=0)[0].squeeze()
             u = control_strategy(new_x, target)
             u = np.ones(self.nu)*u
             x0 = np.hstack((x0, u, new_x))
-
         return x0
 
     def initial_trajectory_warmstart(self, output):
         rollout = self.solution_to_rollout(output)
-        new_x = self.solver.dynamics(rollout[-1, :], p=np.zeros((self.nx+self.nu)), stage=0)[0]
+        new_x = self.solver.dynamics(rollout[-1, :], p=np.zeros((self.npar)), stage=0)[0]
         new_rollout = np.vstack((rollout[1:,:], np.hstack((rollout[-1:, :self.nu], new_x.transpose()))))
         return new_rollout.flatten()
 
     def trajectory_from_suboptimizer(self, s0):
         x0 = np.ndarray((0,))
         s = s0
-        u = self.suboptimizer.best_input_trajectory[0,:].numpy()
+        if self.environment_name == 'pendulum':
+            s = s[0:2]
+        # u = self.suboptimizer.best_input_trajectory[0,:].numpy()
+        u = self.suboptimizer.best_input_trajectory[0].numpy()
         x0 = np.hstack((x0, u, s))
 
         for i in range(self.model.N - 1):
             # new_x = self.rungekutta4(x0[-self.nx:], u, self.dt)
-            new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.model.npar,)), stage=0)[
+            new_x = self.solver.dynamics(x0[-(self.nx + self.nu):], p=np.zeros((self.npar,)), stage=0)[
                 0].squeeze()
             # new_x = self.environment.step_dynamics(s[np.newaxis, :], u[np.newaxis,:], dt=self.dt)
-            u = self.suboptimizer.best_input_trajectory[0, :].numpy()
+            # u = self.suboptimizer.best_input_trajectory[0, :].numpy()
+            u = self.suboptimizer.best_input_trajectory[0].numpy()
             x0 = np.hstack((x0, u, new_x))
 
         return x0
@@ -305,7 +309,7 @@ class optimizer_nlp_forces(template_optimizer):
             s = np.array([np.random.uniform(-self.state_max[i], self.state_max[i]) for i in range(self.nx)])
             u = np.array([np.random.uniform(self.action_low[i], self.action_high[i]) for i in range(self.nu)])
             next_s_env = self.environment.step_dynamics(s[np.newaxis, :], u[np.newaxis,:], dt=self.dt)
-            next_s_solver = self.solver.dynamics(np.hstack((u, s)), p=np.zeros((self.model.npar,)), stage=0)[
+            next_s_solver = self.solver.dynamics(np.hstack((u, s)), p=np.zeros((self.npar,)), stage=0)[
                 0]
             err = np.linalg.norm(next_s_env[0,:].numpy()-next_s_solver[:,0])
             pass
@@ -343,19 +347,21 @@ class optimizer_nlp_forces(template_optimizer):
             pass
 
         p = self.target
-        if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
-            self.target = self.cost_function.cost_function.controller.target_point.numpy()
-            obst = self.cost_function.cost_function.controller.obstacle_positions
-            obst = np.ndarray.flatten(obst.numpy())
-            p = np.hstack((self.target, obst))
+        # if self.cost_function.cost_function.controller.environment_name == 'obstacle_avoidance_batched':
+        #     self.target = self.cost_function.cost_function.controller.target_point.numpy()
+        #     obst = self.cost_function.cost_function.controller.obstacle_positions
+        #     obst = np.ndarray.flatten(obst.numpy())
+        #     p = np.hstack((self.target, obst))
 
         # if self.cost_function.cost_function.controller.environment_name == 'dubinscar_batched':
         #     self.cost_function.cost_function.controller.target_point = np.array([0.9, 0.0, 0.0])
 
         # Build initial guess x0
-        x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        # x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy)
+        # x0 = self.initial_trajectory_guess(s, self.target, self.initial_strategy) if self.step_counter > 10 else rpgd_solution
         # x0 = self.initial_trajectory_warmstart(self.open_loop_solution) if self.step_counter > 10 else rpgd_solution
-        # x0 = rpgd_solution
+        # x0 = self.initial_trajectory_warmstart(self.open_loop_solution) if self.step_counter > 10 and self.step_counter%5 != 0 else rpgd_solution
+        x0 = rpgd_solution
         self.problem["x0"]  = x0
 
 
@@ -458,8 +464,8 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
-            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
-                                              np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0,0]
+            # obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
+            #                                   np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[0,0]
             assert not (np.any(np.isnan(c)) or np.any(np.isinf(c))), 'Encountered NaN in c at stage ' + str(ss)
             assert not (np.any(np.isnan(np.sum(jacc))) or np.any(
                 np.isinf(np.sum(jacc)))), 'Encountered NaN in jacc at stage ' + str(ss)
@@ -470,7 +476,7 @@ class optimizer_nlp_forces(template_optimizer):
             assert not (np.any(np.isnan(gradobj)) or np.any(
                 np.isinf(gradobj))), 'Encountered NaN in gradobj at stage ' + str(ss)
             total_obj += obj
-            total_obj_env += obj_env
+            # total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
         return total_obj, total_obj_env
         print('Did not encounter NaNs')
@@ -486,11 +492,11 @@ class optimizer_nlp_forces(template_optimizer):
             c, jacc = self.solver.dynamics(z, p, stage=ss)
             ineq, jacineq = self.solver.ineq(z, p, stage=ss)
             obj, gradobj = self.solver.objective(z, p, stage=ss)
-            obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
-                                                        np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[
-                0, 0]
+            # obj_env = self.cost_function.get_stage_cost(np.float32(z[self.nu:])[np.newaxis, np.newaxis],
+            #                                             np.float32(z[:self.nu])[np.newaxis, np.newaxis], None).numpy()[
+            #     0, 0]
             total_obj += obj
-            total_obj_env += obj_env
+            # total_obj_env += obj_env
             initial_trajectory[ss, :, np.newaxis] = c
         return total_obj, total_obj_env
         print('Did not encounter NaNs')
