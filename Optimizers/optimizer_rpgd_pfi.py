@@ -18,9 +18,40 @@ from Control_Toolkit.others.standalone_visualizers import *
 from scipy.spatial.distance import cdist
 from scipy.interpolate import interp1d
 import tensorflow_probability as tfp
+import random
+
 # ------------------------------------------------------------------------
 
 logger = get_logger(__name__)
+
+
+@CompileTF
+def tf_interp(x, xs, ys):
+    # Normalize data types
+    ys = tf.cast(ys, tf.float32)
+    xs = tf.cast(xs, tf.float32)
+    x = tf.cast(x, tf.float32)
+
+    # Pad control points for extrapolation
+    xs = tf.concat([[xs[0]], xs, [xs[-1]]], axis=0)
+    ys = tf.concat([ys[:1], ys, ys[-1:]], axis=0)
+
+    # Compute slopes, pad at the edges to flatten
+    ms = (ys[1:] - ys[:-1]) / (xs[1:] - xs[:-1])
+    ms = tf.pad(ms[:-1], [(1, 1)])
+
+    # Solve for intercepts
+    bs = ys - ms * xs
+
+    # Find the line parameters at each input data point using searchsorted
+    i = tf.searchsorted(xs, x)
+    m = tf.gather(ms, i)
+    b = tf.gather(bs, i)
+
+    # Apply the linear mapping at each input data point
+    y = m * x + b
+    return y
+
 
 @CompileTF
 def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
@@ -29,9 +60,9 @@ def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
     x_sorted = tf.gather(x_val, x_sorted_indices)
     y_sorted = tf.gather(y_val, x_sorted_indices)
 
-    # Linear interpolation using TensorFlow operations
+    # Linear interpolation using tf_interp
     x_interp = tf.linspace(x_min, x_max, num_interp_pts)
-    y_interp = tfp.math.interp_regular_1d(x_interp, x_sorted, y_sorted)
+    y_interp = tf_interp(x_interp, x_sorted, y_sorted)
 
     # pdf using TensorFlow operations
     y_pdf = y_interp / tf.reduce_sum(y_interp)
@@ -41,50 +72,51 @@ def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
 
     return x_interp, y_pdf, y_cdf
 
+
 class optimizer_rpgd_pfi(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
 
     def __init__(
-        self,
-        predictor: PredictorWrapper,
-        cost_function: CostFunctionWrapper,
-        control_limits: "Tuple[np.ndarray, np.ndarray]",
-        computation_library: "type[ComputationLibrary]",
-        seed: int,
-        mpc_horizon: int,
-        num_rollouts: int,
-        outer_its: int,
-        sample_stdev: float,
-        sample_mean: float,
-        sample_whole_control_space: bool,
-        uniform_dist_min: float,
-        uniform_dist_max: float,
-        resamp_per: int,
-        period_interpolation_inducing_points: int,
-        SAMPLING_DISTRIBUTION: str,
-        shift_previous: int,
-        warmup: bool,
-        warmup_iterations: int,
-        learning_rate: float,
-        opt_keep_k_ratio: float,
-        gradmax_clip: float,
-        rtol: float,
-        adam_beta_1: float,
-        adam_beta_2: float,
-        adam_epsilon: float,
-        optimizer_logging: bool,
-        calculate_optimal_trajectory: bool,
-        visualize: bool,
-        view_unoptimized: bool,
-        kpf_sample_stdev: float,
-        kpf_sample_mean: float,
-        kpf_keep_ratio: float,
-        kpf_keep_best: int,
-        visualize_color_coded: bool,
-        visualize_control_distributions: bool,
-        visualize_per: int,
-        kpf_g_sigma: float,
-        kpf_cdf_interp_num: int,
+            self,
+            predictor: PredictorWrapper,
+            cost_function: CostFunctionWrapper,
+            control_limits: "Tuple[np.ndarray, np.ndarray]",
+            computation_library: "type[ComputationLibrary]",
+            seed: int,
+            mpc_horizon: int,
+            num_rollouts: int,
+            outer_its: int,
+            sample_stdev: float,
+            sample_mean: float,
+            sample_whole_control_space: bool,
+            uniform_dist_min: float,
+            uniform_dist_max: float,
+            resamp_per: int,
+            period_interpolation_inducing_points: int,
+            SAMPLING_DISTRIBUTION: str,
+            shift_previous: int,
+            warmup: bool,
+            warmup_iterations: int,
+            learning_rate: float,
+            opt_keep_k_ratio: float,
+            gradmax_clip: float,
+            rtol: float,
+            adam_beta_1: float,
+            adam_beta_2: float,
+            adam_epsilon: float,
+            optimizer_logging: bool,
+            calculate_optimal_trajectory: bool,
+            visualize: bool,
+            view_unoptimized: bool,
+            kpf_sample_stdev: float,
+            kpf_sample_mean: float,
+            kpf_keep_ratio: float,
+            kpf_keep_best: int,
+            visualize_color_coded: bool,
+            visualize_control_distributions: bool,
+            visualize_per: int,
+            kpf_g_sigma: float,
+            kpf_cdf_interp_num: int,
     ):
         super().__init__(
             predictor=predictor,
@@ -157,7 +189,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         # Now done below due to num_control_inputs not being initialized
         # self.kpf_dimensions = (self.num_rollouts, self.mpc_horizon, self.num_control_inputs)
         # Initialize weights of size num_rollouts
-        self.kpf_weights = np.empty(self.num_rollouts).fill(1. / self.num_rollouts)
+        self.kpf_weights = np.full(self.num_rollouts, 1. / self.num_rollouts)
         self.kpf_dimensions = None
         self.kpf_keep_ratio = kpf_keep_ratio
         self.kpf_keep_number = int(max(int(num_rollouts * self.kpf_keep_ratio), 1))
@@ -166,7 +198,6 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_sample_stdev = kpf_sample_stdev
         self.kpf_g_sigma = kpf_g_sigma
         self.kpf_cdf_interp_num = kpf_cdf_interp_num
-
 
     def configure(self,
                   num_states: int,
@@ -218,8 +249,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         return Qn
 
-
-    @CompileTF
+    # @CompileTF
     def kpf_step(self, best_idx, Qn):
         rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
 
@@ -266,13 +296,26 @@ class optimizer_rpgd_pfi(template_optimizer):
         # update weights and normalize
         kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
 
-        # uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+        uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
 
-        values = []
+        """for i in range(self.num_control_inputs):
+            for j in range(num_resample):
+                WATCH = tf.map_fn(lambda x: get_interp_pdf_cdf(x[0], x[1], x[2], x[3], x[4]),
+                                  (Qn[j, :, i],
+                                   self.action_low[i],
+                                   self.action_high[i],
+                                   self.kpf_weights,
+                                   self.kpf_cdf_interp_num))
+                Q_kpf_res = self.sample_actions(self.rng, num_resample)"""
+
+        uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+
+        trajectories = []
         for i in range(num_resample):
+            trajectory = []
             for j in range(self.mpc_horizon):
+                inputs_per_timestep = []
                 for k in range(self.num_control_inputs):
-                    uniform_sample = tf.random.uniform(shape=())
                     (
                         sample_x,
                         _,
@@ -282,15 +325,16 @@ class optimizer_rpgd_pfi(template_optimizer):
                                            self.action_high[k],
                                            self.kpf_weights,
                                            self.kpf_cdf_interp_num)
-                    inv_sampled_input = np.interp(uniform_sample, cdf_y, sample_x)
-                    values.append(inv_sampled_input)
+                    rev_sampled_input = tf_interp(uniform_samples[i, j, k], cdf_y, sample_x)
+                    inputs_per_timestep.append(rev_sampled_input)
+                trajectory.append(inputs_per_timestep)
+            trajectories.append(trajectory)
 
-        Q_kpf_res = tf.convert_to_tensor(values, dtype=tf.float32)
+        Q_kpf_res = tf.convert_to_tensor(trajectories, dtype=tf.float32)
         Q_kpf_res = tf.reshape(Q_kpf_res, (num_resample, self.mpc_horizon, self.num_control_inputs))
         # ----------------------------------------------------------------------------------------------------
 
         return total_keep_idx, Q_kpf_res, num_resample, kpf_weights
-
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -302,7 +346,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
     @CompileTF
     def grad_step(
-        self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
+            self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:

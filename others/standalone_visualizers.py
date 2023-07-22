@@ -3,7 +3,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 
-def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
+def get_interp_pdf_cdf_vis(x_val, x_min, x_max, y_val, num_interp_pts):
     # Convert TensorFlow tensors to NumPy arrays for indexing
     x_val = x_val.numpy()
     y_val = y_val.numpy()
@@ -18,13 +18,13 @@ def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
     y_interp = np.interp(x_interp, x_sorted, y_sorted)
 
     # pdf
-    x_pdf = x_interp
+    x = x_interp
     y_pdf = y_interp / np.sum(y_interp)
 
     # cdf
     y_cdf = np.cumsum(y_pdf)
 
-    return x_pdf, y_pdf, y_cdf
+    return x, y_pdf, y_cdf
 
 
 # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
@@ -126,13 +126,13 @@ def visualize_control_input_distributions(action_low, action_high, weights, mpc_
             ac_ci_interp,
             ac_pdf_interp,
             ac_cdf_interp
-        ) = get_interp_pdf_cdf(ac_control_inputs, ac_min, ac_max, weights, num_interp_pts)
+        ) = get_interp_pdf_cdf_vis(ac_control_inputs, ac_min, ac_max, weights, num_interp_pts)
 
         (
             tc_ci_interp,
             tc_pdf_interp,
             tc_cdf_interp
-        ) = get_interp_pdf_cdf(tc_control_inputs, tc_min, tc_max, weights, num_interp_pts)
+        ) = get_interp_pdf_cdf_vis(tc_control_inputs, tc_min, tc_max, weights, num_interp_pts)
 
         # plot pdf
         ac_pdf_image = ac_pdf_interp / np.sum(ac_pdf_interp)
