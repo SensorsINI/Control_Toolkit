@@ -25,7 +25,7 @@ import random
 logger = get_logger(__name__)
 
 
-@CompileTF
+"""@CompileTF
 def tf_interp(x, xs, ys):
     # Normalize data types
     ys = tf.cast(ys, tf.float32)
@@ -70,7 +70,7 @@ def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
     # cdf using TensorFlow operations
     y_cdf = tf.math.cumsum(y_pdf)
 
-    return x_interp, y_pdf, y_cdf
+    return x_interp, y_pdf, y_cdf"""
 
 
 class optimizer_rpgd_pfi(template_optimizer):
@@ -189,7 +189,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         # Now done below due to num_control_inputs not being initialized
         # self.kpf_dimensions = (self.num_rollouts, self.mpc_horizon, self.num_control_inputs)
         # Initialize weights of size num_rollouts
-        self.kpf_weights = np.full(self.num_rollouts, 1. / self.num_rollouts)
+        self.kpf_weights = tf.fill(self.num_rollouts, 1. / self.num_rollouts)
         self.kpf_dimensions = None
         self.kpf_keep_ratio = kpf_keep_ratio
         self.kpf_keep_number = int(max(int(num_rollouts * self.kpf_keep_ratio), 1))
@@ -198,6 +198,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_sample_stdev = kpf_sample_stdev
         self.kpf_g_sigma = kpf_g_sigma
         self.kpf_cdf_interp_num = kpf_cdf_interp_num
+        self.kpf_num_resample = 0
 
     def configure(self,
                   num_states: int,
@@ -225,7 +226,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         self.optimizer_reset()
 
-    @CompileTF
+    # @CompileTF
     def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
         if self.SAMPLING_DISTRIBUTION == "normal":
             Qn = rng_gen.normal(
@@ -249,8 +250,8 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         return Qn
 
-    # @CompileTF
-    def kpf_step(self, best_idx, Qn):
+    @CompileTF
+    def get_kpf_weights(self, best_idx):
         rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
 
         # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
@@ -296,21 +297,44 @@ class optimizer_rpgd_pfi(template_optimizer):
         # update weights and normalize
         kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
 
-        uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+        return kpf_weights, num_resample, total_keep_idx
+
+    # @CompileTF
+    def kpf_step(self, Qn):
+        # uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+
+        # Qn_reduced = tf.reshape(Qn, (self.num_rollouts, self.mpc_horizon * self.num_control_inputs))
 
         """for i in range(self.num_control_inputs):
-            for j in range(num_resample):
-                WATCH = tf.map_fn(lambda x: get_interp_pdf_cdf(x[0], x[1], x[2], x[3], x[4]),
-                                  (Qn[j, :, i],
-                                   self.action_low[i],
-                                   self.action_high[i],
-                                   self.kpf_weights,
-                                   self.kpf_cdf_interp_num))
-                Q_kpf_res = self.sample_actions(self.rng, num_resample)"""
+            for j in range(self.mpc_horizon):
+                # Sort the x and y using TensorFlow operations
+                sliced_inputs = Qn[:, j, i]
 
-        uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+                sorted_indices = tf.argsort(sliced_inputs)
+                Qn_sorted = tf.gather(sliced_inputs, sorted_indices)
+                weights_sorted = tf.gather(self.kpf_weights, sorted_indices)
+                weights_cdf = tf.cumsum(weights_sorted)
 
-        trajectories = []
+                uniform_samples = tf.linspace(0.0, 1.0, num_resample)  # MOVE OUT!
+
+                # Find indices for the sampled points using binary search
+                indices = tf.math.minimum(tf.searchsorted(weights_cdf, uniform_samples), self.num_rollouts - 1)
+
+                # n1 = uniform_samples
+                # n2 = tf.gather(weights_cdf, tf.math.maximum(indices - 1, 0))
+                # n3 = tf.gather(weights_cdf, indices)
+
+                prev_indices = tf.math.maximum(indices - 1, 0)
+
+                alphas = tf.math.maximum(tf.math.divide(uniform_samples - tf.gather(weights_cdf, prev_indices),
+                                                        tf.gather(weights_cdf, indices) - tf.gather(weights_cdf, prev_indices))
+                                         , 0)
+
+                samples_per_ci_per_timestep = tf.gather(Qn_sorted, prev_indices) + alphas * (tf.gather(Qn_sorted, indices) - tf.gather(Qn_sorted, prev_indices))"""
+
+        Q_kpf_res = self.sample_actions(self.rng, self.kpf_num_resample)
+
+        """trajectories = []
         for i in range(num_resample):
             trajectory = []
             for j in range(self.mpc_horizon):
@@ -331,10 +355,10 @@ class optimizer_rpgd_pfi(template_optimizer):
             trajectories.append(trajectory)
 
         Q_kpf_res = tf.convert_to_tensor(trajectories, dtype=tf.float32)
-        Q_kpf_res = tf.reshape(Q_kpf_res, (num_resample, self.mpc_horizon, self.num_control_inputs))
+        Q_kpf_res = tf.reshape(Q_kpf_res, (num_resample, self.mpc_horizon, self.num_control_inputs))"""
         # ----------------------------------------------------------------------------------------------------
 
-        return total_keep_idx, Q_kpf_res, num_resample, kpf_weights
+        return Q_kpf_res
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -429,6 +453,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         # Calculate unoptimized trajectories:
         unoptimized_Q = None
         unoptimized_rollout_trajectories = None
+
         if self.visualize and self.view_unoptimized:
             (
                 unoptimized_Q,
@@ -490,20 +515,25 @@ class optimizer_rpgd_pfi(template_optimizer):
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs"""
 
-            # KPF STEP ------------------------------------------------------------------------------------------------
             (
-                total_keep_idx,
-                Qres,
-                num_resample,
-                self.kpf_weights
-            ) = self.kpf_step(best_idx, Qn)
+                self.kpf_weights,
+                self.kpf_num_resample,
+                total_keep_idx
+            ) = self.get_kpf_weights(best_idx)
 
-            Qres = self.sample_actions(self.rng, num_resample)
+            # KPF STEP ------------------------------------------------------------------------------------------------
+            Qres = self.kpf_step(Qn)
+
+            # Qres = self.sample_actions(self.rng, self.kpf_num_resample)
             # ------------------------------------------------------------------------------------------
 
             # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
             if self.visualize_color_coded and self.count % self.visualize_per == 0:
                 visualize_color_coded_trajectories(self.rollout_trajectories,
+                                                   self.kpf_weights,
+                                                   self.cost_function.cost_function.variable_parameters.lidar_points,
+                                                   self.cost_function.cost_function.variable_parameters.next_waypoints)
+                visualize_color_coded_trajectories(unoptimized_rollout_trajectories,
                                                    self.kpf_weights,
                                                    self.cost_function.cost_function.variable_parameters.lidar_points,
                                                    self.cost_function.cost_function.variable_parameters.next_waypoints)
@@ -524,7 +554,7 @@ class optimizer_rpgd_pfi(template_optimizer):
             Qn = tf.concat([Qres, Q_keep], axis=0)
 
             self.trajectory_ages = tf.concat([
-                tf.zeros(num_resample, dtype=tf.int32),
+                tf.zeros(self.kpf_num_resample, dtype=tf.int32),
                 tf.gather(self.trajectory_ages, total_keep_idx),
             ], axis=0)  # total_keep_idx WAS BEST_IDX; num_resample WAS OPT_KEEP_K BEFORE!!!!!!
             # --------------------------------------------------------------------------------------------------------------------
