@@ -19,58 +19,11 @@ from scipy.spatial.distance import cdist
 from scipy.interpolate import interp1d
 import tensorflow_probability as tfp
 import random
+import math
 
 # ------------------------------------------------------------------------
 
 logger = get_logger(__name__)
-
-
-"""@CompileTF
-def tf_interp(x, xs, ys):
-    # Normalize data types
-    ys = tf.cast(ys, tf.float32)
-    xs = tf.cast(xs, tf.float32)
-    x = tf.cast(x, tf.float32)
-
-    # Pad control points for extrapolation
-    xs = tf.concat([[xs[0]], xs, [xs[-1]]], axis=0)
-    ys = tf.concat([ys[:1], ys, ys[-1:]], axis=0)
-
-    # Compute slopes, pad at the edges to flatten
-    ms = (ys[1:] - ys[:-1]) / (xs[1:] - xs[:-1])
-    ms = tf.pad(ms[:-1], [(1, 1)])
-
-    # Solve for intercepts
-    bs = ys - ms * xs
-
-    # Find the line parameters at each input data point using searchsorted
-    i = tf.searchsorted(xs, x)
-    m = tf.gather(ms, i)
-    b = tf.gather(bs, i)
-
-    # Apply the linear mapping at each input data point
-    y = m * x + b
-    return y
-
-
-@CompileTF
-def get_interp_pdf_cdf(x_val, x_min, x_max, y_val, num_interp_pts):
-    # Sort the x and y using TensorFlow operations
-    x_sorted_indices = tf.argsort(x_val)
-    x_sorted = tf.gather(x_val, x_sorted_indices)
-    y_sorted = tf.gather(y_val, x_sorted_indices)
-
-    # Linear interpolation using tf_interp
-    x_interp = tf.linspace(x_min, x_max, num_interp_pts)
-    y_interp = tf_interp(x_interp, x_sorted, y_sorted)
-
-    # pdf using TensorFlow operations
-    y_pdf = y_interp / tf.reduce_sum(y_interp)
-
-    # cdf using TensorFlow operations
-    y_cdf = tf.math.cumsum(y_pdf)
-
-    return x_interp, y_pdf, y_cdf"""
 
 
 class optimizer_rpgd_pfi(template_optimizer):
@@ -112,7 +65,9 @@ class optimizer_rpgd_pfi(template_optimizer):
             kpf_sample_mean: float,
             kpf_keep_ratio: float,
             kpf_keep_best: int,
+            kpf_perturb_best: int,
             visualize_color_coded: bool,
+            visualize_color_coded_advanced: bool,
             visualize_control_distributions: bool,
             visualize_per: int,
             kpf_g_sigma: float,
@@ -177,11 +132,14 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
 
         # VISUALS:
+        # TV class
         self.visualize = visualize
         self.view_unoptimized = view_unoptimized
         if self.visualize:
             self.TV = TrajectoryVisualizer()
+        # Standalone
         self.visualize_color_coded = visualize_color_coded
+        self.visualize_color_coded_advanced = visualize_color_coded_advanced
         self.visualize_control_distributions = visualize_control_distributions
         self.visualize_per = visualize_per
 
@@ -199,6 +157,9 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_g_sigma = kpf_g_sigma
         self.kpf_cdf_interp_num = kpf_cdf_interp_num
         self.kpf_num_resample = 0
+        self.kpf_limits_low = - (self.action_high - self.action_low) / 5
+        self.kpf_limits_high = - self.kpf_limits_low
+        self.kpf_perturb_best = kpf_perturb_best
 
     def configure(self,
                   num_states: int,
@@ -251,21 +212,42 @@ class optimizer_rpgd_pfi(template_optimizer):
         return Qn
 
     @CompileTF
-    def get_kpf_weights(self, best_idx):
+    def kpf_step(self, best_idx):
         rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
+
+        x = self.rollout_trajectories[:, :, 5]
+        y = self.rollout_trajectories[:, :, 6]
+
+        d_x = x[:, None] - x
+        d_y = y[:, None] - y
+
+        distances = tf.sqrt(tf.square(d_x) + tf.square(d_y))
+
+        distances_sum = tf.reduce_sum(distances, axis=2)
+
+        # distances_sum = distances[:, :, 0]
+
+        # g_distances = 1 - tf.exp(-distances_sum ** 2 / (2 * self.kpf_g_sigma ** 2))
+        g_distances = distances_sum
+
+        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)
+        divergence_metric = tf.reduce_min(g_distances, axis=1)
+
+        """g_distances = tf.linalg.set_diag(g_distances, tf.zeros(rt_dim1))
+        divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
 
         # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
         # becomes (n_rollouts x n_chosen_output_states)
-        squeezed_rt = tf.reshape(self.rollout_trajectories[:, :, 5:7], (rt_dim1, rt_dim2 * 2))
+        """squeezed_rt = tf.reshape(self.rollout_trajectories[:, :, 5:7], (rt_dim1, rt_dim2 * 2))
         distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
 
         # width of Gaussian kernel and distances
         g_distances = 1 - tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
-        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)
+        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
 
         # find the closest similarity to any neighbor, use that as a divergence metric
         divergence_metric = tf.reduce_min(g_distances, axis=1)
-        # divergence_metric = tf.reduce_mean(g_distances, axis=1)
+        # divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
         # -------------------------------------------------------------------------------------------------------
 
         # METHOD 2 - calculate the distances between endpoints--------------------------------------------------
@@ -282,7 +264,86 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         # find indices of furthest (best) points according to predefined kpf_keep_number
         # divergence_metric decreases with more similarity
-        furthest_indices = tf.math.top_k(-divergence_metric, k=self.kpf_keep_number).indices
+        sorted_indices = tf.argsort(divergence_metric)
+        furthest_indices = sorted_indices[-self.kpf_keep_number:]
+        # furthest_indices = tf.math.top_k(divergence_metric, k=self.kpf_keep_number).indices
+        total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
+        total_keep_idx, _ = tf.unique(total_keep_idx)
+        total_keep_idx = tf.cast(total_keep_idx, tf.int32)
+
+        num_resample = self.num_rollouts - len(total_keep_idx)
+
+        kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
+
+        # return self.sample_actions(self.rng, self.kpf_num_resample)
+
+        # return self.sample_actions(self.rng, self.kpf_num_resample)
+        perturb_indices = sorted_indices[-self.kpf_perturb_best:]
+
+        ratio = tf.cast(tf.math.ceil(num_resample / self.kpf_perturb_best), dtype=tf.int32)
+        tiled_pi = tf.tile(perturb_indices, [ratio])[:self.kpf_num_resample]
+
+        Q_picked = tf.gather(Q, tiled_pi)
+        Q_final = tf.add(Q_picked, noise)
+
+        return kpf_weights, num_resample, total_keep_idx, Q_final
+
+    @CompileTF
+    def get_kpf_weights(self, best_idx):
+        rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
+
+        x = self.rollout_trajectories[:, :, 5]
+        y = self.rollout_trajectories[:, :, 6]
+
+        d_x = x[:, None] - x
+        d_y = y[:, None] - y
+
+        distances = tf.sqrt(tf.square(d_x) + tf.square(d_y))
+
+        distances_sum = tf.reduce_sum(distances, axis=2)
+
+        # distances_sum = distances[:, :, 0]
+
+        # g_distances = 1 - tf.exp(-distances_sum ** 2 / (2 * self.kpf_g_sigma ** 2))
+        g_distances = distances_sum
+
+        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)
+        divergence_metric = tf.reduce_min(g_distances, axis=1)
+
+        """g_distances = tf.linalg.set_diag(g_distances, tf.zeros(rt_dim1))
+        divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
+
+        # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
+        # becomes (n_rollouts x n_chosen_output_states)
+        """squeezed_rt = tf.reshape(self.rollout_trajectories[:, :, 5:7], (rt_dim1, rt_dim2 * 2))
+        distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
+
+        # width of Gaussian kernel and distances
+        g_distances = 1 - tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
+        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
+
+        # find the closest similarity to any neighbor, use that as a divergence metric
+        divergence_metric = tf.reduce_min(g_distances, axis=1)
+        # divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
+        # -------------------------------------------------------------------------------------------------------
+
+        # METHOD 2 - calculate the distances between endpoints--------------------------------------------------
+        """reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
+        end_rollout_trajectories = tf.squeeze(reshaped_rt, axis=1)
+        distances = tf.norm(end_rollout_trajectories[:, None] - end_rollout_trajectories, axis=-1)
+
+        distances = tf.linalg.set_diag(distances, tf.ones(rt_dim1) * np.inf)
+        divergence_metric = tf.reduce_min(distances, axis=1)"""
+
+        # get threshold distance for resampling
+        # threshold_distance = tf.cast(tf.reduce_max(worst_values), dtype=tf.float32)
+        # -------------------------------------------------------------------------------------------------------
+
+        # find indices of furthest (best) points according to predefined kpf_keep_number
+        # divergence_metric decreases with more similarity
+        sorted_indices = tf.argsort(divergence_metric)
+        furthest_indices = sorted_indices[-self.kpf_keep_number:]
+        # furthest_indices = tf.math.top_k(divergence_metric, k=self.kpf_keep_number).indices
         total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
         total_keep_idx, _ = tf.unique(total_keep_idx)
         total_keep_idx = tf.cast(total_keep_idx, tf.int32)
@@ -297,68 +358,21 @@ class optimizer_rpgd_pfi(template_optimizer):
         # update weights and normalize
         kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
 
-        return kpf_weights, num_resample, total_keep_idx
+        return kpf_weights, num_resample, total_keep_idx, sorted_indices
 
-    # @CompileTF
-    def kpf_step(self, Qn):
-        # uniform_samples = tf.random.uniform(shape=(num_resample, self.mpc_horizon, self.num_control_inputs))
+    @CompileTF
+    def get_kpf_samples(self, Q, noise, sorted_indices):
+        # return self.sample_actions(self.rng, self.kpf_num_resample)
 
-        # Qn_reduced = tf.reshape(Qn, (self.num_rollouts, self.mpc_horizon * self.num_control_inputs))
+        # return self.sample_actions(self.rng, self.kpf_num_resample)
+        perturb_indices = sorted_indices[-self.kpf_perturb_best:]
 
-        """for i in range(self.num_control_inputs):
-            for j in range(self.mpc_horizon):
-                # Sort the x and y using TensorFlow operations
-                sliced_inputs = Qn[:, j, i]
+        ratio = tf.cast(tf.math.ceil(self.kpf_num_resample / self.kpf_perturb_best), dtype=tf.int32)
+        tiled_pi = tf.tile(perturb_indices, [ratio])[:self.kpf_num_resample]
 
-                sorted_indices = tf.argsort(sliced_inputs)
-                Qn_sorted = tf.gather(sliced_inputs, sorted_indices)
-                weights_sorted = tf.gather(self.kpf_weights, sorted_indices)
-                weights_cdf = tf.cumsum(weights_sorted)
-
-                uniform_samples = tf.linspace(0.0, 1.0, num_resample)  # MOVE OUT!
-
-                # Find indices for the sampled points using binary search
-                indices = tf.math.minimum(tf.searchsorted(weights_cdf, uniform_samples), self.num_rollouts - 1)
-
-                # n1 = uniform_samples
-                # n2 = tf.gather(weights_cdf, tf.math.maximum(indices - 1, 0))
-                # n3 = tf.gather(weights_cdf, indices)
-
-                prev_indices = tf.math.maximum(indices - 1, 0)
-
-                alphas = tf.math.maximum(tf.math.divide(uniform_samples - tf.gather(weights_cdf, prev_indices),
-                                                        tf.gather(weights_cdf, indices) - tf.gather(weights_cdf, prev_indices))
-                                         , 0)
-
-                samples_per_ci_per_timestep = tf.gather(Qn_sorted, prev_indices) + alphas * (tf.gather(Qn_sorted, indices) - tf.gather(Qn_sorted, prev_indices))"""
-
-        Q_kpf_res = self.sample_actions(self.rng, self.kpf_num_resample)
-
-        """trajectories = []
-        for i in range(num_resample):
-            trajectory = []
-            for j in range(self.mpc_horizon):
-                inputs_per_timestep = []
-                for k in range(self.num_control_inputs):
-                    (
-                        sample_x,
-                        _,
-                        cdf_y
-                    ) = get_interp_pdf_cdf(Qn[:, j, k],
-                                           self.action_low[k],
-                                           self.action_high[k],
-                                           self.kpf_weights,
-                                           self.kpf_cdf_interp_num)
-                    rev_sampled_input = tf_interp(uniform_samples[i, j, k], cdf_y, sample_x)
-                    inputs_per_timestep.append(rev_sampled_input)
-                trajectory.append(inputs_per_timestep)
-            trajectories.append(trajectory)
-
-        Q_kpf_res = tf.convert_to_tensor(trajectories, dtype=tf.float32)
-        Q_kpf_res = tf.reshape(Q_kpf_res, (num_resample, self.mpc_horizon, self.num_control_inputs))"""
-        # ----------------------------------------------------------------------------------------------------
-
-        return Q_kpf_res
+        Q_picked = tf.gather(Q, tiled_pi)
+        Q_final = tf.add(Q_picked, noise)
+        return Q_final
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
@@ -454,7 +468,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         unoptimized_Q = None
         unoptimized_rollout_trajectories = None
 
-        if self.visualize and self.view_unoptimized:
+        if (self.visualize and self.view_unoptimized) or self.visualize_color_coded_advanced:
             (
                 unoptimized_Q,
                 _,
@@ -492,7 +506,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         # VISUALIZE TRAJECTORIES --------------------
         if self.visualize:
-            self.TV.plot_update(self.rollout_trajectories, Qn, unoptimized_rollout_trajectories, unoptimized_Q)
+            self.TV.plot_update(self.rollout_trajectories, self.Q_tf, unoptimized_rollout_trajectories, unoptimized_Q)
         # --------------------------------------------
 
         if self.optimizer_logging:
@@ -518,23 +532,42 @@ class optimizer_rpgd_pfi(template_optimizer):
             (
                 self.kpf_weights,
                 self.kpf_num_resample,
-                total_keep_idx
+                total_keep_idx,
+                sorted_indices
             ) = self.get_kpf_weights(best_idx)
 
-            # KPF STEP ------------------------------------------------------------------------------------------------
-            Qres = self.kpf_step(Qn)
+            # self.opt_keep_k = len(total_keep_idx)
 
+            """noise = tf.random.uniform(shape=(self.kpf_num_resample,
+                                             self.mpc_horizon,
+                                             self.num_control_inputs))  # possibility to define it once instead of each time to save time"""
+
+            noise = tf.random.uniform(shape=(self.kpf_num_resample,
+                                             self.mpc_horizon,
+                                             self.num_control_inputs),
+                                      minval=self.kpf_limits_low, maxval=self.kpf_limits_high)
+
+            Qres = self.get_kpf_samples(self.Q_tf, noise, sorted_indices)
             # Qres = self.sample_actions(self.rng, self.kpf_num_resample)
-            # ------------------------------------------------------------------------------------------
 
             # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
-            if self.visualize_color_coded and self.count % self.visualize_per == 0:
+            if (self.visualize_color_coded or self.visualize_color_coded_advanced) and self.count % self.visualize_per == 0:
+                unop_trajectories, kpf_trajectories = None, None
+                if self.visualize_color_coded_advanced:
+                    (_, _, _, kpf_trajectories,) = self.get_action(s,
+                                                                   tf.concat([Qres, tf.zeros(
+                                                                       shape=(self.num_rollouts - self.kpf_num_resample,
+                                                                              self.mpc_horizon,
+                                                                              self.num_control_inputs
+                                                                              )
+                                                                   )
+                                                                              ], axis=0)
+                                                                   )
+                    unop_trajectories = unoptimized_rollout_trajectories
                 visualize_color_coded_trajectories(self.rollout_trajectories,
                                                    self.kpf_weights,
-                                                   self.cost_function.cost_function.variable_parameters.lidar_points,
-                                                   self.cost_function.cost_function.variable_parameters.next_waypoints)
-                visualize_color_coded_trajectories(unoptimized_rollout_trajectories,
-                                                   self.kpf_weights,
+                                                   unop_trajectories,
+                                                   kpf_trajectories,
                                                    self.cost_function.cost_function.variable_parameters.lidar_points,
                                                    self.cost_function.cost_function.variable_parameters.next_waypoints)
             # ---------------------------------------------------------------------------
@@ -546,7 +579,8 @@ class optimizer_rpgd_pfi(template_optimizer):
                                                       self.kpf_weights,
                                                       self.mpc_horizon,
                                                       self.kpf_cdf_interp_num,
-                                                      Qn)
+                                                      self.Q_tf,
+                                                      Qres)
             # ---------------------------------------------------------------------------
 
             Q_keep = tf.gather(Qn, total_keep_idx)
@@ -564,14 +598,14 @@ class optimizer_rpgd_pfi(template_optimizer):
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],
+                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],   # CHANGE to total_keep_idx
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 wk2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],
+                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],    # CHANGE to total_keep_idx
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,

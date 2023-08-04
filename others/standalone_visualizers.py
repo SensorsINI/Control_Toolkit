@@ -31,12 +31,17 @@ def get_interp_pdf_cdf_vis(x_val, x_min, x_max, y_val, num_interp_pts):
 # TO ACCESS LIDAR AND WAYPOINTS:
 # self.cost_function.cost_function.variable_parameters.lidar_points # (40, 2)
 # self.cost_function.cost_function.variable_parameters.next_waypoints  # (15, 7)
-def visualize_color_coded_trajectories(trajectories, weights, lidar_points=None, waypoints=None):
+def visualize_color_coded_trajectories(trajectories, weights, unop_trajectories=None, kpf_trajectories=None,
+                                       lidar_points=None, waypoints=None):
     # Create a color map for the weights (blue to red)
     cmap = plt.cm.get_cmap('RdYlBu')
 
     # Create a figure and axis
     fig, ax = plt.subplots()
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        unop_trajectories = unop_trajectories[:, :, 5:7]
+        kpf_trajectories = kpf_trajectories[:, :, 5:7]
 
     # Flatten the trajectories and weights arrays for correct association with colors
     trajectories = trajectories[:, :, 5:7]
@@ -49,11 +54,29 @@ def visualize_color_coded_trajectories(trajectories, weights, lidar_points=None,
 
     norm_weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
 
+    if unop_trajectories is not None:
+        # unoptimized rollout trajectories
+        for i in range(unop_trajectories.shape[0]):
+            ax.plot(unop_trajectories[i, :, 0],
+                    unop_trajectories[i, :, 1],
+                    color='black',
+                    alpha=0.2)
+
+    # color coded rollout trajectories
     for i in range(trajectories.shape[0]):
         ax.plot(trajectories[i, :, 0],
                 trajectories[i, :, 1],
                 color=cmap(norm_weights)[i],
                 alpha=0.5)
+
+    if kpf_trajectories is not None:
+        # newly proposed trajectories
+        for i in range(kpf_trajectories.shape[0]):
+            ax.plot(kpf_trajectories[i, :, 0],
+                    kpf_trajectories[i, :, 1],
+                    color='fuchsia',
+                    alpha=0.5,
+                    lw=1)
 
     # Plot the starting point of the first trajectory (black point)
     ax.scatter(trajectories[0, 0, 0], trajectories[0, 0, 1], s=100, color='purple')
@@ -64,8 +87,13 @@ def visualize_color_coded_trajectories(trajectories, weights, lidar_points=None,
     if waypoints is not None:
         ax.scatter(waypoints[:, 1], waypoints[:, 2], c='green', marker='D', s=20)
 
-    ax.set_xlim(np.min(trajectories[:, :, 0]), np.max(trajectories[:, :, 0]))
-    ax.set_ylim(np.min(trajectories[:, :, 1]), np.max(trajectories[:, :, 1]))
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        combined_trajectories = np.concatenate((trajectories, unop_trajectories, kpf_trajectories))
+    else:
+        combined_trajectories = trajectories
+
+    ax.set_xlim(np.min(combined_trajectories[:, :, 0]), np.max(combined_trajectories[:, :, 0]))
+    ax.set_ylim(np.min(combined_trajectories[:, :, 1]), np.max(combined_trajectories[:, :, 1]))
 
     # Set plot title and color bar
     ax.set_title('Trajectories with Color-Coded Points Based on Weight')
@@ -81,7 +109,8 @@ def visualize_color_coded_trajectories(trajectories, weights, lidar_points=None,
 
 
 # VISUALIZE DISTRIBUTION WITH WEIGHTS
-def visualize_control_input_distributions(action_low, action_high, weights, mpc_horizon, num_interp_pts, Qn):
+def visualize_control_input_distributions(action_low, action_high, weights, mpc_horizon, num_interp_pts, Qn,
+                                          Q_kpf=None):
     # Define the limits for the 2D space visualization
     ac_min, ac_max = action_low[0], action_high[0]
     tc_min, tc_max = action_low[1], action_high[1]
@@ -122,6 +151,11 @@ def visualize_control_input_distributions(action_low, action_high, weights, mpc_
                   align='center', alpha=0.5)
         ax_tc.scatter(tc_control_inputs, weights, color='black', s=10, zorder=2)
 
+        if Q_kpf is not None:
+            y = tf.ones(shape=(Q_kpf.shape[0],)) * ((y_max - y_min) * 0.1 + y_min)
+            ax_ac.scatter(Q_kpf[:, timestep, 0], y, color='purple', s=10, zorder=2)
+            ax_tc.scatter(Q_kpf[:, timestep, 1], y, color='purple', s=10, zorder=2)
+
         (
             ac_ci_interp,
             ac_pdf_interp,
@@ -135,14 +169,14 @@ def visualize_control_input_distributions(action_low, action_high, weights, mpc_
         ) = get_interp_pdf_cdf_vis(tc_control_inputs, tc_min, tc_max, weights, num_interp_pts)
 
         # plot pdf
-        ac_pdf_image = ac_pdf_interp / np.sum(ac_pdf_interp)
-        tc_pdf_image = tc_pdf_interp / np.sum(tc_pdf_interp)
+        ac_pdf_image = ac_pdf_interp * (y_max - y_min) + y_min
+        tc_pdf_image = tc_pdf_interp * (y_max - y_min) + y_min
         ax_ac.plot(ac_ci_interp, ac_pdf_image, color='green', label='INT. PDF')
         ax_tc.plot(tc_ci_interp, tc_pdf_image, color='green', label='INT. PDF')
 
         # normalize and fit the cdf
-        ac_cdf_image = ac_cdf_interp / ac_cdf_interp[-1] * (y_max - y_min)
-        tc_cdf_image = tc_cdf_interp / tc_cdf_interp[-1] * (y_max - y_min)
+        ac_cdf_image = ac_cdf_interp / ac_cdf_interp[-1] * (y_max - y_min) + y_min
+        tc_cdf_image = tc_cdf_interp / tc_cdf_interp[-1] * (y_max - y_min) + y_min
 
         # plot cdf
         ax_ac.plot(ac_ci_interp, ac_cdf_image, color='red', label='CDF')
@@ -153,7 +187,7 @@ def visualize_control_input_distributions(action_low, action_high, weights, mpc_
         ax_tc.set_title(f'TC Control Input vs. Weight (Timestep {timestep + 1})')
 
         # Show the plot
-        plt.waitforbuttonpress()  # Add a pause to show the plot for a short time
+        plt.waitforbuttonpress()
 
         # Clear the subplots for the next timestep
         ax_ac.clear()
