@@ -26,7 +26,7 @@ class controller_fpga(template_controller):
     def configure(self):
 
 
-        SERIAL_PORT = self.config_controller["SERIAL_PORT"]
+        SERIAL_PORT = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
         SERIAL_BAUD = self.config_controller["SERIAL_BAUD"]
 
         self.InterfaceInstance = Interface()
