@@ -34,7 +34,7 @@ class controller_neural_imitator(template_controller):
         # Create a copy of the network suitable for inference (stateful and with sequence length one)
         self.net, self.net_info = \
             get_net(a, time_series_length=1,
-                    batch_size=self.batch_size, stateful=True)
+                    batch_size=self.batch_size, stateful=True, remove_redundant_dimensions=True)
 
         self.normalization_info = get_norm_info_for_net(self.net_info)
         self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)

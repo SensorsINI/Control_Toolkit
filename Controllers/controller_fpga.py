@@ -91,7 +91,7 @@ class controller_fpga(template_controller):
         net_input = self.lib.to_numpy(net_input)
 
         net_output = self.get_net_output_from_fpga(net_input)
-
+        net_output = np.flip(net_output)
         net_output = self.lib.to_tensor(net_output, self.lib.float32)
 
         net_output = self.denormalize_outputs(net_output)
@@ -194,11 +194,15 @@ class Interface:
     def receive_net_output(self):
         # self.clear_read_buffer()
         # reply = self._receive_reply(4, READ_STATE_TIMEOUT)
-        net_output = self.device.read(size=4)
-        # net_output = struct.unpack('=3hBIH', bytes(net_output[3:16]))
-        net_output = struct.unpack('<f', net_output)
+        net_outputs = []
+        for i in range(2):
+            net_output = self.device.read(size=4)
+            # net_output = struct.unpack('=3hBIH', bytes(net_output[3:16]))
+            net_output = struct.unpack('<f', net_output)
+            net_outputs.append(net_output[0])
+        net_outputs = np.array(net_outputs)
         # net_output=reply
-        return net_output
+        return net_outputs
 
     def _receive_reply(self, cmdLen, timeout=None, crc=True):
         self.device.timeout = timeout
