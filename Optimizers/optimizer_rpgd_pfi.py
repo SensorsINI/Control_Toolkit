@@ -212,97 +212,34 @@ class optimizer_rpgd_pfi(template_optimizer):
         return Qn
 
     @CompileTF
-    def kpf_step(self, best_idx):
-        rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
-
-        x = self.rollout_trajectories[:, :, 5]
-        y = self.rollout_trajectories[:, :, 6]
-
-        d_x = x[:, None] - x
-        d_y = y[:, None] - y
-
-        distances = tf.sqrt(tf.square(d_x) + tf.square(d_y))
-
-        distances_sum = tf.reduce_sum(distances, axis=2)
-
-        # distances_sum = distances[:, :, 0]
-
-        # g_distances = 1 - tf.exp(-distances_sum ** 2 / (2 * self.kpf_g_sigma ** 2))
-        g_distances = distances_sum
-
-        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)
-        divergence_metric = tf.reduce_min(g_distances, axis=1)
-
-        """g_distances = tf.linalg.set_diag(g_distances, tf.zeros(rt_dim1))
-        divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
-
-        # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
-        # becomes (n_rollouts x n_chosen_output_states)
-        """squeezed_rt = tf.reshape(self.rollout_trajectories[:, :, 5:7], (rt_dim1, rt_dim2 * 2))
-        distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
-
-        # width of Gaussian kernel and distances
-        g_distances = 1 - tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
-        g_distances = tf.linalg.set_diag(g_distances, tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
-
-        # find the closest similarity to any neighbor, use that as a divergence metric
-        divergence_metric = tf.reduce_min(g_distances, axis=1)
-        # divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
-        # -------------------------------------------------------------------------------------------------------
-
-        # METHOD 2 - calculate the distances between endpoints--------------------------------------------------
-        """reshaped_rt = tf.reshape(self.rollout_trajectories[:, rt_dim2 - 1, 5:7], (rt_dim1, 1, 2))
-        end_rollout_trajectories = tf.squeeze(reshaped_rt, axis=1)
-        distances = tf.norm(end_rollout_trajectories[:, None] - end_rollout_trajectories, axis=-1)
-
-        distances = tf.linalg.set_diag(distances, tf.ones(rt_dim1) * np.inf)
-        divergence_metric = tf.reduce_min(distances, axis=1)"""
-
-        # get threshold distance for resampling
-        # threshold_distance = tf.cast(tf.reduce_max(worst_values), dtype=tf.float32)
-        # -------------------------------------------------------------------------------------------------------
-
-        # find indices of furthest (best) points according to predefined kpf_keep_number
-        # divergence_metric decreases with more similarity
-        sorted_indices = tf.argsort(divergence_metric)
-        furthest_indices = sorted_indices[-self.kpf_keep_number:]
-        # furthest_indices = tf.math.top_k(divergence_metric, k=self.kpf_keep_number).indices
-        total_keep_idx = tf.concat([furthest_indices, best_idx[:self.kpf_keep_best]], 0)
-        total_keep_idx, _ = tf.unique(total_keep_idx)
-        total_keep_idx = tf.cast(total_keep_idx, tf.int32)
-
-        num_resample = self.num_rollouts - len(total_keep_idx)
-
-        kpf_weights = divergence_metric / tf.reduce_sum(divergence_metric)
-
-        # return self.sample_actions(self.rng, self.kpf_num_resample)
-
-        # return self.sample_actions(self.rng, self.kpf_num_resample)
-        perturb_indices = sorted_indices[-self.kpf_perturb_best:]
-
-        ratio = tf.cast(tf.math.ceil(num_resample / self.kpf_perturb_best), dtype=tf.int32)
-        tiled_pi = tf.tile(perturb_indices, [ratio])[:self.kpf_num_resample]
-
-        Q_picked = tf.gather(Q, tiled_pi)
-        Q_final = tf.add(Q_picked, noise)
-
-        return kpf_weights, num_resample, total_keep_idx, Q_final
-
-    @CompileTF
     def get_kpf_weights(self, best_idx):
         rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
 
-        x = self.rollout_trajectories[:, :, 5]
+        sliced_rt = self.rollout_trajectories[:, :, 5:7]
+
+        squeezed_rt = tf.reshape(sliced_rt, shape=(rt_dim1, rt_dim2 * sliced_rt.shape[2]))
+        distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
+
+        g_similarity = tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
+        g_similarity = tf.linalg.set_diag(g_similarity, -tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
+
+        # find the closest similarity to any neighbor, use that as a divergence metric
+        divergence_metric = tf.reduce_min(1 - g_similarity, axis=1)
+        # divergence_metric = tf.reduce_mean(1 - g_similarity, axis=1)"""
+
+
+        '''x = self.rollout_trajectories[:, :, 5]
         y = self.rollout_trajectories[:, :, 6]
+
+        new_x = x[:, None]
+        new_y = y[:, None]
 
         d_x = x[:, None] - x
         d_y = y[:, None] - y
 
         distances = tf.sqrt(tf.square(d_x) + tf.square(d_y))
 
-        distances_sum = tf.reduce_sum(distances, axis=2)
-
-        # distances_sum = distances[:, :, 0]
+        distances_sum = tf.reduce_mean(distances, axis=2)
 
         # g_distances = 1 - tf.exp(-distances_sum ** 2 / (2 * self.kpf_g_sigma ** 2))
         g_distances = distances_sum
@@ -311,7 +248,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         divergence_metric = tf.reduce_min(g_distances, axis=1)
 
         """g_distances = tf.linalg.set_diag(g_distances, tf.zeros(rt_dim1))
-        divergence_metric = tf.reduce_mean(g_distances, axis=1)"""
+        divergence_metric = tf.reduce_mean(g_distances, axis=1)"""'''
 
         # METHOD 1 - trajectory similarity using kernels-------------------------------------------------------
         # becomes (n_rollouts x n_chosen_output_states)
