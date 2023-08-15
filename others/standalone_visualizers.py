@@ -240,3 +240,57 @@ def visualize_control_input_distributions(action_low, action_high, weights, mpc_
 
     # Close the figure after all timesteps are shown
     plt.close(fig)"""
+
+
+def visualize_control_input_2d(action_low, action_high, weights, mpc_horizon, Qn, Q_kpf=None, Q_unop=None):
+    # Define the limits for the 2D space visualization
+    ac_min, ac_max = action_low[0], action_high[0]
+    tc_min, tc_max = action_low[1], action_high[1]
+
+    num_timesteps = mpc_horizon
+
+    # Create a figure and two subplots (one for AC control input and one for TC control input)
+    fig, ax = plt.subplots()
+
+    # Set the x-axis limits and labels for both subplots
+    ax.set_xlim(ac_min, ac_max)
+    ax.set_xlabel('Angular Control (AC)')
+    ax.set_ylim(tc_min, tc_max)
+    ax.set_ylabel('Translational Control (TC)')
+
+    if Q_unop is not None:
+        for i in range(Q_unop.shape[0]):
+            trajectory_ac = Q_unop[i, :, 0]
+            trajectory_tc = Q_unop[i, :, 1]
+
+            ax.plot(trajectory_ac, trajectory_tc, color='black', label='Q_unoptimized')
+            ax.scatter(trajectory_ac, trajectory_tc, color='black')
+
+    # Get control inputs and weights for the current timestep
+    for i in range(Qn.shape[0]):
+        trajectory_ac = Qn[i, :, 0]
+        trajectory_tc = Qn[i, :, 1]
+
+        ax.scatter(trajectory_ac, trajectory_tc, color='red')
+        ax.plot(trajectory_ac, trajectory_tc, color='red', label='Qn')
+
+    if Q_kpf is not None:
+        for i in range(Q_kpf.shape[0]):
+            trajectory_ac = Q_kpf[i, :, 0]
+            trajectory_tc = Q_kpf[i, :, 1]
+
+            ax.plot(trajectory_ac, trajectory_tc, color='green', label='Q_resampled')
+            ax.scatter(trajectory_ac, trajectory_tc, color='green')
+
+    # Update the plot titles for both subplots
+    ax.set_title(f'Control Inputs in 2D')
+
+    # Show the plot
+    plt.waitforbuttonpress()
+
+    """# Clear the subplots for the next timestep
+    ax_ac.clear()
+    ax_tc.clear()"""
+
+    # Close the figure after all timesteps are shown
+    plt.close()

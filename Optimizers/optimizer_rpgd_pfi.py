@@ -69,6 +69,7 @@ class optimizer_rpgd_pfi(template_optimizer):
             visualize_color_coded: bool,
             visualize_color_coded_advanced: bool,
             visualize_control_distributions: bool,
+            visualize_control_2d: bool,
             visualize_per: int,
             kpf_g_sigma: float,
             kpf_cdf_interp_num: int,
@@ -141,6 +142,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.visualize_color_coded = visualize_color_coded
         self.visualize_color_coded_advanced = visualize_color_coded_advanced
         self.visualize_control_distributions = visualize_control_distributions
+        self.visualize_control_2d = visualize_control_2d
         self.visualize_per = visualize_per
 
         # Kinda Particle Filter:
@@ -157,7 +159,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.kpf_g_sigma = kpf_g_sigma
         self.kpf_cdf_interp_num = kpf_cdf_interp_num
         self.kpf_num_resample = 0
-        self.kpf_limits_low = - (self.action_high - self.action_low) / 5
+        self.kpf_limits_low = - (self.action_high - self.action_low) / 10
         self.kpf_limits_high = - self.kpf_limits_low
         self.kpf_perturb_best = kpf_perturb_best
 
@@ -215,17 +217,17 @@ class optimizer_rpgd_pfi(template_optimizer):
     def get_kpf_weights(self, best_idx):
         rt_dim1, rt_dim2, rt_dim3 = self.rollout_trajectories.shape
 
-        sliced_rt = self.rollout_trajectories[:, :, 5:7]
+        sliced_rt = self.rollout_trajectories[:, :, 5:7]  # makes sense to select 5 and 6 (x,y) in last dim
 
         squeezed_rt = tf.reshape(sliced_rt, shape=(rt_dim1, rt_dim2 * sliced_rt.shape[2]))
         distances = tf.norm(squeezed_rt[:, None] - squeezed_rt, axis=-1)
 
         g_similarity = tf.exp(-distances ** 2 / (2 * self.kpf_g_sigma ** 2))
-        g_similarity = tf.linalg.set_diag(g_similarity, -tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
+        g_similarity = tf.linalg.set_diag(g_similarity, tf.ones(rt_dim1) * 1)  # np.inf if not reduce_min below!
 
         # find the closest similarity to any neighbor, use that as a divergence metric
-        divergence_metric = tf.reduce_min(1 - g_similarity, axis=1)
-        # divergence_metric = tf.reduce_mean(1 - g_similarity, axis=1)"""
+        # divergence_metric = tf.reduce_min(1 - g_similarity, axis=1)
+        divergence_metric = tf.reduce_mean(1 - g_similarity, axis=1)
 
 
         '''x = self.rollout_trajectories[:, :, 5]
@@ -309,6 +311,7 @@ class optimizer_rpgd_pfi(template_optimizer):
 
         Q_picked = tf.gather(Q, tiled_pi)
         Q_final = tf.add(Q_picked, noise)
+
         return Q_final
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
@@ -405,7 +408,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         unoptimized_Q = None
         unoptimized_rollout_trajectories = None
 
-        if (self.visualize and self.view_unoptimized) or self.visualize_color_coded_advanced:
+        if (self.visualize and self.view_unoptimized) or self.visualize_color_coded_advanced or self.visualize_control_2d:
             (
                 unoptimized_Q,
                 _,
@@ -484,8 +487,8 @@ class optimizer_rpgd_pfi(template_optimizer):
                                              self.num_control_inputs),
                                       minval=self.kpf_limits_low, maxval=self.kpf_limits_high)
 
-            Qres = self.get_kpf_samples(self.Q_tf, noise, sorted_indices)
-            # Qres = self.sample_actions(self.rng, self.kpf_num_resample)
+            # Qres = self.get_kpf_samples(self.Q_tf, noise, sorted_indices)
+            Qres = self.sample_actions(self.rng, self.kpf_num_resample)
 
             # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
             if (self.visualize_color_coded or self.visualize_color_coded_advanced) and self.count % self.visualize_per == 0:
@@ -518,6 +521,17 @@ class optimizer_rpgd_pfi(template_optimizer):
                                                       self.kpf_cdf_interp_num,
                                                       self.Q_tf,
                                                       Qres)
+            # ---------------------------------------------------------------------------
+
+            # VISUALIZE CONTROL INPUTS IN 2D ---------------------------------------
+            if self.visualize_control_2d and self.count % self.visualize_per == 0:
+                visualize_control_input_2d(self.action_low,
+                                           self.action_high,
+                                           self.kpf_weights,
+                                           self.mpc_horizon,
+                                           self.Q_tf,
+                                           Qres,
+                                           unoptimized_Q)
             # ---------------------------------------------------------------------------
 
             Q_keep = tf.gather(Qn, total_keep_idx)
