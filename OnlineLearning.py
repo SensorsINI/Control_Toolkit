@@ -23,12 +23,24 @@ class OnlineLearning:
             self.normalize_outputs = get_normalization_function(self.normalization_info, self.predictor.predictor.net_info.outputs, self.lib)
             self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.predictor.predictor.net_info.outputs, self.lib)
 
+        self.get_optimizer()
         self.predictor.predictor.net.compile(
             loss=loss_msr_sequence_customizable(wash_out_len=0,
                                                 post_wash_out_len=1,
                                                 discount_factor=1.0),
-            optimizer=keras.optimizers.Adam(1e-2)
+            optimizer=self.optimizer
         )
+        self.predictor.predictor.net.optimizer.lr = self.lr
+
+
+    def get_optimizer(self):
+        optimizer = self.config['optimizer']
+        if optimizer.lower() == 'sgd':
+            self.lr = self.config['optimizers']['SGD']['lr']
+            self.optimizer = tf.keras.optimizers.SGD(self.lr)
+        elif optimizer.lower() == 'adam':
+            self.lr = self.config['optimizers']['adam']['lr']
+            self.optimizer = tf.keras.optimizers.Adam(self.lr)
 
     def step(self, s, u, time, updated_attributes):
         if self.normalize:
