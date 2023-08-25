@@ -88,8 +88,9 @@ class controller_mpc(template_controller):
             num_control_inputs=self.predictor.num_control_inputs,
         )
 
-        self.online_learning_activated = self.config_controller.get('online_learning_activated')
-        self.online_learning = OnlineLearning(self.predictor, self.config_controller['dt'])
+        self.online_learning_activated = self.config_controller['online_learning']['activated']
+        if self.online_learning_activated:
+            self.online_learning = OnlineLearning(self.predictor, self.config_controller['dt'], self.config_controller['online_learning'])
 
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
