@@ -6,6 +6,29 @@ from SI_Toolkit.computation_library import TensorFlowLibrary
 from SI_Toolkit.Functions.General.Normalising import get_denormalization_function, get_normalization_function
 
 
+class TrainingBuffer:
+    def __init__(self, buffer_length):
+        self.input_buffer = []
+        self.ground_truth_buffer = []
+        self.buffer_length = buffer_length
+
+    def append(self, datapoint):
+        self.input_buffer.append(datapoint[0])
+        self._cut_buffer(self.input_buffer)
+        self.ground_truth_buffer.append(datapoint[1])
+        self._cut_buffer(self.ground_truth_buffer)
+
+    def _cut_buffer(self, buffer):
+        if len(buffer) > self.buffer_length:
+            buffer.pop(0)
+
+    def input_array(self):
+        return np.concatenate(self.input_buffer)
+
+    def ground_truth_array(self):
+        return np.concatenate(self.ground_truth_buffer)
+
+
 class OnlineLearning:
     def __init__(self, predictor, dt, config):
         self.predictor = predictor
@@ -15,6 +38,7 @@ class OnlineLearning:
 
         self.s_previous = None
         self.u_previous = None
+        self.training_buffer = TrainingBuffer(config['buffer_length'])
 
         self.normalization_info = self.predictor.predictor.normalization_info
         self.lib = TensorFlowLibrary
@@ -37,7 +61,8 @@ class OnlineLearning:
         optimizer = self.config['optimizer']
         if optimizer.lower() == 'sgd':
             self.lr = self.config['optimizers']['SGD']['lr']
-            self.optimizer = tf.keras.optimizers.SGD(self.lr)
+            self.momentum = self.config['optimizers']['SGD']['momentum']
+            self.optimizer = tf.keras.optimizers.SGD(self.lr, self.momentum)
         elif optimizer.lower() == 'adam':
             self.lr = self.config['optimizers']['adam']['lr']
             self.optimizer = tf.keras.optimizers.Adam(self.lr)
@@ -54,12 +79,18 @@ class OnlineLearning:
 
             if np.any(['D_' in output_name for output_name in self.predictor.predictor.net_info.outputs]):
                 delta_s = (s - self.s_previous) / self.dt
-                s_measured = tf.reshape(delta_s, [1, len(delta_s)])
+                s_measured = tf.reshape(delta_s, [1, 1, len(delta_s)])
             else:
-                s_measured = s
+                s_measured = tf.reshape(s, [1, 1, len(s)])
 
-            self.predictor.predictor.net.fit(net_input, s_measured, batch_size=1, epochs=1)
+            self.training_buffer.append((net_input.numpy(), s_measured.numpy()))
 
+            # Retrain network
+            if self.N_step % self.config['train_every_n_steps'] == 0:
+                self.predictor.predictor.net.fit(self.training_buffer.input_array(), self.training_buffer.ground_truth_array(),
+                                                 batch_size=self.config['batch_size'], epochs=self.config['epochs_per_training'], callbacks=[])
+                print(f'{self.predictor.predictor.net.car_parameters_tf["mu"].numpy()}')
 
+        self.N_step += 1
         self.s_previous = s
         self.u_previous = u
