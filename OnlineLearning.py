@@ -56,6 +56,31 @@ class OnlineLearning:
         )
         self.predictor.predictor.net.optimizer.lr = self.lr
 
+        self.N_step = 0
+        self.training_step = 0
+        self.last_steps_with_higher_loss = 0
+        self.hist = None
+        self.last_loss = np.inf
+
+    def update_learning_rate(self):
+        config = self.config['exponential_lr_decay']
+        if config['activated']:
+            self.lr = self.lr_init * pow(config['decay_rate'], self.training_step)
+
+        config = self.config['reduce_lr_on_plateau']
+        loss = self.hist.history['loss'][0]  # Only loss from last epoch
+        if config['activated']:
+            if loss - self.last_loss > config['min_delta']:
+                self.last_steps_with_higher_loss += 1
+            else:
+                self.last_steps_with_higher_loss = 0
+
+            if self.last_steps_with_higher_loss >= config['patience']:
+                self.lr = max(config['min_lr'], config['factor'] * self.lr)
+                print(f'Reduce lr on plateau to {self.lr}')
+            self.last_loss = loss
+
+        self.predictor.predictor.net.optimizer.lr = self.lr
 
     def get_optimizer(self):
         optimizer = self.config['optimizer']
@@ -66,6 +91,7 @@ class OnlineLearning:
         elif optimizer.lower() == 'adam':
             self.lr = self.config['optimizers']['adam']['lr']
             self.optimizer = tf.keras.optimizers.Adam(self.lr)
+        self.lr_init = self.lr
 
     def step(self, s, u, time, updated_attributes):
         if self.normalize:
@@ -87,8 +113,11 @@ class OnlineLearning:
 
             # Retrain network
             if self.N_step % self.config['train_every_n_steps'] == 0:
-                self.predictor.predictor.net.fit(self.training_buffer.input_array(), self.training_buffer.ground_truth_array(),
-                                                 batch_size=self.config['batch_size'], epochs=self.config['epochs_per_training'], callbacks=[])
+                self.hist = self.predictor.predictor.net.fit(self.training_buffer.input_array(), self.training_buffer.ground_truth_array(),
+                                                             batch_size=self.config['batch_size'], epochs=self.config['epochs_per_training'],
+                                                             callbacks=[])
+                self.training_step += 1
+                self.update_learning_rate()
                 print(f'{self.predictor.predictor.net.car_parameters_tf["mu"].numpy()}')
 
         self.N_step += 1
