@@ -34,7 +34,9 @@ def get_interp_pdf_cdf_vis(x_val, x_min, x_max, y_val, num_interp_pts):
 def visualize_color_coded_trajectories(trajectories, weights, unop_trajectories=None, kpf_trajectories=None,
                                        lidar_points=None, waypoints=None):
     # Create a color map for the weights (blue to red)
-    cmap = plt.cm.get_cmap('RdYlBu')
+    cmap = plt.cm.get_cmap('coolwarm')
+    # REVERSE COLOR ORDER
+    # weights = - weights
 
     # Create a figure and axis
     fig, ax = plt.subplots()
@@ -96,9 +98,9 @@ def visualize_color_coded_trajectories(trajectories, weights, unop_trajectories=
     ax.set_ylim(np.min(combined_trajectories[:, :, 1]), np.max(combined_trajectories[:, :, 1]))
 
     # Set plot title and color bar
-    ax.set_title('Trajectories with Color-Coded Points Based on Weight')
+    ax.set_title('Trajectories with Color-Coded Points Based on Divergence Metrics')
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label('Weight')
+    cbar.set_label('Divergence Metric')
 
     # Show the plot
     plt.show(block=False)

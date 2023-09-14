@@ -26,7 +26,7 @@ import math
 logger = get_logger(__name__)
 
 
-class optimizer_rpgd_pfi(template_optimizer):
+class optimizer_rpgd_pe(template_optimizer):
     supported_computation_libraries = {TensorFlowLibrary}
 
     def __init__(
@@ -231,8 +231,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         distances = distances0 / tf.reduce_max(distances0)
 
         g_similarity = tf.exp(-(distances ** 2) / (2 * self.kpf_g_sigma ** 2))
-        g_similarity_min = tf.linalg.set_diag(g_similarity,
-                                              - tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
+        g_similarity_min = tf.linalg.set_diag(g_similarity, - tf.ones(rt_dim1) * np.inf)  # np.inf if not reduce_min below!
 
         # find the closest similarity to any neighbor, use that as a divergence metric
         divergence_metric_min = tf.reduce_min(1 - g_similarity_min, axis=1)
@@ -408,8 +407,7 @@ class optimizer_rpgd_pfi(template_optimizer):
         unoptimized_Q = None
         unoptimized_rollout_trajectories = None
 
-        if (
-                self.visualize and self.view_unoptimized) or self.visualize_color_coded_advanced or self.visualize_control_2d:
+        if (self.visualize and self.view_unoptimized) or self.visualize_color_coded_advanced or self.visualize_control_2d:
             (
                 _,
                 _,
@@ -473,25 +471,12 @@ class optimizer_rpgd_pfi(template_optimizer):
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs"""
 
-            inputs = tf.random.uniform(shape=(self.num_rollouts,
-                                              self.mpc_horizon,
-                                              self.num_control_inputs),
-                                       minval=self.action_low, maxval=self.action_high)
-
-            (
-                new_q,
-                _,
-                _,
-                _,
-                new_rollout_trajectories,
-            ) = self.get_action(s, inputs)
-
             (
                 self.kpf_weights,
                 self.kpf_num_resample,
                 kpf_perturb_idx,
                 sorted_indices
-            ) = self.get_kpf_weights(best_idx, new_rollout_trajectories)
+            ) = self.get_kpf_weights(best_idx, self.rollout_trajectories)
 
             total_keep_idx = best_idx
 
@@ -511,23 +496,21 @@ class optimizer_rpgd_pfi(template_optimizer):
                                               dtype=tf.float32)
             random_pick_perturb = tf.cast(random_floats, dtype=tf.int32)
 
-            Qres = self.get_kpf_samples(new_q, noise, random_pick_perturb, kpf_perturb_idx)
+            Qres = self.get_kpf_samples(self.Q_tf, noise, random_pick_perturb, kpf_perturb_idx)
             # Qres = self.sample_actions(self.rng, self.kpf_num_resample)
 
             # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
-            if (
-                    self.visualize_color_coded or self.visualize_color_coded_advanced) and self.count % self.visualize_per == 0:
+            if (self.visualize_color_coded or self.visualize_color_coded_advanced) and self.count % self.visualize_per == 0:
                 unop_trajectories, kpf_trajectories = None, None
                 if self.visualize_color_coded_advanced:
                     (_, _, _, _, kpf_trajectories,) = self.get_action(s,
                                                                       tf.concat([Qres, tf.zeros(
-                                                                          shape=(
-                                                                          self.num_rollouts - self.kpf_num_resample,
-                                                                          self.mpc_horizon,
-                                                                          self.num_control_inputs
-                                                                          )
-                                                                      )
-                                                                                 ], axis=0)
+                                                                        shape=(self.num_rollouts - self.kpf_num_resample,
+                                                                               self.mpc_horizon,
+                                                                               self.num_control_inputs
+                                                                               )
+                                                                                )
+                                                                      ], axis=0)
                                                                       )
                     unop_trajectories = unoptimized_rollout_trajectories
                 visualize_color_coded_trajectories(self.rollout_trajectories,
@@ -575,14 +558,14 @@ class optimizer_rpgd_pfi(template_optimizer):
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
-                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],  # CHANGE to total_keep_idx
+                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],   # CHANGE to total_keep_idx
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
                 wk2 = tf.concat(
                     [
-                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],  # CHANGE to total_keep_idx
+                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],    # CHANGE to total_keep_idx
                         tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
@@ -658,7 +641,10 @@ class optimizer_rpgd_pfi(template_optimizer):
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
 
-        # GRAVEYARD
+
+
+
+# GRAVEYARD
 
         '''x = self.rollout_trajectories[:, :, 5]
         y = self.rollout_trajectories[:, :, 6]
