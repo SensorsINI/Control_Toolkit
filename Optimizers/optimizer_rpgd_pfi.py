@@ -514,6 +514,36 @@ class optimizer_rpgd_pfi(template_optimizer):
             Qres = self.get_kpf_samples(new_q, noise, random_pick_perturb, kpf_perturb_idx)
             # Qres = self.sample_actions(self.rng, self.kpf_num_resample)
 
+            if False and self.count % 20 == 0:
+                (_, _, _, _, kpf_trajectories,) = self.get_action(s,
+                                                                  tf.concat([Qres, tf.zeros(
+                                                                      shape=(self.num_rollouts - self.kpf_num_resample,
+                                                                             self.mpc_horizon,
+                                                                             self.num_control_inputs
+                                                                             )
+                                                                  )
+                                                                             ], axis=0)
+                                                                  )
+                unop_trajectories = unoptimized_rollout_trajectories
+                visualize_obstacles(self.rollout_trajectories,
+                                   self.kpf_weights,
+                                   unop_trajectories,
+                                   kpf_trajectories,
+                                   self.cost_function.cost_function.variable_parameters.lidar_points,
+                                   self.cost_function.cost_function.variable_parameters.next_waypoints)
+                visualize_obstacles_rt(self.rollout_trajectories,
+                                    self.kpf_weights,
+                                    unop_trajectories,
+                                    kpf_trajectories,
+                                    self.cost_function.cost_function.variable_parameters.lidar_points,
+                                    self.cost_function.cost_function.variable_parameters.next_waypoints)
+                visualize_obstacles_kpf(self.rollout_trajectories,
+                                    self.kpf_weights,
+                                    unop_trajectories,
+                                    kpf_trajectories,
+                                    self.cost_function.cost_function.variable_parameters.lidar_points,
+                                    self.cost_function.cost_function.variable_parameters.next_waypoints)
+
             # VISUALIZE COLOR CODED TRAJECTORIES-----------------------------------------
             if (
                     self.visualize_color_coded or self.visualize_color_coded_advanced) and self.count % self.visualize_per == 0:

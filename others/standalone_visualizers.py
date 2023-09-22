@@ -110,6 +110,7 @@ def visualize_color_coded_trajectories(trajectories, weights, unop_trajectories=
     plt.close()
 
 
+
 # VISUALIZE DISTRIBUTION WITH WEIGHTS
 def visualize_control_input_distributions(action_low, action_high, weights, mpc_horizon, num_interp_pts, Qn,
                                           Q_kpf=None):
@@ -295,4 +296,251 @@ def visualize_control_input_2d(action_low, action_high, weights, mpc_horizon, Qn
     ax_tc.clear()"""
 
     # Close the figure after all timesteps are shown
+    plt.close()
+
+
+
+
+
+
+
+
+
+
+
+
+def visualize_obstacles(trajectories, weights, unop_trajectories=None, kpf_trajectories=None,
+                                       lidar_points=None, waypoints=None):
+    # Create a color map for the weights (blue to red)
+    cmap = plt.cm.get_cmap('coolwarm')
+    # REVERSE COLOR ORDER
+    # weights = - weights
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        unop_trajectories = unop_trajectories[:, :, 5:7]
+        kpf_trajectories = kpf_trajectories[:, :, 5:7]
+
+    # Flatten the trajectories and weights arrays for correct association with colors
+    trajectories = trajectories[:, :, 5:7]
+    flat_trajectories = trajectories.numpy().reshape(-1, 2)
+    flat_weights = np.repeat(weights, trajectories.shape[1])
+
+    # Plot all points with a single scatter plot to apply the colormap correctly
+    """scatter = ax.scatter(flat_trajectories[:, 0], flat_trajectories[:, 1], s=2, cmap=cmap, c=flat_weights,
+                         vmin=np.min(weights), vmax=np.max(weights))"""
+
+    norm_weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
+
+    """if unop_trajectories is not None:
+        # unoptimized rollout trajectories
+        for i in range(unop_trajectories.shape[0]):
+            ax.plot(unop_trajectories[i, :, 0],
+                    unop_trajectories[i, :, 1],
+                    color='black',
+                    alpha=0.2)"""
+
+    # color coded rollout trajectories
+    """for i in range(trajectories.shape[0]):
+        ax.plot(trajectories[i, :, 0],
+                trajectories[i, :, 1],
+                color=cmap(norm_weights)[i],
+                alpha=0.5)"""
+
+    """if kpf_trajectories is not None:
+        # newly proposed trajectories
+        for i in range(kpf_trajectories.shape[0]):
+            ax.plot(kpf_trajectories[i, :, 0],
+                    kpf_trajectories[i, :, 1],
+                    color='fuchsia',
+                    alpha=0.5,
+                    lw=1)"""
+
+    # Plot the starting point of the first trajectory (black point)
+    ax.scatter(trajectories[0, 0, 0], trajectories[0, 0, 1], s=100, color='purple')
+
+    if lidar_points is not None:
+        ax.scatter(lidar_points[:, 0], lidar_points[:, 1], c='black', marker='P', s=20)
+
+    if waypoints is not None:
+        ax.scatter(waypoints[:, 1], waypoints[:, 2], c='green', marker='D', s=20)
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        combined_trajectories = np.concatenate((trajectories, unop_trajectories, kpf_trajectories))
+    else:
+        combined_trajectories = trajectories
+
+    ax.set_xlim(np.min(combined_trajectories[:, :, 0]), np.max(combined_trajectories[:, :, 0]))
+    ax.set_ylim(np.min(combined_trajectories[:, :, 1]), np.max(combined_trajectories[:, :, 1]))
+
+    # Set plot title and color bar
+    ax.set_title('Waypoints and Lidar Scans')
+    """cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Divergence Metric')"""
+
+    # Show the plot
+    plt.show(block=False)
+
+    plt.waitforbuttonpress()
+    # plt.pause(2)
+    plt.close()
+
+
+def visualize_obstacles_rt(trajectories, weights, unop_trajectories=None, kpf_trajectories=None,
+                                       lidar_points=None, waypoints=None):
+    # Create a color map for the weights (blue to red)
+    cmap = plt.cm.get_cmap('coolwarm')
+    # REVERSE COLOR ORDER
+    # weights = - weights
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        unop_trajectories = unop_trajectories[:, :, 5:7]
+        kpf_trajectories = kpf_trajectories[:, :, 5:7]
+
+    # Flatten the trajectories and weights arrays for correct association with colors
+    trajectories = trajectories[:, :, 5:7]
+    flat_trajectories = trajectories.numpy().reshape(-1, 2)
+    flat_weights = np.repeat(weights, trajectories.shape[1])
+
+    # Plot all points with a single scatter plot to apply the colormap correctly
+    scatter = ax.scatter(flat_trajectories[:, 0], flat_trajectories[:, 1], s=2, cmap=cmap, c=flat_weights,
+                         vmin=np.min(weights), vmax=np.max(weights))
+
+    norm_weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
+
+    """if unop_trajectories is not None:
+        # unoptimized rollout trajectories
+        for i in range(unop_trajectories.shape[0]):
+            ax.plot(unop_trajectories[i, :, 0],
+                    unop_trajectories[i, :, 1],
+                    color='black',
+                    alpha=0.2)"""
+
+    # color coded rollout trajectories
+    for i in range(trajectories.shape[0]):
+        ax.plot(trajectories[i, :, 0],
+                trajectories[i, :, 1],
+                color=cmap(norm_weights)[i],
+                alpha=0.5)
+
+    """if kpf_trajectories is not None:
+        # newly proposed trajectories
+        for i in range(kpf_trajectories.shape[0]):
+            ax.plot(kpf_trajectories[i, :, 0],
+                    kpf_trajectories[i, :, 1],
+                    color='fuchsia',
+                    alpha=0.5,
+                    lw=1)"""
+
+    # Plot the starting point of the first trajectory (black point)
+    ax.scatter(trajectories[0, 0, 0], trajectories[0, 0, 1], s=100, color='purple')
+
+    if lidar_points is not None:
+        ax.scatter(lidar_points[:, 0], lidar_points[:, 1], c='black', marker='P', s=20)
+
+    if waypoints is not None:
+        ax.scatter(waypoints[:, 1], waypoints[:, 2], c='green', marker='D', s=20)
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        combined_trajectories = np.concatenate((trajectories, unop_trajectories, kpf_trajectories))
+    else:
+        combined_trajectories = trajectories
+
+    ax.set_xlim(np.min(combined_trajectories[:, :, 0]), np.max(combined_trajectories[:, :, 0]))
+    ax.set_ylim(np.min(combined_trajectories[:, :, 1]), np.max(combined_trajectories[:, :, 1]))
+
+    # Set plot title and color bar
+    ax.set_title('Waypoints, Lidar Scans, and Color Coded Rollout Trajectories')
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Divergence Metric')
+
+    # Show the plot
+    plt.show(block=False)
+
+    plt.waitforbuttonpress()
+    # plt.pause(2)
+    plt.close()
+
+
+def visualize_obstacles_kpf(trajectories, weights, unop_trajectories=None, kpf_trajectories=None,
+                                       lidar_points=None, waypoints=None):
+    # Create a color map for the weights (blue to red)
+    cmap = plt.cm.get_cmap('coolwarm')
+    # REVERSE COLOR ORDER
+    # weights = - weights
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        unop_trajectories = unop_trajectories[:, :, 5:7]
+        kpf_trajectories = kpf_trajectories[:, :, 5:7]
+
+    # Flatten the trajectories and weights arrays for correct association with colors
+    trajectories = trajectories[:, :, 5:7]
+    flat_trajectories = trajectories.numpy().reshape(-1, 2)
+    flat_weights = np.repeat(weights, trajectories.shape[1])
+
+    # Plot all points with a single scatter plot to apply the colormap correctly
+    """scatter = ax.scatter(flat_trajectories[:, 0], flat_trajectories[:, 1], s=2, cmap=cmap, c=flat_weights,
+                         vmin=np.min(weights), vmax=np.max(weights))"""
+
+    norm_weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
+
+    """if unop_trajectories is not None:
+        # unoptimized rollout trajectories
+        for i in range(unop_trajectories.shape[0]):
+            ax.plot(unop_trajectories[i, :, 0],
+                    unop_trajectories[i, :, 1],
+                    color='black',
+                    alpha=0.2)"""
+
+    # color coded rollout trajectories
+    """for i in range(trajectories.shape[0]):
+        ax.plot(trajectories[i, :, 0],
+                trajectories[i, :, 1],
+                color=cmap(norm_weights)[i],
+                alpha=0.5)"""
+
+    if kpf_trajectories is not None:
+        # newly proposed trajectories
+        for i in range(kpf_trajectories.shape[0]):
+            ax.plot(kpf_trajectories[i, :, 0],
+                    kpf_trajectories[i, :, 1],
+                    color='fuchsia',
+                    alpha=0.5,
+                    lw=1)
+
+    # Plot the starting point of the first trajectory (black point)
+    ax.scatter(trajectories[0, 0, 0], trajectories[0, 0, 1], s=100, color='purple')
+
+    if lidar_points is not None:
+        ax.scatter(lidar_points[:, 0], lidar_points[:, 1], c='black', marker='P', s=20)
+
+    if waypoints is not None:
+        ax.scatter(waypoints[:, 1], waypoints[:, 2], c='green', marker='D', s=20)
+
+    if unop_trajectories is not None and kpf_trajectories is not None:
+        combined_trajectories = np.concatenate((trajectories, unop_trajectories, kpf_trajectories))
+    else:
+        combined_trajectories = trajectories
+
+    ax.set_xlim(np.min(combined_trajectories[:, :, 0]), np.max(combined_trajectories[:, :, 0]))
+    ax.set_ylim(np.min(combined_trajectories[:, :, 1]), np.max(combined_trajectories[:, :, 1]))
+
+    # Set plot title and color bar
+    ax.set_title('Waypoints, Lidar Scans, and Resampled Trajectories')
+    """cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Divergence Metric')"""
+
+    # Show the plot
+    plt.show(block=False)
+
+    plt.waitforbuttonpress()
+    # plt.pause(2)
     plt.close()
