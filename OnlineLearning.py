@@ -10,6 +10,7 @@ import numpy as np
 from SI_Toolkit.Functions.TF.Loss import loss_msr_sequence_customizable
 from SI_Toolkit.computation_library import TensorFlowLibrary
 from SI_Toolkit.Functions.General.Normalising import get_denormalization_function, get_normalization_function
+from SI_Toolkit.load_and_normalize import normalize_df
 from utilities.state_utilities import FULL_STATE_VARIABLES, CONTROL_INPUTS
 from SI_Toolkit.Functions.TF.Dataset import Dataset
 from SI_Toolkit.Functions.General.Initialization import create_log_file, create_full_name
@@ -18,9 +19,8 @@ import logging
 logging.getLogger('tensorflow').disabled = True
 
 
-
 class TrainingBuffer:
-    def __init__(self, buffer_length, net_info):
+    def __init__(self, buffer_length, net_info, normalization_info, batch_size):
         self.buffer_length = buffer_length
 
         self.net_info = net_info
@@ -28,28 +28,38 @@ class TrainingBuffer:
 
         self.full_state_names = np.concatenate((CONTROL_INPUTS, FULL_STATE_VARIABLES))
         if self.use_diff_output:
-            self.state_names = [f'D_{var}' for var in FULL_STATE_VARIABLES]
-        else:
-            self.state_names = FULL_STATE_VARIABLES
-        if self.use_diff_output:
-            self.full_state_names = np.concatenate((self.full_state_names, self.state_names))
+            delta_state_names = [f'D_{var}' for var in FULL_STATE_VARIABLES]
+            self.full_state_names = np.concatenate((self.full_state_names, delta_state_names))
         self.data_buffer = pd.DataFrame([], columns=self.full_state_names)
+
+        if normalization_info is not None:
+            self.normalize = True
+            self.normalization_info = normalization_info
+        else:
+            self.normalize = False
+
+        self.batch_size = batch_size
 
     def append(self, datapoint):
         new_state = pd.DataFrame([datapoint], columns=self.full_state_names)
         self.data_buffer = pd.concat((self.data_buffer, new_state), axis=0)
         self._cut_buffer()
 
+    def full(self):
+        return len(self.data_buffer) == self.buffer_length + 1
+
     def _cut_buffer(self):
-        if len(self.data_buffer) > self.buffer_length + 2:  # TODO: Do not hardcode this
+        if len(self.data_buffer) > self.buffer_length + 1:
             self.data_buffer = self.data_buffer.iloc[1:]
 
     def get_data(self):
-        batch_size = len(self.data_buffer) - 2  # TODO: Do not hardcode this
-        return Dataset([self.data_buffer], self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=batch_size)
+        if self.normalize:
+            return Dataset(normalize_df([self.data_buffer], self.normalization_info), self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
+        else:
+            return Dataset([self.data_buffer], self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
 
 
-class AddMetrics(keras.callbacks.Callback):
+class AddMetricsToLogger(keras.callbacks.Callback):
     def __init__(self, training_step):
         super().__init__()
         self.training_step = training_step
@@ -57,7 +67,7 @@ class AddMetrics(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs):
         mu = self.model.car_parameters_tf['mu'].numpy()
         logs['mu'] = mu
-        logs['training_step'] = self.training_step
+        logs['step'] = int(self.training_step)
         logs['lr'] = self.model.optimizer.lr.numpy()
 
 
@@ -71,15 +81,15 @@ class OnlineLearning:
 
         self.s_previous = None
         self.u_previous = None
-        self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info)
 
         self.normalization_info = self.predictor.predictor.normalization_info
         self.lib = TensorFlowLibrary
 
+        self.batch_size = config['batch_size']
         if self.normalize:
-            full_state_names = np.concatenate((CONTROL_INPUTS, FULL_STATE_VARIABLES))
-            self.normalize_outputs = get_normalization_function(self.normalization_info, self.predictor.predictor.net_info.outputs, self.lib)
-            self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.predictor.predictor.net_info.outputs, self.lib)
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, self.normalization_info, self.batch_size)
+        else:
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size)
 
         self.get_optimizer()
         self.predictor.predictor.net.compile(
@@ -116,6 +126,7 @@ class OnlineLearning:
         shutil.copy('SI_Toolkit_ASF/config_predictors.yml', dst_folder)
         shutil.copy('Control_Toolkit_ASF/config_controllers.yml', dst_folder)
         shutil.copy('utilities/Settings.py', dst_folder)
+        shutil.copy(net_info.path_to_normalization_info, dst_folder)
 
     def update_learning_rate(self):
         config = self.config['exponential_lr_decay']
@@ -149,14 +160,9 @@ class OnlineLearning:
         self.lr_init = self.lr
 
     def step(self, s, u, time_control, updated_attributes):
-        if self.normalize:
-            s = self.predictor.predictor.normalize_inputs(s)
-            u = self.predictor.predictor.normalize_control_inputs(u)
-
         if self.s_previous is not None and self.u_previous is not None:
-            net_input = np.concatenate([u, s], 0)
+            net_input = np.concatenate([u, s], axis=0)
 
-            delta_s = None
             if self.use_diff_output:
                 delta_s = (s - self.s_previous) / self.dt
                 net_input = np.concatenate((net_input, delta_s), axis=0)
@@ -166,12 +172,14 @@ class OnlineLearning:
             # print(f'Appending to buffer took: {time.process_time() - start}')
 
             # Retrain network
-            if self.N_step % self.config['train_every_n_steps'] == 0 and self.N_step > 2:
-                # start = time.process_time()
+            path_to_net = self.predictor.predictor.net_info.path_to_net
+            add_metrics = AddMetricsToLogger(self.N_step)
+            csv_logger = keras.callbacks.CSVLogger(path_to_net + 'log_training.csv', append=True, separator=';')
+            callbacks = [add_metrics, csv_logger]
+
+            if self.N_step % self.config['train_every_n_steps'] == 0 and self.training_buffer.full():
+                tf.print(f'Doing training at step {self.N_step}')
                 if self.training_step % self.config['save_net_every_n_training_steps'] == 0:
-                    path_to_net = self.predictor.predictor.net_info.path_to_net
-                    add_metrics = AddMetrics(self.training_step)
-                    csv_logger = keras.callbacks.CSVLogger(path_to_net + 'log_training.csv', append=True, separator=';')
                     model_checkpoint_history = keras.callbacks.ModelCheckpoint(
                         filepath=f'{path_to_net}/log/step-{self.N_step}/ckpt.ckpt',
                         save_weights_only=True,
@@ -184,13 +192,10 @@ class OnlineLearning:
                         monitor='val_loss',
                         mode='auto',
                         save_best_only=False)
-                    callbacks = [add_metrics, csv_logger, model_checkpoint_history, model_checkpoint_latest]
-                else:
-                    callbacks = []
+                    callbacks.extend([model_checkpoint_history, model_checkpoint_latest])
                 self.hist = self.predictor.predictor.net.fit(self.training_buffer.get_data(),
                                                              epochs=self.config['epochs_per_training'],
                                                              callbacks=callbacks)
-                # print(f'Training took: {time.process_time() - start}')
                 self.training_step += 1
                 self.update_learning_rate()
 
