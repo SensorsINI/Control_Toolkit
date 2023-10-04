@@ -30,7 +30,7 @@ class TrainingBuffer:
         if self.use_diff_output:
             delta_state_names = [f'D_{var}' for var in FULL_STATE_VARIABLES]
             self.full_state_names = np.concatenate((self.full_state_names, delta_state_names))
-        self.data_buffer = pd.DataFrame([], columns=self.full_state_names)
+        self.data_buffer = pd.DataFrame([], columns=self.full_state_names, dtype=np.float32)
 
         if normalization_info is not None:
             self.normalize = True
