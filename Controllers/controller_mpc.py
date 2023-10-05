@@ -14,6 +14,7 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 from torch import inference_mode
 
 from Control_Toolkit.OnlineLearning import OnlineLearning
+from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
 
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -100,6 +101,8 @@ class controller_mpc(template_controller):
  
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
+        if self.online_learning_activated:
+            load_pretrained_net_weights(self.predictor.predictor.net, f'{self.predictor.predictor.net_info.path_to_net}/ckpt.ckpt', verbose=False)
         u = self.optimizer.step(s, time)
         if self.online_learning_activated:
             self.online_learning.step(s,

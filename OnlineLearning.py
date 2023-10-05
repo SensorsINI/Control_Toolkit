@@ -14,6 +14,7 @@ from SI_Toolkit.load_and_normalize import normalize_df
 from utilities.state_utilities import FULL_STATE_VARIABLES, CONTROL_INPUTS
 from SI_Toolkit.Functions.TF.Dataset import Dataset
 from SI_Toolkit.Functions.General.Initialization import create_log_file, create_full_name
+from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
 
 import logging
 logging.getLogger('tensorflow').disabled = True
@@ -91,14 +92,16 @@ class OnlineLearning:
         else:
             self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size)
 
+        self.net = keras.models.clone_model(self.predictor.predictor.net)
         self.get_optimizer()
-        self.predictor.predictor.net.compile(
+        
+        self.net.compile(
             loss=loss_msr_sequence_customizable(wash_out_len=0,
                                                 post_wash_out_len=1,
                                                 discount_factor=1.0),
             optimizer=self.optimizer,
         )
-        self.predictor.predictor.net.optimizer.lr = self.lr
+        self.net.optimizer.lr = self.lr
 
         self.setup_model_dir()
 
@@ -128,6 +131,8 @@ class OnlineLearning:
         shutil.copy('utilities/Settings.py', dst_folder)
         shutil.copy(net_info.path_to_normalization_info, dst_folder)
 
+        self.net.save_weights(f'{dst_folder}/ckpt.ckpt')
+
     def update_learning_rate(self):
         config = self.config['exponential_lr_decay']
         if config['activated']:
@@ -146,7 +151,7 @@ class OnlineLearning:
                 print(f'Reduce lr on plateau to {self.lr}')
             self.last_loss = loss
 
-        self.predictor.predictor.net.optimizer.lr = self.lr
+        self.net.optimizer.lr = self.lr
 
     def get_optimizer(self):
         optimizer = self.config['optimizer']
@@ -175,7 +180,13 @@ class OnlineLearning:
             path_to_net = self.predictor.predictor.net_info.path_to_net
             add_metrics = AddMetricsToLogger(self.N_step)
             csv_logger = keras.callbacks.CSVLogger(path_to_net + 'log_training.csv', append=True, separator=';')
-            callbacks = [add_metrics, csv_logger]
+            model_checkpoint_latest = keras.callbacks.ModelCheckpoint(
+                        filepath=f'{path_to_net}/ckpt.ckpt',
+                        save_weights_only=True,
+                        monitor='val_loss',
+                        mode='auto',
+                        save_best_only=False)
+            callbacks = [add_metrics, csv_logger, model_checkpoint_latest]
 
             if self.N_step % self.config['train_every_n_steps'] == 0 and self.training_buffer.full():
                 tf.print(f'Doing training at step {self.N_step}')
@@ -185,17 +196,12 @@ class OnlineLearning:
                         save_weights_only=True,
                         monitor='val_loss',
                         mode='auto',
-                        save_best_only=False)
-                    model_checkpoint_latest = keras.callbacks.ModelCheckpoint(
-                        filepath=f'{path_to_net}/ckpt.ckpt',
-                        save_weights_only=True,
-                        monitor='val_loss',
-                        mode='auto',
-                        save_best_only=False)
-                    callbacks.extend([model_checkpoint_history, model_checkpoint_latest])
-                self.hist = self.predictor.predictor.net.fit(self.training_buffer.get_data(),
-                                                             epochs=self.config['epochs_per_training'],
-                                                             callbacks=callbacks)
+                        save_best_only=False) 
+                    callbacks.extend([model_checkpoint_history])
+                self.hist = self.net.fit(self.training_buffer.get_data(),
+                                         epochs=self.config['epochs_per_training'],
+                                         callbacks=callbacks)
+                # self.predictor.predictor.net = self.net  # Not needed, since net is loaded from disk in controller
                 self.training_step += 1
                 self.update_learning_rate()
 
