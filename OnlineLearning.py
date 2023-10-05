@@ -66,10 +66,13 @@ class AddMetricsToLogger(keras.callbacks.Callback):
         self.training_step = training_step
 
     def on_epoch_end(self, epoch, logs):
-        mu = self.model.car_parameters_tf['mu'].numpy()
-        logs['mu'] = mu
-        logs['step'] = int(self.training_step)
-        logs['lr'] = self.model.optimizer.lr.numpy()
+        try:
+            mu = self.model.car_parameters_tf['mu'].numpy()
+            logs['mu'] = mu
+            logs['step'] = int(self.training_step)
+            logs['lr'] = self.model.optimizer.lr.numpy()
+        except:
+            pass
 
 
 class OnlineLearning:
