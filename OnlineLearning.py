@@ -96,6 +96,7 @@ class OnlineLearning:
             self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size)
 
         self.net = keras.models.clone_model(self.predictor.predictor.net)
+        self.net.set_weights(self.predictor.predictor.net.get_weights())
         self.get_optimizer()
         
         self.net.compile(
