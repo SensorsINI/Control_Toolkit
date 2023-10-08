@@ -41,6 +41,9 @@ class TrainingBuffer:
 
         self.batch_size = batch_size
 
+    def clear(self):
+         self.data_buffer = pd.DataFrame([], columns=self.full_state_names, dtype=np.float32)
+
     def append(self, datapoint):
         new_state = pd.DataFrame([datapoint], columns=self.full_state_names)
         self.data_buffer = pd.concat((self.data_buffer, new_state), axis=0)
@@ -168,8 +171,20 @@ class OnlineLearning:
             self.optimizer = tf.keras.optimizers.Adam(self.lr)
         self.lr_init = self.lr
 
+    def input_contains_nan(self, s, u):
+        '''
+        Checks for NaN in s and u. If there is nan, it clears the data buffer, since
+        a missing value would lead to problems in the calculation of the delta values and the prediction.
+        Having NaN values in the state is mostly a problem when running on the real car.
+        '''
+        contains_nan = False
+        if np.isnan(np.sum(s)) or np.isnan(np.sum(u)):
+            self.data_buffer.clear()
+            contains_nan = True
+        return contains_nan
+
     def step(self, s, u, time_control, updated_attributes):
-        if self.s_previous is not None and self.u_previous is not None:
+        if self.s_previous is not None and self.u_previous is not None and not self.input_contains_nan(s, u):
             net_input = np.concatenate([u, s], axis=0)
 
             if self.use_diff_output:
