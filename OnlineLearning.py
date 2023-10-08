@@ -42,7 +42,7 @@ class TrainingBuffer:
         self.batch_size = batch_size
 
     def clear(self):
-         self.data_buffer = pd.DataFrame([], columns=self.full_state_names, dtype=np.float32)
+        self.data_buffer = pd.DataFrame([], columns=self.full_state_names, dtype=np.float32)
 
     def append(self, datapoint):
         new_state = pd.DataFrame([datapoint], columns=self.full_state_names)
