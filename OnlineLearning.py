@@ -208,8 +208,8 @@ class OnlineLearning:
             callbacks = [add_metrics, csv_logger, model_checkpoint_latest]
 
             if self.N_step % self.config['train_every_n_steps'] == 0 and self.training_buffer.full():
-                tf.print(f'Doing training at step {self.N_step}')
-                if self.training_step % self.config['save_net_every_n_training_steps'] == 0:
+                # tf.print(f'Doing training at step {self.N_step}')
+                if self.training_step % self.config['save_net_history_every_n_training_steps'] == 0:
                     model_checkpoint_history = keras.callbacks.ModelCheckpoint(
                         filepath=f'{path_to_net}/log/step-{self.N_step}/ckpt.ckpt',
                         save_weights_only=True,

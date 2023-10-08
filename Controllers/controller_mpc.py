@@ -98,11 +98,19 @@ class controller_mpc(template_controller):
             self.step = inference_mode()(self.step)
         else:
             self.step = self.step
- 
+
+        self.steps_since_last_model_update = 0
+
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
-        if self.online_learning_activated:
+
+        if self.online_learning_activated and (self.steps_since_last_model_update >= self.config_controller['online_learning']['controller_load_net_every_n_steps']):
+            start = timer.time()
             load_pretrained_net_weights(self.predictor.predictor.net, f'{self.predictor.predictor.net_info.path_to_net}/ckpt.ckpt', verbose=False)
+            self.steps_since_last_model_update = 0
+            print(f'Loading net from disk took {timer.time() - start}s')
+        self.steps_since_last_model_update += 1
+
         u = self.optimizer.step(s, time)
         if self.online_learning_activated:
             self.online_learning.step(s,
