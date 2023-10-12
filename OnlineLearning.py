@@ -15,6 +15,7 @@ from utilities.state_utilities import FULL_STATE_VARIABLES, CONTROL_INPUTS
 from SI_Toolkit.Functions.TF.Dataset import Dataset
 from SI_Toolkit.Functions.General.Initialization import create_log_file, create_full_name
 from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
+from SI_Toolkit.Functions.General.Initialization import get_net
 
 import logging
 logging.getLogger('tensorflow').disabled = True
@@ -98,7 +99,7 @@ class OnlineLearning:
         else:
             self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size)
 
-        self.net = keras.models.clone_model(self.predictor.predictor.net)
+        self.net, self.net_info = get_net(self.predictor.predictor.net_info)
         self.net.set_weights(self.predictor.predictor.net.get_weights())
         self.get_optimizer()
         
