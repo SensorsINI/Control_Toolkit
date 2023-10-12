@@ -184,7 +184,7 @@ class OnlineLearning:
             contains_nan = True
         return contains_nan
 
-    def step(self, s, u, time_control, updated_attributes):
+    def step(self, s, u, *args):
         if self.s_previous is not None and self.u_previous is not None and not self.input_contains_nan(s, u):
             net_input = np.concatenate([u, s], axis=0)
 
