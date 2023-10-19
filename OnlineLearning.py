@@ -24,10 +24,10 @@ logging.getLogger('tensorflow').disabled = True
 
 
 class TrainingBuffer:
-    def __init__(self, buffer_length, net_info, normalization_info, batch_size):
+    def __init__(self, buffer_length, net_info, normalization_info, batch_size, config):
 
         self.buffer_length = buffer_length + 1  # Dataset generation needs one extra point
-        self.setup_filter(None)
+        self.setup_filter(config)
 
         self.net_info = net_info
         self.use_diff_output = np.any(['D_' in output_name for output_name in self.net_info.outputs])
@@ -85,16 +85,17 @@ class TrainingBuffer:
         return df
 
     def setup_filter(self, config):
-        # rolling_window = 2
-        # self.filter = lambda df: df.rolling(rolling_window).mean().dropna()
-        # self.buffer_length += rolling_window - 1
-
-        self.filter = self.butterworth_filter
+        if config['data_filter'] == 'butterworth':
+            self.filter = self.butterworth_filter
+        elif config['data_filter'] == 'averaging':
+            rolling_window = 2
+            self.filter = lambda df: df.rolling(rolling_window).mean().dropna()
+        else:
+            self.filter = lambda x: x
 
     def get_data(self):
         if self.full():
             data = self.filter(self.data_buffer)
-            # data = self.data_buffer
         else:
             return None
 
@@ -135,9 +136,9 @@ class OnlineLearning:
 
         self.batch_size = config['batch_size']
         if self.normalize:
-            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, self.normalization_info, self.batch_size)
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, self.normalization_info, self.batch_size, config)
         else:
-            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size)
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size, config)
 
         self.net, self.net_info = get_net(self.predictor.predictor.net_info)
         self.net.set_weights(self.predictor.predictor.net.get_weights())
