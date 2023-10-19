@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow import keras
 from types import SimpleNamespace
 import numpy as np
+from scipy import signal
 
 from SI_Toolkit.Functions.TF.Loss import loss_msr_sequence_customizable
 from SI_Toolkit.computation_library import TensorFlowLibrary
@@ -16,6 +17,7 @@ from SI_Toolkit.Functions.TF.Dataset import Dataset
 from SI_Toolkit.Functions.General.Initialization import create_log_file, create_full_name
 from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
 from SI_Toolkit.Functions.General.Initialization import get_net
+from utilities.Settings import Settings
 
 import logging
 logging.getLogger('tensorflow').disabled = True
@@ -23,7 +25,9 @@ logging.getLogger('tensorflow').disabled = True
 
 class TrainingBuffer:
     def __init__(self, buffer_length, net_info, normalization_info, batch_size):
-        self.buffer_length = buffer_length
+
+        self.buffer_length = buffer_length + 1  # Dataset generation needs one extra point
+        self.setup_filter(None)
 
         self.net_info = net_info
         self.use_diff_output = np.any(['D_' in output_name for output_name in self.net_info.outputs])
@@ -51,17 +55,53 @@ class TrainingBuffer:
         self._cut_buffer()
 
     def full(self):
-        return len(self.data_buffer) == self.buffer_length + 1
+        return len(self.data_buffer) == self.buffer_length
 
     def _cut_buffer(self):
-        if len(self.data_buffer) > self.buffer_length + 1:
+        if len(self.data_buffer) > self.buffer_length:
             self.data_buffer = self.data_buffer.iloc[1:]
 
+    def butterworth_filter(self, df):
+        df = df.copy()  # Dataframes are passed as reference
+        cutoff_frequencies = {
+            # 'angular_control': 12.4999,  # 4
+            # 'translational_control': 12.4999,  # 4
+            # 'angular_vel_z': 12.4999,  # 7
+            # 'linear_vel_x': 12.4999,  # 4
+            # 'pose_theta': 12.4999,  # 4
+            # 'pose_theta_cos': 12.4999,  # 3
+            # 'pose_theta_sin': 12.4999,  # 3
+            # 'pose_x': 12.4999,  # 1
+            # 'pose_y': 12.4999,  # 1
+            # 'slip_angle': 12.4999,  # 4
+            'steering_angle': 2.0  # 4
+        }  # TODO: Currently does not work for delta outputs
+
+        fs = 1 / Settings.TIMESTEP_CONTROL
+
+        for column, cutoff in cutoff_frequencies.items():
+            butter = signal.butter(5, cutoff, analog=False, output='sos', fs=fs)  # TODO: Do not hardcode fs
+            df[column] = signal.sosfiltfilt(butter, df[column])
+        return df
+
+    def setup_filter(self, config):
+        # rolling_window = 2
+        # self.filter = lambda df: df.rolling(rolling_window).mean().dropna()
+        # self.buffer_length += rolling_window - 1
+
+        self.filter = self.butterworth_filter
+
     def get_data(self):
-        if self.normalize:
-            return Dataset(normalize_df([self.data_buffer], self.normalization_info), self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
+        if self.full():
+            data = self.filter(self.data_buffer)
+            # data = self.data_buffer
         else:
-            return Dataset([self.data_buffer], self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
+            return None
+
+        if self.normalize:
+            return Dataset(normalize_df([data], self.normalization_info), self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
+        else:
+            return Dataset([data], self.net_info, shuffle=False, inputs=self.net_info.inputs, outputs=self.net_info.outputs, batch_size=self.batch_size)
 
 
 class AddMetricsToLogger(keras.callbacks.Callback):
@@ -208,8 +248,7 @@ class OnlineLearning:
                         save_best_only=False)
             callbacks = [add_metrics, csv_logger, model_checkpoint_latest]
 
-            if self.N_step % self.config['train_every_n_steps'] == 0 and self.training_buffer.full():
-                # tf.print(f'Doing training at step {self.N_step}')
+            if self.N_step % self.config['train_every_n_steps'] == 0:
                 if self.training_step % self.config['save_net_history_every_n_training_steps'] == 0:
                     model_checkpoint_history = keras.callbacks.ModelCheckpoint(
                         filepath=f'{path_to_net}/log/step-{self.N_step}/ckpt.ckpt',
@@ -218,12 +257,15 @@ class OnlineLearning:
                         mode='auto',
                         save_best_only=False) 
                     callbacks.extend([model_checkpoint_history])
-                self.hist = self.net.fit(self.training_buffer.get_data(),
-                                         epochs=self.config['epochs_per_training'],
-                                         callbacks=callbacks)
-                # self.predictor.predictor.net = self.net  # Not needed, since net is loaded from disk in controller
-                self.training_step += 1
-                self.update_learning_rate()
+
+                dataset = self.training_buffer.get_data()
+                if dataset is not None:
+                    self.hist = self.net.fit(dataset,
+                                             epochs=self.config['epochs_per_training'],
+                                             callbacks=callbacks)
+                    # self.predictor.predictor.net = self.net  # Not needed, since net is loaded from disk in controller
+                    self.training_step += 1
+                    self.update_learning_rate()
 
         self.N_step += 1
         self.s_previous = s
