@@ -212,21 +212,22 @@ class OnlineLearning:
             self.optimizer = tf.keras.optimizers.Adam(self.lr)
         self.lr_init = self.lr
 
-    def input_contains_nan(self, s, u):
+    def check_input_validity(self, net_input):
         '''
         Checks for NaN in s and u. If there is nan, it clears the data buffer, since
         a missing value would lead to problems in the calculation of the delta values and the prediction.
         Having NaN values in the state is mostly a problem when running on the real car.
         '''
-        contains_nan = False
-        if np.isnan(np.sum(s)) or np.isnan(np.sum(u)):
-            self.data_buffer.clear()
-            contains_nan = True
-        return contains_nan
+        valid = True
+        velocity = net_input[self.net_info.inputs.index('linear_vel_x')]
+        if np.isnan(np.sum(net_input)) or np.isnan(np.sum(net_input)) or np.abs(velocity) < 0.1:
+            self.training_buffer.clear()
+            valid = False
+        return valid
 
     def step(self, s, u, *args):
-        if self.s_previous is not None and self.u_previous is not None and not self.input_contains_nan(s, u):
-            net_input = np.concatenate([u, s], axis=0)
+        net_input = np.concatenate([u, s], axis=0)
+        if self.s_previous is not None and self.u_previous is not None and self.check_input_validity(net_input):
 
             if self.use_diff_output:
                 delta_s = (s - self.s_previous) / self.dt
