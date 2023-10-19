@@ -13,7 +13,6 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
-from Control_Toolkit.OnlineLearning import OnlineLearning
 from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
 
 
@@ -89,11 +88,6 @@ class controller_mpc(template_controller):
             num_control_inputs=self.predictor.num_control_inputs,
         )
 
-        self.online_learning_activated = self.config_controller['online_learning']['activated']
-        if self.online_learning_activated:
-            self.online_learning = OnlineLearning(self.predictor, self.config_controller['dt'], 
-                                                  self.config_controller['online_learning'])
-
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
         else:
@@ -104,22 +98,17 @@ class controller_mpc(template_controller):
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
 
-        if self.online_learning_activated and (self.steps_since_last_model_update >= self.config_controller['online_learning']['controller_load_net_every_n_steps']):
-            start = timer.time()
+        u = self.optimizer.step(s, time)
+
+        if self.steps_since_last_model_update >= self.config_controller.get('online_learning', {}).get('controller_load_net_every_n_steps', False):
             load_pretrained_net_weights(self.predictor.predictor.net, f'{self.predictor.predictor.net_info.path_to_net}/ckpt.ckpt', verbose=False)
             self.steps_since_last_model_update = 0
-            print(f'Loading net from disk took {timer.time() - start}s')
-        self.steps_since_last_model_update += 1
+        else:
+            self.steps_since_last_model_update += 1
 
         u = self.optimizer.step(s, time)
-        if self.online_learning_activated:
-            self.online_learning.step(s,
-                                      u,
-                                      time,
-                                      updated_attributes)
         self.update_logs(self.optimizer.logging_values)
         return u
 
     def controller_reset(self):
         self.optimizer.optimizer_reset()
-        
