@@ -135,13 +135,10 @@ class OnlineLearning:
         self.lib = TensorFlowLibrary
 
         self.batch_size = config['batch_size']
-        if self.normalize:
-            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, self.normalization_info, self.batch_size, config)
-        else:
-            self.training_buffer = TrainingBuffer(config['buffer_length'], self.predictor.predictor.net_info, None, self.batch_size, config)
 
         self.net, self.net_info = get_net(self.predictor.predictor.net_info)
         self.net.set_weights(self.predictor.predictor.net.get_weights())
+        self.net_info.wash_out_len = 0
         self.get_optimizer()
         
         self.net.compile(
@@ -151,6 +148,11 @@ class OnlineLearning:
             optimizer=self.optimizer,
         )
         self.net.optimizer.lr = self.lr
+        
+        if self.normalize:
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.net_info, self.normalization_info, self.batch_size, config)
+        else:
+            self.training_buffer = TrainingBuffer(config['buffer_length'], self.net_info, None, self.batch_size, config)
 
         self.setup_model_dir()
 
@@ -257,7 +259,7 @@ class OnlineLearning:
                         save_weights_only=True,
                         monitor='val_loss',
                         mode='auto',
-                        save_best_only=False) 
+                        save_best_only=False)
                     callbacks.extend([model_checkpoint_history])
 
                 dataset = self.training_buffer.get_data()
