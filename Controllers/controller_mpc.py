@@ -13,6 +13,7 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 
 from torch import inference_mode
 
+from Control_Toolkit.OnlineLearning import OnlineLearning
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
 config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
@@ -70,6 +71,10 @@ class controller_mpc(template_controller):
             predictor_specification=predictor_specification
         )
 
+        self.online_learning_activated = self.config_controller["online_learning_activated"]
+        if self.online_learning_activated:
+            self.online_learning = OnlineLearning(self.predictor, self.config_controller['dt'])
+
         if self.lib.lib == 'Pytorch':
             self.step = inference_mode()(self.step)
         else:
@@ -78,7 +83,23 @@ class controller_mpc(template_controller):
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.update_attributes(updated_attributes)
+        # need to add 'self.prev_buffer' in '_init_.py'
+        # if self.prev_buffer is None:
+        #     print('using zeros temporarily')
+        #     se = np.array(list(s)+[0]*5)
+        # else:
+        #     se = np.array(list(s)+self.prev_buffer)
         u = self.optimizer.step(s, time)
+        # self.prev_buffer = list(s[1:])
+        if self.online_learning_activated:
+            angle = s[0]
+            s0 = np.delete(s,0)
+            self.online_learning.step(s0,
+                                      angle,
+                                      u,
+                                      time,
+                                      updated_attributes)
+            print("Finish 1 step of online learning!")
         self.update_logs(self.optimizer.logging_values)
         return u
 
