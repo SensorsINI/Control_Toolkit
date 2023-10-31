@@ -5,13 +5,14 @@ from typing import Tuple
 import numpy as np
 import yaml
 from Control_Toolkit.others.globals_and_utils import get_logger
+from SI_Toolkit.load_and_normalize import load_yaml
 from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
                                             PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
 
 from types import SimpleNamespace
 
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_cost_function = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
 logger = get_logger(__name__)
 
 """
@@ -38,10 +39,7 @@ class template_controller(ABC):
         initial_environment_attributes: "dict[str, TensorType]",
     ):
         # Load controller config and select the entry for the current controller
-        config_controllers = yaml.load(
-            open(os.path.join("Control_Toolkit_ASF", "config_controllers.yml")),
-            Loader=yaml.FullLoader
-        )
+        config_controllers = load_yaml(os.path.join("Control_Toolkit_ASF", "config_controllers.yml"))
         # self.controller_name is inferred from the class name, which is the class being instantiated
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.

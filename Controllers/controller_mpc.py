@@ -3,19 +3,20 @@ from typing import Optional
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
-import yaml
+
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import TensorType
+from SI_Toolkit.load_and_normalize import load_yaml
 from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
 from torch import inference_mode
 
 
-config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_optimizers = load_yaml(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml"))
+config_cost_function = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
 logger = get_logger(__name__)
 
 
