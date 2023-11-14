@@ -7,6 +7,7 @@ from tensorflow import keras
 from types import SimpleNamespace
 import numpy as np
 from scipy import signal
+import math
 
 from SI_Toolkit.Functions.TF.Loss import loss_msr_sequence_customizable
 from SI_Toolkit.computation_library import TensorFlowLibrary
@@ -228,6 +229,21 @@ class OnlineLearning:
             valid = False
         return valid
 
+    def check_delta_validity(self, delta_s):
+        valid = True
+        if np.abs(delta_s[-1]) < 0.001:  # Check for non-changing steering angle
+            print('Skipping training due to a non-changing steering angle')
+            self.training_buffer.clear()
+            valid = False
+        return valid
+    
+    def check_theta_wrapping(self, delta_s):
+        D_pose_theta_idx = self.net_info.outputs.index('D_pose_theta')
+        D_pose_theta = delta_s[D_pose_theta_idx] * self.dt
+        D_pose_theta = math.remainder(D_pose_theta, math.tau)
+        delta_s[D_pose_theta_idx] = D_pose_theta * self.dt
+        return delta_s
+
     def step(self, s, u, *args):
         net_input = np.concatenate([u, s], axis=0)
         if self.s_previous is not None and self.u_previous is not None and self.check_input_validity(net_input):
@@ -235,6 +251,9 @@ class OnlineLearning:
             if self.use_diff_output:
                 delta_s = (s - self.s_previous) / self.dt
                 net_input = np.concatenate((net_input, delta_s), axis=0)
+            # self.check_delta_validity(delta_s)
+            if 'D_pose_theta' in self.net_info.outputs:
+                delta_s = self.check_theta_wrapping(delta_s)
 
             # start = time.process_time()
             self.training_buffer.append(net_input)
@@ -271,6 +290,6 @@ class OnlineLearning:
                     self.training_step += 1
                     self.update_learning_rate()
 
-        self.N_step += 1
+            self.N_step += 1
         self.s_previous = s
         self.u_previous = u
