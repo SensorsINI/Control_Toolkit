@@ -14,8 +14,6 @@ from Control_Toolkit.others.globals_and_utils import get_logger, import_optimize
 from torch import inference_mode
 
 from SI_Toolkit.Functions.TF.Network import load_pretrained_net_weights
-import time as timer
-
 
 
 config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
@@ -104,7 +102,6 @@ class controller_mpc(template_controller):
 
         if (self.steps_since_last_model_update > self.config_controller.get('online_learning', {}).get('controller_load_net_every_n_steps', np.inf)
             and self.config_controller.get('online_learning', {}).get('activated', False)):
-            # print('Loading model from disk')
             load_pretrained_net_weights(self.predictor.predictor.net, f'{self.predictor.predictor.net_info.path_to_net}/ckpt.ckpt', verbose=False)
             self.steps_since_last_model_update = 0
         else:
