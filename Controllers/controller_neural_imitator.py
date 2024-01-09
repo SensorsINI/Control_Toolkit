@@ -75,10 +75,6 @@ class controller_neural_imitator(template_controller):
             self.device = get_device()
             self.net.reset()
             self.net.eval()
-        
-        # The net_inputs_buffer and net_outputs_buffer are used for debugging purposes only
-        self.net_inputs_buffer = []
-        self.net_outputs_buffer = []
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
 
@@ -107,15 +103,6 @@ class controller_neural_imitator(template_controller):
         return Q
 
     def controller_reset(self):
-        if self.net_inputs_buffer and len(self.net_inputs_buffer) > 1:
-            net_inputs = self.lib.stack(self.net_inputs_buffer)
-            net_outputs = self.lib.stack(self.net_outputs_buffer)
-
-            net_inputs = self.lib.to_numpy(net_inputs)
-            net_outputs = self.lib.to_numpy(net_outputs)
-
-            np.savetxt('net_inputs.csv', net_inputs, delimiter=',')
-            np.savetxt('net_outputs.csv', net_outputs, delimiter=',')
 
         self.configure()
 
@@ -129,8 +116,6 @@ class controller_neural_imitator(template_controller):
             net_output = self.net.predict(net_input)
         else:
             net_output = self.net(net_input)
-        # self.net_inputs_buffer.append(self.lib.squeeze(self.lib.to_tensor(net_input, self.lib.float32)))
-        # self.net_outputs_buffer.append(self.lib.squeeze(net_output))
 
         net_output = self.denormalize_outputs(net_output)
 
