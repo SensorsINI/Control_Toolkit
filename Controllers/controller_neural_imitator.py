@@ -103,7 +103,6 @@ class controller_neural_imitator(template_controller):
         return Q
 
     def controller_reset(self):
-
         self.configure()
 
     def _step_compilable(self, net_input):
