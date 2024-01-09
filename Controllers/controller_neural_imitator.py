@@ -75,7 +75,8 @@ class controller_neural_imitator(template_controller):
             self.device = get_device()
             self.net.reset()
             self.net.eval()
-
+        
+        # The net_inputs_buffer and net_outputs_buffer are used for debugging purposes only
         self.net_inputs_buffer = []
         self.net_outputs_buffer = []
 
