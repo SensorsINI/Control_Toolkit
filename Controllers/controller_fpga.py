@@ -65,13 +65,12 @@ class controller_fpga(template_controller):
             else:
                 break  # state inputs must be adjacent in the current implementation
 
-        self.net_inputs_buffer = []
-        self.net_outputs_buffer = []
+        self.just_restarted = True
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
-
+        self.just_restarted = False
         if self.input_at_input:
             net_input = s
         else:
@@ -104,17 +103,9 @@ class controller_fpga(template_controller):
         return Q
 
     def controller_reset(self):
-        if self.net_inputs_buffer and len(self.net_inputs_buffer) > 1:
-            net_inputs = self.lib.stack(self.net_inputs_buffer)
-            net_outputs = self.lib.stack(self.net_outputs_buffer)
 
-            net_inputs = self.lib.to_numpy(net_inputs)
-            net_outputs = self.lib.to_numpy(net_outputs)
-
-            np.savetxt('net_inputs.csv', net_inputs, delimiter=',')
-            np.savetxt('net_outputs.csv', net_outputs, delimiter=',')
-
-        self.configure()
+        if not self.just_restarted:
+            self.configure()
 
     def get_net_output_from_fpga(self, net_input):
         self.InterfaceInstance.send_net_input(net_input)
