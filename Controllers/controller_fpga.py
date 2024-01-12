@@ -28,7 +28,7 @@ class controller_fpga(template_controller):
 
         SERIAL_PORT = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
         SERIAL_BAUD = self.config_controller["SERIAL_BAUD"]
-
+        set_ftdi_latency_timer(serial_port_number=self.config_controller["SERIAL_PORT"])
         self.InterfaceInstance = Interface()
         self.InterfaceInstance.open(SERIAL_PORT, SERIAL_BAUD)
 
@@ -170,7 +170,6 @@ class Interface:
         msg = [SERIAL_SOF, CMD_PING, 4]
         msg.append(self._crc(msg))
         self.device.write(bytearray(msg))
-        self.device.flush()
         return self._receive_reply(CMD_PING, 4, PING_TIMEOUT) == msg
 
     def send_net_input(self, net_input):
@@ -180,7 +179,6 @@ class Interface:
         # msg.append(self._crc(msg))
         bytes_written = self.device.write(bytearray(net_input))
         # print(bytes_written)
-        self.device.flush()
 
     def receive_net_output(self):
         # self.clear_read_buffer()
@@ -249,3 +247,26 @@ class Interface:
                 val >>= 1
 
         return crc8
+
+
+import subprocess
+def set_ftdi_latency_timer(serial_port_number):
+    print('\nSetting FTDI latency timer')
+    ftdi_timer_latency_requested_value = 1
+    command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > /sys/bus/usb-serial/devices/ttyUSB{serial_port_number}/latency_timer'"
+    command_ftdi_timer_latency_check = f'cat /sys/bus/usb-serial/devices/ttyUSB{serial_port_number}/latency_timer'
+    try:
+        subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(e.stderr)
+        if "Permission denied" in e.stderr:
+            print("Trying with sudo...")
+            command_ftdi_timer_latency_set = "sudo " + command_ftdi_timer_latency_set
+            try:
+                subprocess.run("echo Teresa | sudo -S :", shell=True)
+                subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                print(e.stderr)
+
+    ftdi_latency_timer_value = subprocess.run(command_ftdi_timer_latency_check, shell=True, capture_output=True, text=True).stdout.rstrip()
+    print(f'FTDI latency timer value (tested only for FTDI with Zybo and with Linux on PC side): {ftdi_latency_timer_value} ms  \n')
