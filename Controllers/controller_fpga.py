@@ -84,7 +84,8 @@ class controller_fpga(template_controller):
         if self.lib.lib == 'Pytorch':
             net_input = net_input.to(self.device)
 
-        self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
+        # self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
+        self.lib.assign(self.net_input_normed, net_input)
 
         net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
         net_input = self.lib.to_numpy(net_input)
@@ -93,7 +94,7 @@ class controller_fpga(template_controller):
 
         net_output = self.lib.to_tensor(net_output, self.lib.float32)
 
-        net_output = self.denormalize_outputs(net_output)
+        # net_output = self.denormalize_outputs(net_output)
 
         if self.lib.lib == 'Pytorch':
             net_output = net_output.detach().numpy()
