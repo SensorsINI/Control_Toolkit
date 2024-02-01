@@ -68,7 +68,7 @@ class optimizer_gradient_tf(template_optimizer):
     
     def _predict_and_cost(self, s, Q):
         # rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        rollout_trajectory = self.predictor.predict_core(s, Q)
         traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )

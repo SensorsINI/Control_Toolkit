@@ -151,7 +151,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        rollout_trajectory = self.predictor.predict_core(s, Q)
         traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )
@@ -218,7 +218,7 @@ class optimizer_rpgd_tf(template_optimizer):
         return Qn, best_idx, traj_cost, rollout_trajectory
 
     def _predict_optimal_trajectory(self, s, u_nom):
-        optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
+        optimal_trajectory = self.predictor_single_trajectory.predict_core(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
 

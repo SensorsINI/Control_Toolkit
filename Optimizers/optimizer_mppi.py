@@ -183,7 +183,7 @@ class optimizer_mppi(template_optimizer):
         delta_u = self.inizialize_pertubation(random_gen)
         u_run = self.lib.tile(u_nom, (self.num_rollouts, 1, 1))+delta_u
         u_run = self.lib.clip(u_run, self.action_low, self.action_high)
-        rollout_trajectory = self.predictor.predict_tf(s, u_run)
+        rollout_trajectory = self.predictor.predict_core(s, u_run)
         traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
         u_nom = self.lib.clip(u_nom + self.reward_weighted_average(traj_cost, delta_u), self.action_low, self.action_high)
         u = u_nom[0, 0, :]
@@ -195,7 +195,7 @@ class optimizer_mppi(template_optimizer):
         self.predictor.update(s=s, Q0=u_tiled)
 
     def _predict_optimal_trajectory(self, s, u_nom):
-        optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
+        optimal_trajectory = self.predictor_single_trajectory.predict_core(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
 

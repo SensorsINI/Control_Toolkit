@@ -99,7 +99,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         # rollout the trajectories and record gradient
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q_tf)
-            rollout_trajectory = self.predictor.predict_tf(s, Q_tf)
+            rollout_trajectory = self.predictor.predict_core(s, Q_tf)
             traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q_tf, self.u)
         # retrieve gradient
         dc_dQ = tape.gradient(traj_cost, Q_tf)
@@ -109,7 +109,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         opt.apply_gradients(zip([dc_dQ_clipped], [Q_tf]))
         Qn = tf.clip_by_value(Q_tf, self.action_low, self.action_high)
         #rollout all trajectories a last time
-        rollout_trajectory = self.predictor.predict_tf(s, Qn)
+        rollout_trajectory = self.predictor.predict_core(s, Qn)
         traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Qn, self.u)
 
         # sort the costs and find best k costs
