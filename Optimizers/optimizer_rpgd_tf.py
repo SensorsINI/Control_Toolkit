@@ -92,7 +92,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.Interpolator = None
 
-        self.opt = tf.keras.optimizers.Adam(
+        current_tf_version = tf.__version__.split('.')
+        if int(current_tf_version[1]) > 10:
+            Adam = tf.keras.optimizers.legacy.Adam
+        else:
+            Adam = tf.keras.optimizers.Adam
+
+        self.opt = Adam(
             learning_rate=learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
@@ -275,6 +281,9 @@ class optimizer_rpgd_tf(template_optimizer):
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
         # The algorithm not only warmstrats the initial guess, but also the intial optimizer weights
+        # Solution for new TF>2.10 adam optimizer, now using legacy instead
+        # adam_weights_variables = self.opt.variables()
+        # adam_weights = [v.numpy() for v in adam_weights_variables]
         adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
@@ -372,6 +381,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.count = 0
 
         # reset optimizer
+        # Solution for new TF>2.10 adam optimizer, now using legacy instead
+        # adam_weights_variables = self.opt.variables()
+        # adam_weights = [v.numpy() for v in adam_weights_variables]
+
+        # Next line should be changed for new adam optimizer, I don't know yet how.
+        # It is probably something like
+        # self.opt.build([tf.Variable(tf.zeros_like(???)) for el in adam_weights])
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
