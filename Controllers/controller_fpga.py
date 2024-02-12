@@ -3,7 +3,6 @@ import serial
 import struct
 import time
 
-from types import SimpleNamespace
 from SI_Toolkit.computation_library import TensorType, NumpyLibrary
 
 import numpy as np
@@ -88,7 +87,7 @@ class controller_fpga(template_controller):
 
     def get_net_output_from_fpga(self, net_input):
         self.InterfaceInstance.send_net_input(net_input)
-        net_output = self.InterfaceInstance.receive_net_output()
+        net_output = self.InterfaceInstance.receive_net_output(len(self.net_info.outputs))
         return net_output
 
 
@@ -153,18 +152,13 @@ class Interface:
 
     def send_net_input(self, net_input):
         self.device.reset_output_buffer()
-        # self.clear_read_buffer()
-        # msg = [SERIAL_SOF, net_input]
-        # msg.append(self._crc(msg))
         bytes_written = self.device.write(bytearray(net_input))
         # print(bytes_written)
 
-    def receive_net_output(self):
-        # self.clear_read_buffer()
-        # reply = self._receive_reply(4, READ_STATE_TIMEOUT)
-        net_output = self.device.read(size=4)
-        # net_output = struct.unpack('=3hBIH', bytes(net_output[3:16]))
-        net_output = struct.unpack('<f', net_output)
+    def receive_net_output(self, net_output_length):
+        net_output_length_bytes = net_output_length * 4  # We assume float32
+        net_output = self.device.read(size=net_output_length_bytes)
+        net_output = struct.unpack(f'<{net_output_length}f', net_output)
         # net_output=reply
         return net_output
 
