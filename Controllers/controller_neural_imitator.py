@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from SI_Toolkit.computation_library import TensorType, NumpyLibrary
+from SI_Toolkit.Functions.General.value_precision import set_value_precision
 
 import numpy as np
 
@@ -24,6 +25,7 @@ class controller_neural_imitator(template_controller):
         PATH_TO_MODELS = self.config_controller["PATH_TO_MODELS"]
 
         self.input_at_input = self.config_controller["input_at_input"]
+        self.input_precision = self.config_controller["input_precision"]
 
         a = SimpleNamespace()
         self.batch_size = 1  # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
@@ -35,16 +37,6 @@ class controller_neural_imitator(template_controller):
         self.net, self.net_info = \
             get_net(a, time_series_length=1,
                     batch_size=self.batch_size, stateful=True)
-
-        self.normalization_info = get_norm_info_for_net(self.net_info)
-        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
-        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
-                                                                self.lib)
-
-        self.net_input_normed = self.lib.to_variable(
-            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
-
-        self.step_compilable = CompileAdaptive(self._step_compilable)
 
         self.state_2_input_idx = []
         self.remaining_inputs = self.net_info.inputs.copy()
@@ -76,6 +68,16 @@ class controller_neural_imitator(template_controller):
             self.net.reset()
             self.net.eval()
 
+        self.normalization_info = get_norm_info_for_net(self.net_info)
+        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
+        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
+                                                                self.lib)
+
+        self.net_input_normed = self.lib.to_variable(
+            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
+
+        self.step_compilable = CompileAdaptive(self._step_compilable)
+
         print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
@@ -88,6 +90,7 @@ class controller_neural_imitator(template_controller):
             for key in self.remaining_inputs:
                 net_input = np.append(net_input, getattr(self.variable_parameters, key))
 
+        net_input = set_value_precision(net_input, self.input_precision)
         net_input = self.lib.to_tensor(net_input, self.lib.float32)
 
         if self.lib.lib == 'Pytorch':
