@@ -1,3 +1,4 @@
+import os
 import serial
 import struct
 import time
@@ -14,9 +15,7 @@ try:
 except ModuleNotFoundError:
     print("SI_Toolkit_ASF not yet created")
 
-from SI_Toolkit.Functions.General.Initialization import (get_net,
-                                                         get_norm_info_for_net)
-from SI_Toolkit.Functions.TF.Compile import CompileAdaptive
+from SI_Toolkit.Functions.General.Initialization import load_net_info_from_txt_file
 
 
 class controller_fpga(template_controller):
@@ -33,19 +32,11 @@ class controller_fpga(template_controller):
 
         NET_NAME = self.config_controller["net_name"]
         PATH_TO_MODELS = self.config_controller["PATH_TO_MODELS"]
+        path_to_model_info = os.path.join(PATH_TO_MODELS, NET_NAME, NET_NAME + ".txt")
 
         self.input_at_input = self.config_controller["input_at_input"]
 
-        a = SimpleNamespace()
-        self.batch_size = 1  # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
-
-        a.path_to_models = PATH_TO_MODELS
-        a.net_name = NET_NAME
-
-        # Create a copy of the network suitable for inference (stateful and with sequence length one)
-        self.net, self.net_info = \
-            get_net(a, time_series_length=1,
-                    batch_size=self.batch_size, stateful=True)
+        self.net_info = load_net_info_from_txt_file(path_to_model_info)
 
         self.state_2_input_idx = []
         self.remaining_inputs = self.net_info.inputs.copy()
@@ -58,7 +49,7 @@ class controller_fpga(template_controller):
 
         self.just_restarted = True
 
-        print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
+        print('Configured fpga controller with {} network with {} library\n'.format(self.net_info.net_full_name, self.lib.lib))
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         self.just_restarted = False
