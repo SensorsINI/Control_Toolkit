@@ -93,7 +93,7 @@ class controller_fpga(template_controller):
         net_output = self.get_net_output_from_fpga(net_input)
 
         net_output = self.lib.to_tensor(net_output, self.lib.float32)
-
+        net_output = net_output[self.lib.newaxis, self.lib.newaxis, :]
         # net_output = self.denormalize_outputs(net_output)
 
         if self.lib.lib == 'Pytorch':
