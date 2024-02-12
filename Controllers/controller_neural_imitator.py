@@ -100,7 +100,10 @@ class controller_neural_imitator(template_controller):
         if self.lib.lib == 'Pytorch':
             net_output = net_output.detach().numpy()
 
-        Q = net_output
+        if self.lib.ndim(net_output) == 1:
+            Q = net_output[self.lib.newaxis, self.lib.newaxis, :]
+        else:
+            Q = net_output
 
         return Q
 
