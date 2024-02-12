@@ -8,7 +8,6 @@ from SI_Toolkit.computation_library import TensorType, NumpyLibrary
 import numpy as np
 
 from Control_Toolkit.Controllers import template_controller
-from SI_Toolkit.Functions.General.Normalising import get_normalization_function, get_denormalization_function
 
 try:
     from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
@@ -48,14 +47,6 @@ class controller_fpga(template_controller):
             get_net(a, time_series_length=1,
                     batch_size=self.batch_size, stateful=True)
 
-        self.normalization_info = get_norm_info_for_net(self.net_info)
-        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
-        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
-                                                                self.lib)
-
-        self.net_input_normed = self.lib.to_variable(
-            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
-
         self.state_2_input_idx = []
         self.remaining_inputs = self.net_info.inputs.copy()
         for key in self.net_info.inputs:
@@ -84,17 +75,13 @@ class controller_fpga(template_controller):
         if self.lib.lib == 'Pytorch':
             net_input = net_input.to(self.device)
 
-        # self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
-        self.lib.assign(self.net_input_normed, net_input)
-
-        net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
+        net_input = self.lib.reshape(net_input, (-1, 1, len(self.net_info.inputs)))
         net_input = self.lib.to_numpy(net_input)
 
         net_output = self.get_net_output_from_fpga(net_input)
 
         net_output = self.lib.to_tensor(net_output, self.lib.float32)
         net_output = net_output[self.lib.newaxis, self.lib.newaxis, :]
-        # net_output = self.denormalize_outputs(net_output)
 
         if self.lib.lib == 'Pytorch':
             net_output = net_output.detach().numpy()
