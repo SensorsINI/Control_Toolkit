@@ -90,7 +90,6 @@ class controller_neural_imitator(template_controller):
             for key in self.remaining_inputs:
                 net_input = np.append(net_input, getattr(self.variable_parameters, key))
 
-        net_input = set_value_precision(net_input, self.input_precision)
         net_input = self.lib.to_tensor(net_input, self.lib.float32)
 
         if self.lib.lib == 'Pytorch':
@@ -113,6 +112,7 @@ class controller_neural_imitator(template_controller):
         self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
 
         net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
+        net_input = set_value_precision(net_input, self.input_precision, lib=self.lib)
 
         if self.lib.lib == 'Numpy':  # Covers just the case for hls4ml, when the model is hls model
             net_output = self.net.predict(net_input)
