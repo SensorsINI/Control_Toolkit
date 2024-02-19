@@ -32,6 +32,10 @@ class controller_mpc(template_controller):
             logger.info(f"Using predictor {predictor_specification} specified in controller config file")
         
         config_optimizer = config_optimizers[optimizer_name]
+
+        logger.info(f'\nConfig optimizer {optimizer_name}:')
+        for key, value in config_optimizer.items():
+            logger.info('{}: {}'.format(key, value))
         
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
