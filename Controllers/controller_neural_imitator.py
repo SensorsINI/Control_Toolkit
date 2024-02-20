@@ -8,7 +8,7 @@ from Control_Toolkit.Controllers import template_controller
 from SI_Toolkit.Functions.General.Normalising import get_normalization_function, get_denormalization_function
 
 try:
-    from SI_Toolkit_ASF.predictors_customization_tf import STATE_INDICES
+    from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
 except ModuleNotFoundError:
     print("SI_Toolkit_ASF not yet created")
 
