@@ -75,6 +75,15 @@ class template_controller(ABC):
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
 
+        if "device" in self.config_controller:
+            device = str(self.config_controller["device"])
+        else:
+            device = None
+
+        if device is not None:
+            self.configure = self.lib.set_device(device)(self.configure)
+            self.set_attributes = self.lib.set_device(device)(self.set_attributes)
+
         self.set_attributes()
                 
         # Initialize control variable
