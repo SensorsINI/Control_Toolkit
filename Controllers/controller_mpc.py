@@ -92,9 +92,9 @@ class controller_mpc(template_controller):
         )
 
         if self.lib.lib == 'Pytorch':
-            self.step = inference_mode()(self.step)
+            self.step = self.lib.set_device(self.config_controller["device"])(inference_mode()(self.step))
         else:
-            self.step = self.step
+            self.step = self.lib.set_device(self.config_controller["device"])(self.step)
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
