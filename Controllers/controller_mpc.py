@@ -3,19 +3,20 @@ from typing import Optional
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 import numpy as np
-import yaml
+
 from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 
 from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.computation_library import TensorType
+from SI_Toolkit.load_and_normalize import load_yaml
 from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
 from torch import inference_mode
 
 
-config_optimizers = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml")), Loader=yaml.FullLoader)
-config_cost_function = yaml.load(open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml")), Loader=yaml.FullLoader)
+config_optimizers = load_yaml(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml"))
+config_cost_function = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
 logger = get_logger(__name__)
 
 
@@ -31,6 +32,10 @@ class controller_mpc(template_controller):
             logger.info(f"Using predictor {predictor_specification} specified in controller config file")
         
         config_optimizer = config_optimizers[optimizer_name]
+
+        logger.info(f'\nConfig optimizer {optimizer_name}:')
+        for key, value in config_optimizer.items():
+            logger.info('{}: {}'.format(key, value))
         
         # Create cost function
         cost_function_specification = self.config_controller.get("cost_function_specification", None)
@@ -87,9 +92,9 @@ class controller_mpc(template_controller):
         )
 
         if self.lib.lib == 'Pytorch':
-            self.step = inference_mode()(self.step)
+            self.step = self.lib.set_device(self.config_controller["device"])(inference_mode()(self.step))
         else:
-            self.step = self.step
+            self.step = self.lib.set_device(self.config_controller["device"])(self.step)
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
