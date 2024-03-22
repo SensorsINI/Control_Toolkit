@@ -101,8 +101,6 @@ class template_controller(ABC):
             "rollout_trajectories_logged",
         ]
         self.logs: "dict[str, list[TensorType]]" = {s: [] for s in self.save_vars}
-
-        self.just_configured = False
     
     def configure(self, **kwargs):
         # In your controller, implement any additional initialization steps here
