@@ -12,7 +12,7 @@ from numpy.random import SFC64, Generator
 from SI_Toolkit.Functions.TF.Compile import CompileTF, CompileAdaptive
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
-LOGGING_LEVEL = logging.ERROR
+LOGGING_LEVEL = logging.INFO
 
 
 class CustomFormatter(logging.Formatter):
