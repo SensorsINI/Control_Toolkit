@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from SI_Toolkit.computation_library import TensorType, NumpyLibrary
+from SI_Toolkit.Functions.General.value_precision import set_value_precision
 
 import numpy as np
 
@@ -24,6 +25,7 @@ class controller_neural_imitator(template_controller):
         PATH_TO_MODELS = self.config_controller["PATH_TO_MODELS"]
 
         self.input_at_input = self.config_controller["input_at_input"]
+        self.input_precision = self.config_controller["input_precision"]
 
         a = SimpleNamespace()
         self.batch_size = 1  # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
@@ -36,16 +38,6 @@ class controller_neural_imitator(template_controller):
             get_net(a, time_series_length=1,
                     batch_size=self.batch_size, stateful=True)
 
-        self.normalization_info = get_norm_info_for_net(self.net_info)
-        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
-        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
-                                                                self.lib)
-
-        self.net_input_normed = self.lib.to_variable(
-            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
-
-        self.step_compilable = CompileAdaptive(self._step_compilable)
-
         self.state_2_input_idx = []
         self.remaining_inputs = self.net_info.inputs.copy()
         for key in self.net_info.inputs:
@@ -55,18 +47,36 @@ class controller_neural_imitator(template_controller):
             else:
                 break  # state inputs must be adjacent in the current implementation
 
-        if self.net_info.library == 'Pytorch':
+        self.hls4ml = self.config_controller["hls4ml"]
+        if self.hls4ml:
+            self._computation_library = NumpyLibrary
+            # Convert network to HLS form
+            from SI_Toolkit.HLS4ML.hls4ml_functions import convert_model_with_hls4ml
+            self.net, _ = convert_model_with_hls4ml(self.net)
+            self.net.compile()
+        elif self.net_info.library == 'Pytorch':
             from SI_Toolkit.computation_library import PyTorchLibrary
             self._computation_library = PyTorchLibrary
         elif self.net_info.library == 'TF':
             from SI_Toolkit.computation_library import TensorFlowLibrary
             self._computation_library = TensorFlowLibrary
+        self.set_attributes()
 
         if self.lib.lib == 'Pytorch':
             from SI_Toolkit.Functions.Pytorch.Network import get_device
             self.device = get_device()
             self.net.reset()
             self.net.eval()
+
+        self.normalization_info = get_norm_info_for_net(self.net_info)
+        self.normalize_inputs = get_normalization_function(self.normalization_info, self.net_info.inputs, self.lib)
+        self.denormalize_outputs = get_denormalization_function(self.normalization_info, self.net_info.outputs,
+                                                                self.lib)
+
+        self.net_input_normed = self.lib.to_variable(
+            np.zeros([len(self.net_info.inputs), ], dtype=np.float32), self.lib.float32)
+
+        self.step_compilable = CompileAdaptive(self._step_compilable)
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_info.net_full_name, self.net_info.library))
 
@@ -90,7 +100,10 @@ class controller_neural_imitator(template_controller):
         if self.lib.lib == 'Pytorch':
             net_output = net_output.detach().numpy()
 
-        Q = net_output
+        if self.lib.ndim(net_output) == 1:
+            Q = net_output[self.lib.newaxis, self.lib.newaxis, :]
+        else:
+            Q = net_output
 
         return Q
 
@@ -102,8 +115,12 @@ class controller_neural_imitator(template_controller):
         self.lib.assign(self.net_input_normed, self.normalize_inputs(net_input))
 
         net_input = self.lib.reshape(self.net_input_normed, (-1, 1, len(self.net_info.inputs)))
+        net_input = set_value_precision(net_input, self.input_precision, lib=self.lib)
 
-        net_output = self.net(net_input)
+        if self.lib.lib == 'Numpy':  # Covers just the case for hls4ml, when the model is hls model
+            net_output = self.net.predict(net_input)
+        else:
+            net_output = self.net(net_input)
 
         net_output = self.denormalize_outputs(net_output)
 

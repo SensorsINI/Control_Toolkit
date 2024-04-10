@@ -134,7 +134,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1]) + delta_u
         u_run = tf.clip_by_value(u_run, self.action_low, self.action_high)
         #predict trajectories
-        rollout_trajectory = self.predictor.predict_tf(s, u_run)
+        rollout_trajectory = self.predictor.predict_core(s, u_run)
         #rollout cost
         traj_cost = self.get_mppi_trajectory_cost(rollout_trajectory, u_run, u_old, delta_u)
         #retrive control sequence via path integral
@@ -148,7 +148,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
             #rollout trajectory and retrive cost
-            rollout_trajectory = self.predictor.predict_tf(s, Q)
+            rollout_trajectory = self.predictor.predict_core(s, Q)
             traj_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, Q, self.u)
         #retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)

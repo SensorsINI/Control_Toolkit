@@ -1,7 +1,7 @@
 from importlib import import_module
 import os
+from SI_Toolkit.load_and_normalize import load_yaml
 from SI_Toolkit.computation_library import TensorType, ComputationLibrary
-import yaml
 from copy import deepcopy as dcp
 from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
@@ -9,11 +9,7 @@ from Control_Toolkit.Controllers import template_controller
 from Control_Toolkit.Cost_Functions import cost_function_base
 
 # cost_function config
-cost_function_config = yaml.load(
-    open(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r"),
-    Loader=yaml.FullLoader,
-)
-
+cost_function_config = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r")
 
 class CostFunctionWrapper:
     """

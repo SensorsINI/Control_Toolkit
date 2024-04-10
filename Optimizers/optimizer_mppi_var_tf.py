@@ -121,7 +121,7 @@ class optimizer_mppi_var_tf(template_optimizer):
             u_run = tf.tile(u_nom, [self.num_rollouts, 1, 1]) + delta_u
             u_run = tfp.math.clip_by_value_preserve_gradient(u_run, self.action_low, self.action_high)
             #rollout and cost
-            rollout_trajectory = self.predictor.predict_tf(s, u_run)
+            rollout_trajectory = self.predictor.predict_core(s, u_run)
             unc_cost = self.cost_function.get_trajectory_cost(rollout_trajectory, u_run, u_old)
             mean_uncost = tf.math.reduce_mean(unc_cost)
             #retrieve gradient

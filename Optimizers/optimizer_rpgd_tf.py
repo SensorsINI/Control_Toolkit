@@ -92,7 +92,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.Interpolator = None
 
-        self.opt = tf.keras.optimizers.Adam(
+        current_tf_version = tf.__version__.split('.')
+        if int(current_tf_version[1]) > 10:
+            Adam = tf.keras.optimizers.legacy.Adam
+        else:
+            Adam = tf.keras.optimizers.Adam
+
+        self.opt = Adam(
             learning_rate=learning_rate,
             beta_1=adam_beta_1,
             beta_2=adam_beta_2,
@@ -151,7 +157,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
     def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
         # rollout trajectories and retrieve cost
-        rollout_trajectory = self.predictor.predict_tf(s, Q)
+        rollout_trajectory = self.predictor.predict_core(s, Q)
         traj_cost = self.cost_function.get_trajectory_cost(
             rollout_trajectory, Q, self.u
         )
@@ -218,7 +224,7 @@ class optimizer_rpgd_tf(template_optimizer):
         return Qn, best_idx, traj_cost, rollout_trajectory
 
     def _predict_optimal_trajectory(self, s, u_nom):
-        optimal_trajectory = self.predictor_single_trajectory.predict_tf(s, u_nom)
+        optimal_trajectory = self.predictor_single_trajectory.predict_core(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
         return optimal_trajectory
 
@@ -275,6 +281,9 @@ class optimizer_rpgd_tf(template_optimizer):
         # modify adam optimizers. The optimizer optimizes all rolled out trajectories at once
         # and keeps weights for all these, which need to get modified.
         # The algorithm not only warmstrats the initial guess, but also the intial optimizer weights
+        # Solution for new TF>2.10 adam optimizer, now using legacy instead
+        # adam_weights_variables = self.opt.variables()
+        # adam_weights = [v.numpy() for v in adam_weights_variables]
         adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
@@ -372,6 +381,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.count = 0
 
         # reset optimizer
+        # Solution for new TF>2.10 adam optimizer, now using legacy instead
+        # adam_weights_variables = self.opt.variables()
+        # adam_weights = [v.numpy() for v in adam_weights_variables]
+
+        # Next line should be changed for new adam optimizer, I don't know yet how.
+        # It is probably something like
+        # self.opt.build([tf.Variable(tf.zeros_like(???)) for el in adam_weights])
         adam_weights = self.opt.get_weights()
         self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
         self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
