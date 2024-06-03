@@ -69,7 +69,7 @@ class template_controller(ABC):
 
         # Environment-related parameters
         self.environment_name = environment_name
-        self.initial_environment_attributes = {key: self.lib.to_tensor(value, self.lib.float32) for key, value in initial_environment_attributes.items()}
+        self.initial_environment_attributes = {key: self.lib.to_variable(value, self.lib.float32) for key, value in initial_environment_attributes.items()}
         self.variable_parameters = SimpleNamespace()
 
         self.control_limits = control_limits
