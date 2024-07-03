@@ -49,7 +49,8 @@ class optimizer_nlp_forces(template_optimizer):
             terminal_constraint_at_target: bool,
             terminal_set_width: float,
             num_rollouts: int,
-            environment_specific_parameters: dict
+            environment_specific_parameters: dict,
+            **kwargs,
     ):
         super().__init__(
             predictor=predictor,

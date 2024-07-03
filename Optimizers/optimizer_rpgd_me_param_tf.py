@@ -47,6 +47,7 @@ class optimizer_rpgd_me_param_tf(template_optimizer):
         maximum_entropy_alpha: float,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,

@@ -30,6 +30,7 @@ class optimizer_mppi(template_optimizer):
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         """Instantiate MPPI optimizer, see
         Williams et al. 2017, 'Model Predictive Path Integral Control: From Theory to Parallel Computation'

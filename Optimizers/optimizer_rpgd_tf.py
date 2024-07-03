@@ -45,6 +45,7 @@ class optimizer_rpgd_tf(template_optimizer):
         adam_epsilon: float,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,
@@ -113,9 +114,11 @@ class optimizer_rpgd_tf(template_optimizer):
     def configure(self,
                   num_states: int,
                   num_control_inputs: int,
-                  dt: float,
-                  predictor_specification: str,
                   **kwargs):
+
+        dt = kwargs.get("dt", None)
+        predictor_specification = kwargs.get("predictor_specification", None)
+
         super().configure(
             num_states=num_states,
             num_control_inputs=num_control_inputs,
@@ -125,10 +128,13 @@ class optimizer_rpgd_tf(template_optimizer):
         self.Interpolator = Interpolator(self.mpc_horizon, self.period_interpolation_inducing_points,
                                          self.num_control_inputs, self.lib)
 
-        self.predictor_single_trajectory.configure(
-            batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
-            predictor_specification=predictor_specification,
-        )
+        if dt is not None and predictor_specification is not None:
+            self.predictor_single_trajectory.configure(
+                batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
+                predictor_specification=predictor_specification,
+            )
+        else:
+            raise ValueError("RPGD requires dt and predictor_specification to be passed.")
 
         self.optimizer_reset()
 

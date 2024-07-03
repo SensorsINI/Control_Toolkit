@@ -37,6 +37,7 @@ class optimizer_mppi_optimize_tf(template_optimizer):
         period_interpolation_inducing_points: int,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,
