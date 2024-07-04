@@ -7,6 +7,7 @@ from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions.CostFunctionUpdater import CostFunctionUpdater
 
 # cost_function config
 cost_function_config = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r")
@@ -62,6 +63,9 @@ class CostFunctionWrapper:
         )(variable_parameters, computation_library)
 
         self.cost_function.configure(batch_size=batch_size, horizon=horizon)
+
+        # Create the cost function updater and bind it to the cost function
+        self.cost_function_updater = CostFunctionUpdater(self.cost_function, environment_name, self.cost_function_name)
 
     def update_cost_function_name_from_specification(
         self, cost_function_specification: str = None

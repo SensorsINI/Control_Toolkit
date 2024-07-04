@@ -20,6 +20,8 @@ class cost_function_base:
         self.batch_size = None
         self.horizon = None
 
+        self.reload_cost_parameters_from_config_flag = False
+
 
     def configure(
             self,
@@ -79,10 +81,16 @@ class cost_function_base:
         :return: The summed cost of the trajectory. Has shape [batch_size].
         :rtype: TensorType
         """
+        if self.reload_cost_parameters_from_config_flag:
+            self.reload_cost_parameters_from_config()
+            self.reload_cost_parameters_from_config_flag = False
         stage_costs = self.get_stage_cost(state_horizon[:, :-1, :], inputs, previous_input)  # Select all but last state of the horizon
         terminal_cost = self.lib.reshape(self.get_terminal_cost(state_horizon[:, -1, :]), (-1, 1))
         total_cost = self.lib.mean(self.lib.concat([stage_costs, terminal_cost], 1), 1)  # Average across the MPC horizon dimension
         return total_cost
+
+    def reload_cost_parameters_from_config(self):
+        pass
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
