@@ -7,9 +7,16 @@ from yaml import safe_load
 
 class CostFunctionUpdater:
     def __init__(self, cost_function, environment_name, cost_function_name):
+
+        self.config_path = os.path.abspath(cost_function.config_path)
+        # Verify if the configuration file exists
+        if not os.path.isfile(self.config_path):
+            raise FileNotFoundError(f"Configuration file not found at path: {self.config_path}")
+
+
         self.observer = Observer()
         self.handler = ConfigChangeHandler(cost_function, environment_name, cost_function_name)  # Your custom event handler
-        self.observer.schedule(self.handler, cost_function.config_path, recursive=True)
+        self.observer.schedule(self.handler, self.config_path, recursive=True)
         atexit.register(self.stop)
         self.observer.start()
 
@@ -17,12 +24,11 @@ class CostFunctionUpdater:
         self.observer.stop()
         self.observer.join()
 
-
 # Handler for configuration changes
 class ConfigChangeHandler(FileSystemEventHandler):
     def __init__(self, cost_function, environment_name, cost_function_name):
         self.cost_function = cost_function
-        self.config_path = cost_function.config_path
+        self.config_path = os.path.abspath(cost_function.config_path)
 
         self.environment_name = environment_name
         self.cost_function_name = cost_function_name

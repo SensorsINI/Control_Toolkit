@@ -67,6 +67,11 @@ class CostFunctionWrapper:
         # Create the cost function updater and bind it to the cost function
         self.cost_function_updater = CostFunctionUpdater(self.cost_function, environment_name, self.cost_function_name)
 
+    def update_cost_parameters_from_config(self):
+        if self.cost_function.reload_cost_parameters_from_config_flag:
+            self.cost_function.reload_cost_parameters_from_config()
+            self.cost_function.reload_cost_parameters_from_config_flag = False
+
     def update_cost_function_name_from_specification(
         self, cost_function_specification: str = None
     ):
