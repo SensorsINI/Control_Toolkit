@@ -108,6 +108,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.calculate_optimal_trajectory = calculate_optimal_trajectory
         self.optimal_trajectory = None
+        self.summed_stage_cost = None
         self.optimal_control_sequence = None
         self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
 
@@ -273,7 +274,6 @@ class optimizer_rpgd_tf(template_optimizer):
             self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
         self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
-        self.u = self.u_nom[0, 0, :].numpy()
         
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
@@ -361,9 +361,11 @@ class optimizer_rpgd_tf(template_optimizer):
         self.count += 1
 
         if self.calculate_optimal_trajectory:
-            self.optimal_trajectory = self.lib.to_numpy(self.predict_optimal_trajectory(s[:1, :], self.u_nom))
+            optimal_trajectory = self.predict_optimal_trajectory(s[:1, :], self.u_nom)
+            self.summed_stage_cost = self.cost_function.get_summed_stage_cost(optimal_trajectory, self.u_nom[:1, :, :], self.u)
+            self.optimal_trajectory = self.lib.to_numpy(optimal_trajectory)
 
-
+        self.u = self.u_nom[0, 0, :].numpy()
         return self.u
 
     def optimizer_reset(self):

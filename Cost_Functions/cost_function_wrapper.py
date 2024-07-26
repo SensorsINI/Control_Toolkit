@@ -98,6 +98,12 @@ class CostFunctionWrapper:
         """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
         return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
 
+    def get_summed_stage_cost(
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
+    ):
+        """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
+        return self.cost_function.get_summed_stage_cost(state_horizon, inputs, previous_input)
+
     def copy(self):
         """
         Makes a copy of a cost_function, specification get preserved, except configuration
