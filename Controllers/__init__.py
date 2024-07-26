@@ -99,6 +99,8 @@ class template_controller(ABC):
             "rollout_trajectories_logged",
         ]
         self.logs: "dict[str, list[TensorType]]" = {s: [] for s in self.save_vars}
+
+        self.controller_data_for_csv = {}
     
     def configure(self, **kwargs):
         # In your controller, implement any additional initialization steps here
@@ -152,10 +154,6 @@ class template_controller(ABC):
             return name.replace("controller_", "").replace("_", "-").lower()
         else:
             raise AttributeError()
-    
-    @property
-    def controller_data_for_csv(self):
-        return {}
 
     @property
     def computation_library(self) -> "type[ComputationLibrary]":
