@@ -230,10 +230,11 @@ class optimizer_rpgd_tf(template_optimizer):
             , axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
 
-    def _predict_optimal_trajectory(self, s, u_nom):
+    def _predict_optimal_trajectory(self, s, u_nom, u):
         optimal_trajectory = self.predictor_single_trajectory.predict_core(s, u_nom)
         self.predictor_single_trajectory.update(s=s, Q0=u_nom[:, :1, :])
-        return optimal_trajectory
+        summed_stage_cost = self.cost_function.get_summed_stage_cost(optimal_trajectory, u_nom[:1, :, :], u)
+        return optimal_trajectory, summed_stage_cost
 
     def step(self, s: np.ndarray, time=None):
         if self.optimizer_logging:
@@ -361,9 +362,9 @@ class optimizer_rpgd_tf(template_optimizer):
         self.count += 1
 
         if self.calculate_optimal_trajectory:
-            optimal_trajectory = self.predict_optimal_trajectory(s[:1, :], self.u_nom)
-            self.summed_stage_cost = self.cost_function.get_summed_stage_cost(optimal_trajectory, self.u_nom[:1, :, :], self.u)
+            optimal_trajectory, summed_stage_cost = self.predict_optimal_trajectory(s[:1, :], self.u_nom, self.u)
             self.optimal_trajectory = self.lib.to_numpy(optimal_trajectory)
+            self.summed_stage_cost = self.lib.to_numpy(summed_stage_cost)
 
         self.u = self.u_nom[0, 0, :].numpy()
         return self.u
