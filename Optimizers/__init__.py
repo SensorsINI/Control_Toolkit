@@ -20,6 +20,7 @@ class template_optimizer:
             num_rollouts: int,
             mpc_horizon: int,
             computation_library: "type[ComputationLibrary]",
+            **kwargs,
         ) -> None:
 
         # Check if the computation_library passed is compatible with this optimizer
@@ -52,6 +53,7 @@ class template_optimizer:
                   num_states: int,
                   num_control_inputs: int,
                   default_configure: bool = True,
+                  **kwargs,
                   ) -> None:
 
         self.num_states = num_states

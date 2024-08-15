@@ -1,4 +1,5 @@
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary, TensorType
+from SI_Toolkit.Functions.FunctionalDict import FunctionalDict
 from Control_Toolkit.others.globals_and_utils import get_logger
 from types import SimpleNamespace
 
@@ -19,6 +20,10 @@ class cost_function_base:
 
         self.batch_size = None
         self.horizon = None
+
+        self.reload_cost_parameters_from_config_flag = False
+
+        self.logged_attributes = {}
 
 
     def configure(
@@ -63,6 +68,9 @@ class cost_function_base:
     def _get_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType) -> TensorType:
         raise NotImplementedError("To be implemented in subclass.")
 
+    def get_summed_stage_cost(self, states: TensorType, inputs: TensorType, previous_input: TensorType) -> TensorType:
+        return self.lib.sum(self.get_stage_cost(states[:, :-1, :], inputs, previous_input), 1)
+
     def get_trajectory_cost(
         self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
     ) -> TensorType:
@@ -84,8 +92,14 @@ class cost_function_base:
         total_cost = self.lib.mean(self.lib.concat([stage_costs, terminal_cost], 1), 1)  # Average across the MPC horizon dimension
         return total_cost
 
+    def reload_cost_parameters_from_config(self):
+        pass
+
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
         assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
         if not ComputationLib in self.supported_computation_libraries:
             raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
         self.lib = ComputationLib
+
+    def set_logged_attributes(self, logged_attributes_dict):
+        self.logged_attributes = FunctionalDict(logged_attributes_dict)

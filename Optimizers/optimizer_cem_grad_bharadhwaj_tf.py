@@ -38,6 +38,7 @@ class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
         warmup_iterations: int,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,

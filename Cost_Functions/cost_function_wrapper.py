@@ -7,6 +7,7 @@ from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
 
 from Control_Toolkit.Cost_Functions import cost_function_base
+from Control_Toolkit.Cost_Functions.CostFunctionUpdater import CostFunctionUpdater
 
 # cost_function config
 cost_function_config = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"), "r")
@@ -63,6 +64,14 @@ class CostFunctionWrapper:
 
         self.cost_function.configure(batch_size=batch_size, horizon=horizon)
 
+        # Create the cost function updater and bind it to the cost function
+        self.cost_function_updater = CostFunctionUpdater(self.cost_function, environment_name, self.cost_function_name)
+
+    def update_cost_parameters_from_config(self):
+        if self.cost_function.reload_cost_parameters_from_config_flag:
+            self.cost_function.reload_cost_parameters_from_config()
+            self.cost_function.reload_cost_parameters_from_config_flag = False
+
     def update_cost_function_name_from_specification(
         self, cost_function_specification: str = None
     ):
@@ -88,6 +97,12 @@ class CostFunctionWrapper:
     ):
         """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
         return self.cost_function.get_trajectory_cost(state_horizon, inputs, previous_input)
+
+    def get_summed_stage_cost(
+        self, state_horizon: TensorType, inputs: TensorType, previous_input: TensorType = None
+    ):
+        """Refer to :func:`the base cost function <Control_Toolkit.Cost_Functions.cost_function_base.get_trajectory_cost>`"""
+        return self.cost_function.get_summed_stage_cost(state_horizon, inputs, previous_input)
 
     def copy(self):
         """

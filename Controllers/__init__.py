@@ -33,7 +33,6 @@ class template_controller(ABC):
     
     def __init__(
         self,
-        dt: float,
         environment_name: str,
         control_limits: "Tuple[np.ndarray, np.ndarray]",
         initial_environment_attributes: "dict[str, TensorType]",
@@ -44,7 +43,6 @@ class template_controller(ABC):
         # Example: If you create a controller_mpc, this controller_template.__init__ will be called
         # but the class name will be controller_mpc, not template_controller.
         self.config_controller = dict(config_controllers[self.controller_name])
-        self.config_controller["dt"] = dt
         
         # Set computation library
         computation_library_name = str(self.config_controller.get("computation_library", ""))
@@ -69,7 +67,7 @@ class template_controller(ABC):
 
         # Environment-related parameters
         self.environment_name = environment_name
-        self.initial_environment_attributes = initial_environment_attributes
+        self.initial_environment_attributes = {key: self.lib.to_variable(value, self.lib.float32) for key, value in initial_environment_attributes.items()}
         self.variable_parameters = SimpleNamespace()
 
         self.control_limits = control_limits
@@ -101,6 +99,8 @@ class template_controller(ABC):
             "rollout_trajectories_logged",
         ]
         self.logs: "dict[str, list[TensorType]]" = {s: [] for s in self.save_vars}
+
+        self.controller_data_for_csv = {}
     
     def configure(self, **kwargs):
         # In your controller, implement any additional initialization steps here
@@ -154,10 +154,6 @@ class template_controller(ABC):
             return name.replace("controller_", "").replace("_", "-").lower()
         else:
             raise AttributeError()
-    
-    @property
-    def controller_data_for_csv(self):
-        return {}
 
     @property
     def computation_library(self) -> "type[ComputationLibrary]":

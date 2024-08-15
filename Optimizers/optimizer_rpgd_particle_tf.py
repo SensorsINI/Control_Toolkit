@@ -40,6 +40,7 @@ class optimizer_rpgd_particle_tf(template_optimizer):
         adam_epsilon: float,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,

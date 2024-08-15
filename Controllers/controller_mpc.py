@@ -69,7 +69,7 @@ class controller_mpc(template_controller):
         self.predictor.configure(
             batch_size=self.optimizer.num_rollouts,
             horizon=self.optimizer.mpc_horizon,
-            dt=self.config_controller["dt"],
+            dt=config_optimizer["mpc_timestep"],
             computation_library=self.computation_library,
             variable_parameters=self.variable_parameters,
             predictor_specification=predictor_specification,
@@ -85,11 +85,13 @@ class controller_mpc(template_controller):
         )
 
         self.optimizer.configure(
-            dt=self.config_controller["dt"],
+            dt=config_optimizer["mpc_timestep"],
             predictor_specification=predictor_specification,
             num_states=self.predictor.num_states,
             num_control_inputs=self.predictor.num_control_inputs,
         )
+
+        self.controller_data_for_csv = self.cost_function.cost_function.logged_attributes
 
         if self.lib.lib == 'Pytorch':
             self.step = self.lib.set_device(self.config_controller["device"])(inference_mode()(self.step))
@@ -98,6 +100,9 @@ class controller_mpc(template_controller):
 
         
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
+
+        self.cost_function.update_cost_parameters_from_config()
+
         self.update_attributes(updated_attributes)
         u = self.optimizer.step(s, time)
         self.update_logs(self.optimizer.logging_values)

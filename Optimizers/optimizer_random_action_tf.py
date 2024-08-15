@@ -23,6 +23,7 @@ class optimizer_random_action_tf(template_optimizer):
         num_rollouts: int,
         optimizer_logging: bool,
         calculate_optimal_trajectory: bool,
+        **kwargs,
     ):
         super().__init__(
             predictor=predictor,

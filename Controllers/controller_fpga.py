@@ -12,7 +12,7 @@ import numpy as np
 from Control_Toolkit.Controllers import template_controller
 
 try:
-    from SI_Toolkit_ASF.predictors_customization import STATE_INDICES
+    from SI_Toolkit_ASF.ToolkitCustomization.predictors_customization import STATE_INDICES
 except ModuleNotFoundError:
     print("SI_Toolkit_ASF not yet created")
 
