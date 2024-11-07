@@ -8,7 +8,6 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 class template_optimizer:
-    supported_computation_libraries = (NumpyLibrary, TensorFlowLibrary, PyTorchLibrary)
     
     def __init__(
             self,
@@ -23,6 +22,7 @@ class template_optimizer:
             **kwargs,
         ) -> None:
 
+        self.supported_computation_libraries = (NumpyLibrary, TensorFlowLibrary, PyTorchLibrary)
         # Check if the computation_library passed is compatible with this optimizer
         if not isinstance(computation_library, self.supported_computation_libraries):
             raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
