@@ -2,6 +2,7 @@ from importlib import import_module
 import os
 from SI_Toolkit.load_and_normalize import load_yaml
 from SI_Toolkit.computation_library import TensorType, ComputationLibrary
+from SI_Toolkit.General.variable_parameters import VariableParameters
 from copy import deepcopy as dcp
 from types import MappingProxyType
 from Control_Toolkit.Controllers import template_controller
@@ -33,7 +34,7 @@ class CostFunctionWrapper:
         self,
         batch_size: int,
         horizon: int,
-        variable_parameters: template_controller,
+        variable_parameters: VariableParameters,
         environment_name: str,
         computation_library: "type[ComputationLibrary]",
         cost_function_specification: str=None,
