@@ -37,8 +37,6 @@ class controller_neural_imitator(template_controller):
             else:
                 break  # state inputs must be adjacent in the current implementation
 
-        self.set_attributes()
-
         if self.controller_logging:
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
 
