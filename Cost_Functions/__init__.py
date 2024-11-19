@@ -96,9 +96,8 @@ class cost_function_base:
         pass
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
-        # assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
-        # if not ComputationLib in self.supported_computation_libraries:
-        #     raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
+        if not isinstance(ComputationLib, self.supported_computation_libraries):
+            raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
         self.lib = ComputationLib
 
     def set_logged_attributes(self, logged_attributes_dict):
