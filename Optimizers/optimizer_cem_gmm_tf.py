@@ -12,7 +12,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # CEM with Gaussian Mixture Model Sampling Distribution
 class optimizer_cem_gmm_tf(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary,)
     
     def __init__(
         self,

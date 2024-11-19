@@ -20,7 +20,7 @@ from SI_Toolkit.Functions.General.Initialization import load_net_info_from_txt_f
 
 
 class controller_fpga(template_controller):
-    _computation_library = NumpyLibrary
+    _computation_library = NumpyLibrary()
 
     def configure(self):
 

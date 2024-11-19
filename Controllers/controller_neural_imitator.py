@@ -13,7 +13,7 @@ except ModuleNotFoundError:
 
 
 class controller_neural_imitator(template_controller):
-    _computation_library = NumpyLibrary
+    _computation_library = NumpyLibrary()
 
     def configure(self):
 

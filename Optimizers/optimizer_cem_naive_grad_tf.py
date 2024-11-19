@@ -13,7 +13,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 # optimizer class
 class optimizer_cem_naive_grad_tf(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary,)
     
     def __init__(
         self,

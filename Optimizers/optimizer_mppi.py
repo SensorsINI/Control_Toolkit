@@ -11,7 +11,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 class optimizer_mppi(template_optimizer):
-    supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
+    supported_computation_libraries = (NumpyLibrary, TensorFlowLibrary, PyTorchLibrary)
     
     def __init__(
         self,
