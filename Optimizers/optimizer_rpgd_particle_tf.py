@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 
 class optimizer_rpgd_particle_tf(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary)
     
     def __init__(
         self,

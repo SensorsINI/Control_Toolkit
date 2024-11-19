@@ -27,7 +27,7 @@ See the provided examples of controllers to gain more insight.
 class template_controller(ABC):
     _has_optimizer = False
     # Define the computation library in your controller class or in the controller's configuration:
-    _computation_library: "type[ComputationLibrary]" = None
+    _computation_library: "ComputationLibrary" = None
     
     def __init__(
         self,
@@ -49,11 +49,11 @@ class template_controller(ABC):
             # Assign computation library from config
             logger.info(f"Found library {computation_library_name} for MPC controller.")
             if "tensorflow" in computation_library_name.lower():
-                self._computation_library = TensorFlowLibrary
+                self._computation_library = TensorFlowLibrary()
             elif "pytorch" in computation_library_name.lower():
-                self._computation_library = PyTorchLibrary
+                self._computation_library = PyTorchLibrary()
             elif "numpy" in computation_library_name.lower():
-                self._computation_library = NumpyLibrary
+                self._computation_library = NumpyLibrary()
             else:
                 raise ValueError(f"Computation library {computation_library_name} could not be interpreted.")
         else:
