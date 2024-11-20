@@ -14,7 +14,7 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
 
 class optimizer_cem_grad_bharadhwaj_tf(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary,)
     
     def __init__(
         self,

@@ -3,14 +3,12 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 
 import numpy as np
-import yaml
 from Control_Toolkit.others.globals_and_utils import get_logger
 from SI_Toolkit.load_and_normalize import load_yaml
-from SI_Toolkit.computation_library import (ComputationLibrary, NumpyLibrary,
-                                            PyTorchLibrary, TensorFlowLibrary,
+from SI_Toolkit.General.variable_parameters import VariableParameters
+from SI_Toolkit.computation_library import (ComputationLibrary, ComputationClasses,
+                                            NumpyLibrary, PyTorchLibrary, TensorFlowLibrary,
                                             TensorType)
-
-from types import SimpleNamespace
 
 config_cost_function = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
 logger = get_logger(__name__)
@@ -60,15 +58,13 @@ class template_controller(ABC):
                 raise ValueError(f"Computation library {computation_library_name} could not be interpreted.")
         else:
             # Try using default computation library set as class attribute
-            if not issubclass(self.computation_library, ComputationLibrary):
+            if not isinstance(self.computation_library, ComputationClasses):
                 raise ValueError(f"{self.__class__.__name__} does not have a default computation library set. You have to define one in this controller's config.")
             else:
                 logger.info(f"No computation library specified in controller config. Using default {self.computation_library} for class.")
 
         # Environment-related parameters
         self.environment_name = environment_name
-        self.initial_environment_attributes = {key: self.lib.to_variable(value, self.lib.float32) for key, value in initial_environment_attributes.items()}
-        self.variable_parameters = SimpleNamespace()
 
         self.control_limits = control_limits
         self.action_low, self.action_high = self.control_limits
@@ -80,9 +76,10 @@ class template_controller(ABC):
 
         if device is not None:
             self.configure = self.lib.set_device(device)(self.configure)
-            self.set_attributes = self.lib.set_device(device)(self.set_attributes)
 
-        self.set_attributes()
+        self.initial_environment_attributes = {key: self.lib.to_variable(value, self.lib.float32) for key, value in initial_environment_attributes.items()}
+        self.variable_parameters = VariableParameters(self.lib)
+        self.variable_parameters.set_attributes(self.initial_environment_attributes, device=device)
                 
         # Initialize control variable
         self.u = 0.0
@@ -107,19 +104,8 @@ class template_controller(ABC):
         pass
     
     def update_attributes(self, updated_attributes: "dict[str, TensorType]"):
-        for property, new_value in updated_attributes.items():
-            attr = getattr(self.variable_parameters, property)
-            self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
-            # This try-except was causing silent error! I comment it out on 1.05.2023
-            # If you see this comment after 1.08.2023 and this change is not causing problems
-            # Delete this comment with the commented lines below
-            # try:
-            #     # Assume the variable is an attribute type and assign
-            #     attr = getattr(self.variable_parameters, property)
-            #     self.computation_library.assign(attr, self.lib.to_tensor(new_value, attr.dtype))
-            # except:
-            #     setattr(self.variable_parameters, property, new_value)
-    
+        self.variable_parameters.update_attributes(updated_attributes)
+
     @abstractmethod
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         ### Any computations in order to retrieve the current control. Such as:
@@ -190,12 +176,3 @@ class template_controller(ABC):
                     self.logs[name].append(
                         var.numpy().copy() if hasattr(var, "numpy") else var.copy()
                     )
-
-    def set_attributes(self):
-        # Set properties like target positions on this controller
-        for p, v in self.initial_environment_attributes.items():
-            if type(v) in {np.ndarray, float, int, bool}:
-                data_type = getattr(v, "dtype", self.lib.float32)
-                data_type = self.lib.int32 if data_type == int else self.lib.float32
-                v = self.lib.to_variable(v, data_type)
-            setattr(self.variable_parameters, p, v)

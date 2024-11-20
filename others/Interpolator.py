@@ -35,15 +35,15 @@ class Interpolator:
             self.calculate_interpolation_matrix()
             self.interpolate = self._interpolate_Diego
         else:
-            if self.lib == NumpyLibrary:
+            if isinstance(self.lib, NumpyLibrary):
                 from scipy import interpolate
                 self.interpolate_f = interpolate.interp1d
                 self.interpolate = self._interpolate_np
-            if self.lib == TensorFlowLibrary:
+            if isinstance(self.lib, TensorFlowLibrary):
                 import tensorflow_probability as tfp
                 self.interpolate_f = tfp.math.interp_regular_1d_grid
                 self.interpolate = self._interpolate_tf
-            if self.lib == PyTorchLibrary:
+            if isinstance(self.lib, PyTorchLibrary):
                 raise NotImplementedError('There seems to be no generic interpolation function in Pytorch yet')
 
     @staticmethod
