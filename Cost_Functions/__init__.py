@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 
 class cost_function_base:
     # Default: Class supports all libs to compute costs
-    supported_computation_libraries = {NumpyLibrary, TensorFlowLibrary, PyTorchLibrary}
+    supported_computation_libraries = (NumpyLibrary, TensorFlowLibrary, PyTorchLibrary)
     # Define default values used for cost normalization
     MIN_COST = -1.0
     MAX_COST = 0.0
@@ -96,9 +96,9 @@ class cost_function_base:
         pass
 
     def set_computation_library(self, ComputationLib: "type[ComputationLibrary]"):
-        assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
-        if not ComputationLib in self.supported_computation_libraries:
-            raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
+        # assert isinstance(ComputationLib, type), "Need to set a library of type[ComputationLibrary]"
+        # if not ComputationLib in self.supported_computation_libraries:
+        #     raise ValueError(f"The cost function {self.__class__.__name__} does not support {ComputationLib.__name__}")
         self.lib = ComputationLib
 
     def set_logged_attributes(self, logged_attributes_dict):
