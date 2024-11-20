@@ -187,6 +187,28 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
+    def _gradient_iterations(self, s, iters: int):
+        # optimize control sequences with gradient based optimization
+        # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
+        for _ in range(0, iters):
+            Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
+            self.Q_tf.assign(Qn)
+
+            # check for convergence of optimization
+            # if bool(
+            #     tf.reduce_mean(
+            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
+            #     )
+            #     < self.rtol
+            # ):
+            #     # assume that we have converged sufficiently
+            #     break
+            # prev_cost = tf.identity(traj_cost)
+
+    @CompileTF
+    def gradient_iterations(self, s):
+        self._gradient_iterations(s, self.outer_its)
+
     @CompileTF
     def get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
@@ -246,26 +268,9 @@ class optimizer_rpgd_tf(template_optimizer):
 
         # warm start setup
         if self.count == 0:
-            iters = self.first_iter_count
-        else:
-            iters = self.outer_its
+            self._gradient_iterations(s, self.first_iter_count) # Not compiled, for single call not worth it
 
-        # optimize control sequences with gradient based optimization
-        # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
-        for _ in range(0, iters):
-            Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
-            self.Q_tf.assign(Qn)
-
-            # check for convergence of optimization
-            # if bool(
-            #     tf.reduce_mean(
-            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
-            #     )
-            #     < self.rtol
-            # ):
-            #     # assume that we have converged sufficiently
-            #     break
-            # prev_cost = tf.identity(traj_cost)
+        self.gradient_iterations(s)
 
         # Prepare warmstart
         (
