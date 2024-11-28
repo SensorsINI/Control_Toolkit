@@ -28,19 +28,28 @@ class controller_neural_imitator(template_controller):
 
         self.input_at_input = self.config_controller["input_at_input"]
 
-        self.state_2_input_idx = []
-        self.remaining_inputs = self.net_evaluator.net_info.inputs.copy()
-        for key in self.net_evaluator.net_info.inputs:
-            if key in STATE_INDICES.keys():
-                self.state_2_input_idx.append(STATE_INDICES.get(key))
-                self.remaining_inputs.remove(key)
-            else:
-                break  # state inputs must be adjacent in the current implementation
+        # Prepare input mapping
+        self.input_mapping = self._create_input_mapping()
 
         if self.controller_logging:
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_evaluator.net_info.net_full_name, self.net_evaluator.net_info.library))
+
+    def _create_input_mapping(self):
+        """
+        Creates a mapping for network inputs to their sources ('state' or 'variable_parameters').
+
+        Returns:
+            Dict[str, str]: A dictionary mapping input keys to their sources.
+        """
+        mapping = {}
+        for key in self.net_evaluator.net_info.inputs:
+            if key in STATE_INDICES:
+                mapping[key] = 'state'
+            else:
+                mapping[key] = 'variable_parameters'
+        return mapping
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
 
@@ -48,13 +57,40 @@ class controller_neural_imitator(template_controller):
             net_input = s
         else:
             self.update_attributes(updated_attributes)
-            net_input = s[..., self.state_2_input_idx]
-            for key in self.remaining_inputs:
-                net_input = np.append(net_input, getattr(self.variable_parameters, key))
+            net_input = self._compose_network_input(s)
 
         Q = self.net_evaluator.step(net_input)
 
         return Q
+
+    def _compose_network_input(self, state: np.ndarray) -> np.ndarray:
+        """
+        Composes the network input vector from state and variable parameters.
+
+        Args:
+            state (np.ndarray): Current state array.
+
+        Returns:
+            np.ndarray: Composed network input vector.
+        """
+        input_vector = []
+
+        for key, source in self.input_mapping.items():
+            if source == 'state':
+                idx = STATE_INDICES[key]
+                input_vector.append(state[idx])
+            elif source == 'variable_parameters':
+                try:
+                    value = getattr(self.variable_parameters, key)
+                    input_vector.append(value)
+                except AttributeError:
+                    raise ValueError(f"Variable parameter '{key}' not found in 'variable_parameters'.")
+            else:
+                raise ValueError(f"Unknown source '{source}' for input '{key}'.")
+
+        # Convert to numpy array and ensure correct shape
+        net_input = np.array(input_vector).reshape(-1)  # Assuming batch_size=1
+        return net_input
 
     def controller_reset(self):
         self.configure()
