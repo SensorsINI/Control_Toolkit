@@ -24,7 +24,7 @@ class controller_rl(template_controller):
     _computation_library = NumpyLibrary
 
     def configure(self):
-        self.cpe = CartPoleEquations(lib=NumpyLibrary)
+        self.cpe = CartPoleEquations(lib=NumpyLibrary())
         self.theta_threshold_radians = 12 * 2 * math.pi / 360
         self.x_threshold = self.cpe.params.TrackHalfLength
 
