@@ -19,7 +19,7 @@ class optimizer_rpgd_me_param_tf(template_optimizer):
     :param template_optimizer: A base optimizer with the required interface
     :type template_optimizer: abc.ABCMeta
     """
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary,)
     
     def __init__(
         self,

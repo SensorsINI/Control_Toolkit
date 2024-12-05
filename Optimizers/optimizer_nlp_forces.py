@@ -33,7 +33,7 @@ import Control_Toolkit_ASF.Forces_interfaces.initial_guess_forces_interface
 import Control_Toolkit_ASF.Forces_interfaces.target_forces_interface
 
 class optimizer_nlp_forces(template_optimizer):
-    supported_computation_libraries = {TensorFlowLibrary}
+    supported_computation_libraries = (TensorFlowLibrary,)
 
     def __init__(
             self,
