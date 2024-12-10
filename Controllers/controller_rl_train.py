@@ -30,8 +30,11 @@ class controller_rl_train(template_controller):
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         #TODO: wait for learn thread to call step?
         # if train
+        # print('step')
+        # self.Q_last = self.action
         if self.action_ready == True:
             # print("I GOT HERE")
+            # print('action ready')
             self.Q_last = self.action
             self.action_ready = False
         # print("step is being used")
