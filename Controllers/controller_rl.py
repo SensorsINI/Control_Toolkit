@@ -27,6 +27,9 @@ class controller_rl(template_controller):
         self.cpe = CartPoleEquations(lib=NumpyLibrary())
         self.theta_threshold_radians = 12 * 2 * math.pi / 360
         self.x_threshold = self.cpe.params.TrackHalfLength
+        self.smooth = False
+        self.q_last = 0.0
+        self.q_last_last = 0.0
 
         high = np.array(
             [
@@ -48,6 +51,11 @@ class controller_rl(template_controller):
 
     def step(self, s: np.ndarray, time=None, updated_attributes: "dict[str, TensorType]" = {}):
         Q, _states = self.rl_model.predict(s, deterministic=True)
+        if self.smooth:
+            Q = (Q + self.q_last) / 2
+            # Q = (Q + self.q_last + self.q_last_last)/3
+            # self.q_last_last = self.q_last
+            self.q_last = Q
         return Q
 
     def controller_reset(self):
