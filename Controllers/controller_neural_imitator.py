@@ -61,6 +61,8 @@ class controller_neural_imitator(template_controller):
 
         Q = self.net_evaluator.step(net_input)
 
+        Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
+
         return Q
 
     def _compose_network_input(self, state: np.ndarray) -> np.ndarray:
