@@ -173,11 +173,18 @@ class optimizer_rpgd_tf(template_optimizer):
         )
         return traj_cost, rollout_trajectory
 
-    def _grad_step(
+    def _grad_step(self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer):
+        # dispatch to the TF or Torch implementation *and* return its outputs
+        if isinstance(self.lib, TensorFlowLibrary):
+            return self._grad_step_tf(s, Q, opt)
+        else:
+            return self._grad_step_torch(s, Q, opt)
+
+    def _grad_step_tf(
         self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
+        with self.lib.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(Q)
             traj_cost, _ = self.predict_and_cost(s, Q)
         # retrieve gradient of cost w.r.t. input sequence
@@ -188,6 +195,29 @@ class optimizer_rpgd_tf(template_optimizer):
         # clip
         Qn = self.lib.clip(Q, self.action_low, self.action_high)
         return Qn, traj_cost
+
+    def _grad_step_torch(
+            self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer
+    ):
+        # --- PyTorch branch ---------------------------
+        # ensure Q collects gradients
+        Q.requires_grad_(True)
+        traj_cost, _ = self.predict_and_cost(s, Q)
+        # sum over rollouts to get a scalar
+        loss = traj_cost.sum()
+        opt.zero_grad()
+        loss.backward()
+        # raw gradient
+        dc_dQ = Q.grad
+        # clip by norm
+        dc_dQ_prc = self.lib.clip_by_norm(dc_dQ, self.gradmax_clip, [1, 2])
+        # manually inject the clipped grad before stepping
+        Q.grad = dc_dQ_prc
+        opt.step()
+        # clip outputs, detach for next iteration
+        Qn = self.lib.clip(Q.detach(), self.action_low, self.action_high)
+        # set up new leaf with grad enabled
+        return Qn.clone().detach().requires_grad_(True), traj_cost.detach()
 
     def _get_action(self, s: TensorType, Q: VariableType):
         # Rollout trajectories and retrieve cost
