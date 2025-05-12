@@ -95,13 +95,8 @@ class optimizer_rpgd_tf(template_optimizer):
         # Build optimizer based on library
         if isinstance(self.lib, TensorFlowLibrary):
             import tensorflow as tf
-            current_tf_version = tf.__version__.split('.')
-            if int(current_tf_version[1]) > 10:
-                Adam = tf.keras.optimizers.legacy.Adam
-            else:
-                Adam = tf.keras.optimizers.Adam
 
-            self.opt = Adam(
+            self.opt = tf.keras.optimizers.Adam(
                 learning_rate=learning_rate,
                 beta_1=adam_beta_1,
                 beta_2=adam_beta_2,
@@ -334,7 +329,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # Solution for new TF>2.10 adam optimizer, now using legacy instead
         # adam_weights_variables = self.opt.variables()
         # adam_weights = [v.numpy() for v in adam_weights_variables]
-        adam_weights = self.opt.get_weights()
+        adam_weights = self.adam_get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
@@ -381,7 +376,7 @@ class optimizer_rpgd_tf(template_optimizer):
                 w1 = self.lib.concat([w1, wk1], 0)
                 w2 = self.lib.concat([w2, wk2], 0)
                 # Set weights
-                self.opt.set_weights([adam_weights[0], w1, w2])
+                self.adam_set_weights([adam_weights[0], w1, w2])
         else:
             if len(adam_weights) > 0:
                 # if it is not time to reset, all optimizer weights are shifted for a warmstart
@@ -399,7 +394,7 @@ class optimizer_rpgd_tf(template_optimizer):
                     ],
                     1,
                 )
-                self.opt.set_weights([adam_weights[0], w1, w2])
+                self.adam_set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
         self.Q_tf.assign(Qn)
         self.count += 1
@@ -411,6 +406,27 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.u = self.u_nom[0, 0, :].numpy()
         return self.u
+
+    def adam_get_weights(self):
+        # Gather every tf.Variable storing Adam’s state:
+        #   iteration count, beta-power accumulators, then m/v for each var.
+        state_vars = self.opt.variables()
+        # Convert each to a NumPy array so they can be serialized/passed around.
+        return [var.numpy() for var in state_vars]
+
+    def adam_set_weights(self, weights):
+        # Retrieve the same list of state variables
+        state_vars = self.opt.variables()
+        # Guard against wrong number of arrays
+        if len(weights) != len(state_vars):
+            raise ValueError(
+                f"Expected {len(state_vars)} arrays but got {len(weights)}"
+            )
+        # Assign each provided array back into the optimizer’s variables.
+        for var, w in zip(state_vars, weights):
+            # .assign will convert Python/numpy to the correct tf.dtype automatically.
+            var.assign(w)
+
 
     def optimizer_reset(self):
         # # unnecessary part: Adaptive sampling distribution
@@ -440,6 +456,6 @@ class optimizer_rpgd_tf(template_optimizer):
         # Next line should be changed for new adam optimizer, I don't know yet how.
         # It is probably something like
         # self.opt.build([self.lib(self.lib.zeros_like(???), self.lib.float32) for el in adam_weights])
-        adam_weights = self.opt.get_weights()
-        self.opt.set_weights([self.lib.zeros_like(el) for el in adam_weights])
+        adam_weights = self.adam_get_weights()
+        self.adam_set_weights([self.lib.zeros_like(el) for el in adam_weights])
         self.trajectory_ages = self.lib.zeros((self.num_rollouts,))
