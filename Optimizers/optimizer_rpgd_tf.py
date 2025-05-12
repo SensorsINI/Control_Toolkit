@@ -64,16 +64,16 @@ class optimizer_rpgd_tf(template_optimizer):
         # RPGD parameters
         self.outer_its = outer_its
 
-        self.sample_stdev = tf.convert_to_tensor(sample_stdev, dtype=tf.float32)
-        self.sample_mean = tf.convert_to_tensor(sample_mean, dtype=tf.float32)
+        self.sample_stdev = self.lib.to_tensor(sample_stdev, self.lib.float32)
+        self.sample_mean = self.lib.to_tensor(sample_mean, self.lib.float32)
 
         self.sample_whole_control_space = sample_whole_control_space
         if self.sample_whole_control_space:
-            self.sample_min = tf.convert_to_tensor(self.action_low, dtype=tf.float32)
-            self.sample_max = tf.convert_to_tensor(self.action_high, dtype=tf.float32)
+            self.sample_min = self.lib.to_tensor(self.action_low, self.lib.float32)
+            self.sample_max = self.lib.to_tensor(self.action_high, self.lib.float32)
         else:
-            self.sample_min = tf.convert_to_tensor(uniform_dist_min, dtype=tf.float32)
-            self.sample_max = tf.convert_to_tensor(uniform_dist_max, dtype=tf.float32)
+            self.sample_min = self.lib.to_tensor(uniform_dist_min, self.lib.float32)
+            self.sample_max = self.lib.to_tensor(uniform_dist_max, self.lib.float32)
 
         self.resamp_per = resamp_per
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
@@ -81,7 +81,7 @@ class optimizer_rpgd_tf(template_optimizer):
         self.do_warmup = warmup
         self.warmup_iterations = warmup_iterations
         self.opt_keep_k = int(max(int(num_rollouts * opt_keep_k_ratio), 1))
-        self.gradmax_clip = tf.constant(gradmax_clip, dtype=tf.float32)
+        self.gradmax_clip = self.lib.constant(gradmax_clip, self.lib.float32)
         self.rtol = rtol
         self.SAMPLING_DISTRIBUTION = SAMPLING_DISTRIBUTION
 
@@ -145,14 +145,14 @@ class optimizer_rpgd_tf(template_optimizer):
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
                 mean=self.sample_mean,
                 stddev=self.sample_stdev,
-                dtype=tf.float32,
+                dtype=self.lib.float32,
             )
         elif self.SAMPLING_DISTRIBUTION == "uniform":
             Qn = rng_gen.uniform(
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
                 minval=self.sample_min,
                 maxval=self.sample_max,
-                dtype=tf.float32,
+                dtype=self.lib.float32,
             )
         else:
             raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
@@ -225,7 +225,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # # End of unnecessary part
 
         # Retrieve optimal input and warmstart for next iteration
-        Qn = tf.concat(
+        Qn = self.lib.concat(
             [Q[:, self.shift_previous:, :], self.lib.tile(Q[:, -1:, :], (1, self.shift_previous, 1))]
             , axis=1)
         return Qn, best_idx, traj_cost, rollout_trajectory
@@ -241,8 +241,8 @@ class optimizer_rpgd_tf(template_optimizer):
             self.logging_values = {"s_logged": s.copy()}
             
         # tile inital state and convert inputs to tensorflow tensors
-        s = np.tile(s, tf.constant([self.num_rollouts, 1]))
-        s = tf.convert_to_tensor(s, dtype=tf.float32)
+        s = np.tile(s, self.lib.constant([self.num_rollouts, 1], self.lib.int64))
+        s = self.lib.to_tensor(s, self.lib.float32)
 
         # warm start setup
         if self.count == 0:
@@ -251,15 +251,15 @@ class optimizer_rpgd_tf(template_optimizer):
             iters = self.outer_its
 
         # optimize control sequences with gradient based optimization
-        # prev_cost = tf.convert_to_tensor(np.inf, dtype=tf.float32)
+        # prev_cost = self.lib.to_tensor(np.inf, self.lib.float32)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
             self.Q_tf.assign(Qn)
 
             # check for convergence of optimization
             # if bool(
-            #     tf.reduce_mean(
-            #         tf.math.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
+            #     self.lib.reduce_mean(
+            #         self.lib.abs((traj_cost - prev_cost) / (prev_cost + self.rtol))
             #     )
             #     < self.rtol
             # ):
@@ -274,7 +274,7 @@ class optimizer_rpgd_tf(template_optimizer):
             J,
             self.rollout_trajectories,
         ) = self.get_action(s, self.Q_tf)
-        self.u_nom = self.Q_tf[tf.newaxis, best_idx[0], :, :]
+        self.u_nom = self.Q_tf[self.lib.newaxis, best_idx[0], :, :]
         
         if self.optimizer_logging:
             self.logging_values["Q_logged"] = self.Q_tf.numpy()
@@ -298,30 +298,30 @@ class optimizer_rpgd_tf(template_optimizer):
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
-            Qn = tf.concat([Qres, Q_keep], axis=0)
-            self.trajectory_ages = tf.concat([
-                tf.zeros(self.num_rollouts - self.opt_keep_k, dtype=tf.int32),
+            Qn = self.lib.concat([Qres, Q_keep], 0)
+            self.trajectory_ages = self.lib.concat([
+                self.lib.zeros(self.num_rollouts - self.opt_keep_k),
                 tf.gather(self.trajectory_ages, best_idx),
-            ], axis=0)
+            ], 0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
                 wk1 = tf.concat(
                     [
                         tf.gather(adam_weights[1], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                        self.lib.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     axis=1,
                 )
-                wk2 = tf.concat(
+                wk2 = self.lib.concat(
                     [
                         tf.gather(adam_weights[2], best_idx)[:, 1:, :],
-                        tf.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
+                        self.lib.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
-                    axis=1,
+                    1,
                 )
                 # For the new trajectories they are reset to 0
-                w1 = tf.zeros(
+                w1 = self.lib.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
                         self.mpc_horizon,
@@ -335,26 +335,26 @@ class optimizer_rpgd_tf(template_optimizer):
                         self.num_control_inputs,
                     ]
                 )
-                w1 = tf.concat([w1, wk1], axis=0)
-                w2 = tf.concat([w2, wk2], axis=0)
+                w1 = self.lib.concat([w1, wk1], 0)
+                w2 = self.lib.concat([w2, wk2], 0)
                 # Set weights
                 self.opt.set_weights([adam_weights[0], w1, w2])
         else:
             if len(adam_weights) > 0:
                 # if it is not time to reset, all optimizer weights are shifted for a warmstart
-                w1 = tf.concat(
+                w1 = self.lib.concat(
                     [
                         adam_weights[1][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        self.lib.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                     ],
-                    axis=1,
+                    1,
                 )
-                w2 = tf.concat(
+                w2 = self.lib.concat(
                     [
                         adam_weights[2][:, 1:, :],
-                        tf.zeros([self.num_rollouts, 1, self.num_control_inputs]),
+                        self.lib.zeros([self.num_rollouts, 1, self.num_control_inputs]),
                     ],
-                    axis=1,
+                    1,
                 )
                 self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
@@ -374,9 +374,9 @@ class optimizer_rpgd_tf(template_optimizer):
         # self.dist_mue = (
         #     (self.action_low + self.action_high)
         #     * 0.5
-        #     * tf.ones([1, self.mpc_horizon, self.num_control_inputs])
+        #     * self.lib.ones([1, self.mpc_horizon, self.num_control_inputs])
         # )
-        # self.stdev = self.sample_stdev * tf.ones(
+        # self.stdev = self.sample_stdev * self.lib.ones(
         #     [1, self.mpc_horizon, self.num_control_inputs]
         # )
         # # end of unnecessary part
@@ -386,7 +386,7 @@ class optimizer_rpgd_tf(template_optimizer):
         if hasattr(self, "Q_tf"):
             self.Q_tf.assign(Qn)
         else:
-            self.Q_tf = tf.Variable(Qn)
+            self.Q_tf = self.lib.to_variable(Qn, self.lib.float32)
         self.count = 0
 
         # reset optimizer
@@ -396,7 +396,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         # Next line should be changed for new adam optimizer, I don't know yet how.
         # It is probably something like
-        # self.opt.build([tf.Variable(tf.zeros_like(???)) for el in adam_weights])
+        # self.opt.build([self.lib(self.lib.zeros_like(???), self.lib.float32) for el in adam_weights])
         adam_weights = self.opt.get_weights()
-        self.opt.set_weights([tf.zeros_like(el) for el in adam_weights])
-        self.trajectory_ages: tf.Tensor = tf.zeros((self.num_rollouts), dtype=tf.int32)
+        self.opt.set_weights([self.lib.zeros_like(el) for el in adam_weights])
+        self.trajectory_ages = self.lib.zeros((self.num_rollouts,))
