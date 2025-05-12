@@ -11,6 +11,74 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 logger = get_logger(__name__)
 
 
+class ADAM:
+    """
+    A class to represent the ADAM optimizer.
+    """
+
+    def __init__(self, lib, learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+
+        self.lib = lib
+
+        self.learning_rate = learning_rate
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
+
+        self.adam = None
+
+    def build_optimizer(self, num_rollouts: int, mpc_horizon: int, control_limits: Tuple[np.ndarray, np.ndarray]):
+
+        # Build optimizer based on library
+        if isinstance(self.lib, TensorFlowLibrary):
+            import tensorflow as tf
+
+            self.adam = tf.keras.optimizers.Adam(
+                learning_rate=self.learning_rate,
+                beta_1=self.beta_1,
+                beta_2=self.beta_2,
+                epsilon=self.epsilon,
+            )
+        else:
+            # PyTorch Adam
+            import torch
+            self.adam = torch.optim.Adam(
+                params=[self.lib.to_tensor(np.zeros((num_rollouts, mpc_horizon, control_limits[0].shape[-1])),
+                                           self.lib.float32)],
+                lr=self.learning_rate,
+                betas=(self.beta_1, self.beta_2),
+                eps=self.epsilon,
+            )
+
+    def apply_gradients(self, grads_and_vars):
+        self.adam.apply_gradients(grads_and_vars)
+
+    def get_weights(self):
+        # Gather every tf.Variable storing Adam’s state:
+        #   iteration count, beta-power accumulators, then m/v for each var.
+        state_vars = self.adam.variables()
+        # Convert each to a NumPy array so they can be serialized/passed around.
+        return [var.numpy() for var in state_vars]
+
+    def set_weights(self, weights):
+        # Retrieve the same list of state variables
+        state_vars = self.adam.variables()
+        # Guard against wrong number of arrays
+        if len(weights) != len(state_vars):
+            raise ValueError(
+                f"Expected {len(state_vars)} arrays but got {len(weights)}"
+            )
+        # Assign each provided array back into the optimizer’s variables.
+        for var, w in zip(state_vars, weights):
+            # .assign will convert Python/numpy to the correct tf.dtype automatically.
+            var.assign(w)
+
+    def reset(self):
+        adam_weights = self.get_weights()
+        self.set_weights([self.lib.zeros_like(el) for el in adam_weights])
+
+
+
 class optimizer_rpgd_tf(template_optimizer):
     supported_computation_libraries = (TensorFlowLibrary, PyTorchLibrary)
     
@@ -92,26 +160,9 @@ class optimizer_rpgd_tf(template_optimizer):
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.Interpolator = None
 
-        # Build optimizer based on library
-        if isinstance(self.lib, TensorFlowLibrary):
-            import tensorflow as tf
-
-            self.opt = tf.keras.optimizers.Adam(
-                learning_rate=learning_rate,
-                beta_1=adam_beta_1,
-                beta_2=adam_beta_2,
-                epsilon=adam_epsilon,
-            )
-        else:
-            # PyTorch Adam
-            import torch
-            self.opt = torch.optim.Adam(
-                params=[self.lib.to_tensor(np.zeros((num_rollouts, mpc_horizon, control_limits[0].shape[-1])),
-                                           self.lib.float32)],
-                lr=learning_rate,
-                betas=(adam_beta_1, adam_beta_2),
-                eps=adam_epsilon,
-            )
+        self.opt = ADAM(self.lib, learning_rate=learning_rate, beta_1=adam_beta_1,
+                        beta_2=adam_beta_2, epsilon=adam_epsilon)
+        self.opt.build_optimizer(num_rollouts, mpc_horizon, control_limits)
 
         self.calculate_optimal_trajectory = calculate_optimal_trajectory
         self.optimal_trajectory = None
@@ -329,7 +380,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # Solution for new TF>2.10 adam optimizer, now using legacy instead
         # adam_weights_variables = self.opt.variables()
         # adam_weights = [v.numpy() for v in adam_weights_variables]
-        adam_weights = self.adam_get_weights()
+        adam_weights = self.opt.get_weights()
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
@@ -376,7 +427,7 @@ class optimizer_rpgd_tf(template_optimizer):
                 w1 = self.lib.concat([w1, wk1], 0)
                 w2 = self.lib.concat([w2, wk2], 0)
                 # Set weights
-                self.adam_set_weights([adam_weights[0], w1, w2])
+                self.opt.set_weights([adam_weights[0], w1, w2])
         else:
             if len(adam_weights) > 0:
                 # if it is not time to reset, all optimizer weights are shifted for a warmstart
@@ -394,7 +445,7 @@ class optimizer_rpgd_tf(template_optimizer):
                     ],
                     1,
                 )
-                self.adam_set_weights([adam_weights[0], w1, w2])
+                self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
         self.Q_tf.assign(Qn)
         self.count += 1
@@ -406,26 +457,6 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.u = self.u_nom[0, 0, :].numpy()
         return self.u
-
-    def adam_get_weights(self):
-        # Gather every tf.Variable storing Adam’s state:
-        #   iteration count, beta-power accumulators, then m/v for each var.
-        state_vars = self.opt.variables()
-        # Convert each to a NumPy array so they can be serialized/passed around.
-        return [var.numpy() for var in state_vars]
-
-    def adam_set_weights(self, weights):
-        # Retrieve the same list of state variables
-        state_vars = self.opt.variables()
-        # Guard against wrong number of arrays
-        if len(weights) != len(state_vars):
-            raise ValueError(
-                f"Expected {len(state_vars)} arrays but got {len(weights)}"
-            )
-        # Assign each provided array back into the optimizer’s variables.
-        for var, w in zip(state_vars, weights):
-            # .assign will convert Python/numpy to the correct tf.dtype automatically.
-            var.assign(w)
 
 
     def optimizer_reset(self):
@@ -448,14 +479,5 @@ class optimizer_rpgd_tf(template_optimizer):
             self.Q_tf = self.lib.to_variable(Qn, self.lib.float32)
         self.count = 0
 
-        # reset optimizer
-        # Solution for new TF>2.10 adam optimizer, now using legacy instead
-        # adam_weights_variables = self.opt.variables()
-        # adam_weights = [v.numpy() for v in adam_weights_variables]
-
-        # Next line should be changed for new adam optimizer, I don't know yet how.
-        # It is probably something like
-        # self.opt.build([self.lib(self.lib.zeros_like(???), self.lib.float32) for el in adam_weights])
-        adam_weights = self.adam_get_weights()
-        self.adam_set_weights([self.lib.zeros_like(el) for el in adam_weights])
+        self.opt.reset()
         self.trajectory_ages = self.lib.zeros((self.num_rollouts,))
