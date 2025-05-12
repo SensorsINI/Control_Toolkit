@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF, get_logger
+from Control_Toolkit.others.globals_and_utils import CompileAdaptive, get_logger
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 
@@ -110,7 +110,10 @@ class optimizer_rpgd_tf(template_optimizer):
         self.optimal_trajectory = None
         self.summed_stage_cost = None
         self.optimal_control_sequence = None
-        self.predict_optimal_trajectory = CompileTF(self._predict_optimal_trajectory)
+
+        self.get_action = CompileAdaptive(self._get_action)
+        self.grad_step = CompileAdaptive(self._grad_step)
+        self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
 
     def configure(self,
                   num_states: int,
@@ -170,8 +173,7 @@ class optimizer_rpgd_tf(template_optimizer):
         )
         return traj_cost, rollout_trajectory
 
-    @CompileTF
-    def grad_step(
+    def _grad_step(
         self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
@@ -187,8 +189,7 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    @CompileTF
-    def get_action(self, s: tf.Tensor, Q: tf.Variable):
+    def _get_action(self, s: tf.Tensor, Q: tf.Variable):
         # Rollout trajectories and retrieve cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         
