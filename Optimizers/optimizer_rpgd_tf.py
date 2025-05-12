@@ -1,8 +1,7 @@
-from typing import Tuple
+from typing import Tuple, Any
 from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary, TensorType, VariableType
 
 import numpy as np
-import tensorflow as tf
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
 from Control_Toolkit.others.globals_and_utils import CompileAdaptive, get_logger
@@ -93,18 +92,31 @@ class optimizer_rpgd_tf(template_optimizer):
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.Interpolator = None
 
-        current_tf_version = tf.__version__.split('.')
-        if int(current_tf_version[1]) > 10:
-            Adam = tf.keras.optimizers.legacy.Adam
-        else:
-            Adam = tf.keras.optimizers.Adam
+        # Build optimizer based on library
+        if isinstance(self.lib, TensorFlowLibrary):
+            import tensorflow as tf
+            current_tf_version = tf.__version__.split('.')
+            if int(current_tf_version[1]) > 10:
+                Adam = tf.keras.optimizers.legacy.Adam
+            else:
+                Adam = tf.keras.optimizers.Adam
 
-        self.opt = Adam(
-            learning_rate=learning_rate,
-            beta_1=adam_beta_1,
-            beta_2=adam_beta_2,
-            epsilon=adam_epsilon,
-        )
+            self.opt = Adam(
+                learning_rate=learning_rate,
+                beta_1=adam_beta_1,
+                beta_2=adam_beta_2,
+                epsilon=adam_epsilon,
+            )
+        else:
+            # PyTorch Adam
+            import torch
+            self.opt = torch.optim.Adam(
+                params=[self.lib.to_tensor(np.zeros((num_rollouts, mpc_horizon, control_limits[0].shape[-1])),
+                                           self.lib.float32)],
+                lr=learning_rate,
+                betas=(adam_beta_1, adam_beta_2),
+                eps=adam_epsilon,
+            )
 
         self.calculate_optimal_trajectory = calculate_optimal_trajectory
         self.optimal_trajectory = None
@@ -142,7 +154,7 @@ class optimizer_rpgd_tf(template_optimizer):
 
         self.optimizer_reset()
 
-    def sample_actions(self, rng_gen: tf.random.Generator, batch_size: int):
+    def sample_actions(self, rng_gen: Any, batch_size: int):
         if self.SAMPLING_DISTRIBUTION == "normal":
             Qn = rng_gen.normal(
                 [batch_size, self.Interpolator.number_of_interpolation_inducing_points, self.num_control_inputs],
@@ -173,7 +185,7 @@ class optimizer_rpgd_tf(template_optimizer):
         )
         return traj_cost, rollout_trajectory
 
-    def _grad_step(self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer):
+    def _grad_step(self, s: TensorType, Q: VariableType, opt: Any):
         # dispatch to the TF or Torch implementation *and* return its outputs
         if isinstance(self.lib, TensorFlowLibrary):
             return self._grad_step_tf(s, Q, opt)
@@ -181,7 +193,7 @@ class optimizer_rpgd_tf(template_optimizer):
             return self._grad_step_torch(s, Q, opt)
 
     def _grad_step_tf(
-        self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer
+        self, s: TensorType, Q: VariableType, opt: Any
     ):
         # rollout trajectories and retrieve cost
         with self.lib.GradientTape(watch_accessed_variables=False) as tape:
@@ -197,7 +209,7 @@ class optimizer_rpgd_tf(template_optimizer):
         return Qn, traj_cost
 
     def _grad_step_torch(
-            self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer
+            self, s: TensorType, Q: VariableType, opt: Any
     ):
         # --- PyTorch branch ---------------------------
         # ensure Q collects gradients
