@@ -1,5 +1,5 @@
 from typing import Tuple
-from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary
+from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary, TensorType, VariableType
 
 import numpy as np
 import tensorflow as tf
@@ -159,13 +159,13 @@ class optimizer_rpgd_tf(template_optimizer):
             )
         else:
             raise ValueError(f"RPGD cannot interpret sampling type {self.SAMPLING_DISTRIBUTION}")
-        Qn = tf.clip_by_value(Qn, self.action_low, self.action_high)
+        Qn = self.lib.clip(Qn, self.action_low, self.action_high)
 
         Qn = self.Interpolator.interpolate(Qn)
 
         return Qn
 
-    def predict_and_cost(self, s: tf.Tensor, Q: tf.Variable):
+    def predict_and_cost(self, s: TensorType, Q: VariableType):
         # rollout trajectories and retrieve cost
         rollout_trajectory = self.predictor.predict_core(s, Q)
         traj_cost = self.cost_function.get_trajectory_cost(
@@ -174,7 +174,7 @@ class optimizer_rpgd_tf(template_optimizer):
         return traj_cost, rollout_trajectory
 
     def _grad_step(
-        self, s: tf.Tensor, Q: tf.Variable, opt: tf.keras.optimizers.Optimizer
+        self, s: TensorType, Q: VariableType, opt: tf.keras.optimizers.Optimizer
     ):
         # rollout trajectories and retrieve cost
         with tf.GradientTape(watch_accessed_variables=False) as tape:
@@ -182,46 +182,46 @@ class optimizer_rpgd_tf(template_optimizer):
             traj_cost, _ = self.predict_and_cost(s, Q)
         # retrieve gradient of cost w.r.t. input sequence
         dc_dQ = tape.gradient(traj_cost, Q)
-        dc_dQ_prc = tf.clip_by_norm(dc_dQ, self.gradmax_clip, axes=[1, 2])
+        dc_dQ_prc = self.lib.clip_by_norm(dc_dQ, self.gradmax_clip, [1, 2])
         # use optimizer to apply gradients and retrieve next set of input sequences
         opt.apply_gradients(zip([dc_dQ_prc], [Q]))
         # clip
-        Qn = tf.clip_by_value(Q, self.action_low, self.action_high)
+        Qn = self.lib.clip(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    def _get_action(self, s: tf.Tensor, Q: tf.Variable):
+    def _get_action(self, s: TensorType, Q: VariableType):
         # Rollout trajectories and retrieve cost
         traj_cost, rollout_trajectory = self.predict_and_cost(s, Q)
         
         # sort the costs and find best k costs
-        sorted_cost = tf.argsort(traj_cost)
+        sorted_cost = self.lib.argsort(traj_cost, 0)
         best_idx = sorted_cost[: self.opt_keep_k]
 
         # # Unnecessary Part
         # # get distribution of kept trajectories. This is actually unnecessary for this optimizer, might be incorparated into another one tho
-        # elite_Q = tf.gather(Q, best_idx, axis=0)
-        # dist_mue = tf.math.reduce_mean(elite_Q, axis=0, keepdims=True)
-        # dist_std = tf.math.reduce_std(elite_Q, axis=0, keepdims=True)
+        # elite_Q = self.lib.gather(Q, best_idx, axis=0)
+        # dist_mue = self.lib.reduce_mean(elite_Q, axis=0, keepdims=True)
+        # dist_std = self.lib.reduce_std(elite_Q, axis=0, keepdims=True)
 
-        # dist_mue = tf.concat(
+        # dist_mue = self.lib.concat(
         #     [
         #         dist_mue[:, 1:, :],
         #         (self.action_low + self.action_high)
         #         * 0.5
-        #         * tf.ones([1, 1, self.num_control_inputs]),
+        #         * self.lib.ones([1, 1, self.num_control_inputs]),
         #     ],
-        #     axis=1,
+        #     1,
         # )
 
         # # after all inner loops, clip std min, so enough is explored and shove all the values down by one for next control input
-        # dist_std = tf.clip_by_value(dist_std, self.sample_stdev, 10.0)
-        # dist_std = tf.concat(
+        # dist_std = self.lib.clip(dist_std, self.sample_stdev, 10.0)
+        # dist_std = self.lib.concat(
         #     [
         #         dist_std[:, 1:, :],
         #         self.sample_stdev
-        #         * tf.ones(shape=[1, 1, self.num_control_inputs]),
+        #         * self.lib.ones(shape=[1, 1, self.num_control_inputs]),
         #     ],
-        #     axis=1,
+        #     1,
         # )
         # # End of unnecessary part
 
@@ -298,25 +298,25 @@ class optimizer_rpgd_tf(template_optimizer):
             Qres = self.sample_actions(
                 self.rng, self.num_rollouts - self.opt_keep_k
             )
-            Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
+            Q_keep = self.lib.gather(Qn, best_idx, 0)  # resorting according to costs
             Qn = self.lib.concat([Qres, Q_keep], 0)
             self.trajectory_ages = self.lib.concat([
                 self.lib.zeros((self.num_rollouts - self.opt_keep_k,)),
-                tf.gather(self.trajectory_ages, best_idx),
+                self.lib.gather(self.trajectory_ages, best_idx, 0),
             ], 0)
             # Updating the weights of adam:
             # For the trajectories which are kept, the weights are shifted for a warmstart
             if len(adam_weights) > 0:
-                wk1 = tf.concat(
+                wk1 = self.lib.concat(
                     [
-                        tf.gather(adam_weights[1], best_idx)[:, 1:, :],
+                        self.lib.gather(adam_weights[1], best_idx, 0)[:, 1:, :],
                         self.lib.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
-                    axis=1,
+                    1,
                 )
                 wk2 = self.lib.concat(
                     [
-                        tf.gather(adam_weights[2], best_idx)[:, 1:, :],
+                        self.lib.gather(adam_weights[2], best_idx, 0)[:, 1:, :],
                         self.lib.zeros([self.opt_keep_k, 1, self.num_control_inputs]),
                     ],
                     1,
@@ -329,7 +329,7 @@ class optimizer_rpgd_tf(template_optimizer):
                         self.num_control_inputs,
                     ]
                 )
-                w2 = tf.zeros(
+                w2 = self.lib.zeros(
                     [
                         self.num_rollouts - self.opt_keep_k,
                         self.mpc_horizon,
