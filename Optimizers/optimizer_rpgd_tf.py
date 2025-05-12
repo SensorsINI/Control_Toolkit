@@ -1,5 +1,5 @@
 from typing import Tuple, Any
-from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary, TensorType, VariableType
+from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary, PyTorchLibrary, TensorType, VariableType
 
 import numpy as np
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 class optimizer_rpgd_tf(template_optimizer):
-    supported_computation_libraries = (TensorFlowLibrary,)
+    supported_computation_libraries = (TensorFlowLibrary, PyTorchLibrary)
     
     def __init__(
         self,
