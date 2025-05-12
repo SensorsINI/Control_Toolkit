@@ -300,7 +300,7 @@ class optimizer_rpgd_tf(template_optimizer):
             Q_keep = tf.gather(Qn, best_idx)  # resorting according to costs
             Qn = self.lib.concat([Qres, Q_keep], 0)
             self.trajectory_ages = self.lib.concat([
-                self.lib.zeros(self.num_rollouts - self.opt_keep_k),
+                self.lib.zeros((self.num_rollouts - self.opt_keep_k,)),
                 tf.gather(self.trajectory_ages, best_idx),
             ], 0)
             # Updating the weights of adam:
