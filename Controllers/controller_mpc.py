@@ -94,7 +94,7 @@ class controller_mpc(template_controller):
         self.controller_data_for_csv = self.cost_function.cost_function.logged_attributes
 
         if self.lib.lib == 'Pytorch':
-            self.step = self.lib.set_device(self.config_controller["device"])(inference_mode()(self.step))
+            self.step = self.lib.set_device(self.config_controller["device"])(self.step)
         else:
             self.step = self.lib.set_device(self.config_controller["device"])(self.step)
 
