@@ -26,6 +26,7 @@ class ADAM:
         self.epsilon = epsilon
 
         self.adam = None
+        self._torch_state = None
 
     def build_optimizer(self, num_rollouts: int, mpc_horizon: int, control_limits: Tuple[np.ndarray, np.ndarray]):
 
@@ -39,43 +40,88 @@ class ADAM:
                 beta_2=self.beta_2,
                 epsilon=self.epsilon,
             )
+        # PyTorch branch
         else:
-            # PyTorch Adam
-            import torch
-            self.adam = torch.optim.Adam(
-                params=[self.lib.to_tensor(np.zeros((num_rollouts, mpc_horizon, control_limits[0].shape[-1])),
-                                           self.lib.float32)],
-                lr=self.learning_rate,
-                betas=(self.beta_1, self.beta_2),
-                eps=self.epsilon,
-            )
+            # We’ll implement Adam ourselves, so just init state
+            self.adam = None
+            self._torch_state = {'step': 0, 'm': None, 'v': None}
 
     def apply_gradients(self, grads_and_vars):
-        self.adam.apply_gradients(grads_and_vars)
+        # TensorFlow: delegate to tf.keras
+        if isinstance(self.lib, TensorFlowLibrary):
+            self.adam.apply_gradients(grads_and_vars)
+            return
+
+        # PyTorch: manual Adam update
+        import torch
+        state = self._torch_state
+        state['step'] += 1
+        updated = []
+
+        for grad, var in grads_and_vars:
+            if state['m'] is None:
+                state['m'] = torch.zeros_like(grad)
+                state['v'] = torch.zeros_like(grad)
+
+            # first & second moment
+            m = state['m'].mul(self.beta_1).add(grad, alpha=1 - self.beta_1)
+            v = state['v'].mul(self.beta_2).add(grad * grad, alpha=1 - self.beta_2)
+            state['m'], state['v'] = m, v
+
+            # bias correction
+            bc1 = 1 - self.beta_1 ** state['step']
+            bc2 = 1 - self.beta_2 ** state['step']
+            m_hat = m.div(bc1)
+            v_hat = v.div(bc2)
+
+            # parameter update
+            var = var - self.learning_rate * m_hat / (v_hat.sqrt() + self.epsilon)
+            updated.append(var)
+
+        return updated[0] if len(updated) == 1 else updated
 
     def get_weights(self):
-        # Gather every tf.Variable storing Adam’s state:
-        #   iteration count, beta-power accumulators, then m/v for each var.
-        state_vars = self.adam.variables()
-        # Convert each to a NumPy array so they can be serialized/passed around.
-        return [var.numpy() for var in state_vars]
+        # TensorFlow: grab optimizer variables
+        if isinstance(self.lib, TensorFlowLibrary):
+            import tensorflow as tf
+            state_vars = self.adam.variables()
+            return [var.numpy() for var in state_vars]
+
+        # PyTorch: serialize our manual state
+        state = self._torch_state
+        return [
+            state['step'],
+            state['m'].cpu().numpy() if state['m'] is not None else None,
+            state['v'].cpu().numpy() if state['v'] is not None else None,
+        ]
 
     def set_weights(self, weights):
-        # Retrieve the same list of state variables
-        state_vars = self.adam.variables()
-        # Guard against wrong number of arrays
-        if len(weights) != len(state_vars):
-            raise ValueError(
-                f"Expected {len(state_vars)} arrays but got {len(weights)}"
-            )
-        # Assign each provided array back into the optimizer’s variables.
-        for var, w in zip(state_vars, weights):
-            # .assign will convert Python/numpy to the correct tf.dtype automatically.
-            var.assign(w)
+        # TensorFlow: restore via assign()
+        if isinstance(self.lib, TensorFlowLibrary):
+            import tensorflow as tf
+            state_vars = self.adam.variables()
+            if len(weights) != len(state_vars):
+                raise ValueError(f"Expected {len(state_vars)} arrays but got {len(weights)}")
+            for var, w in zip(state_vars, weights):
+                var.assign(w)
+            return
+
+        # PyTorch: load into our manual state
+        import torch
+        step, m_arr, v_arr = weights
+        self._torch_state['step'] = step
+        self._torch_state['m'] = torch.tensor(m_arr, dtype=torch.float32) if m_arr is not None else None
+        self._torch_state['v'] = torch.tensor(v_arr, dtype=torch.float32) if v_arr is not None else None
 
     def reset(self):
-        adam_weights = self.get_weights()
-        self.set_weights([self.lib.zeros_like(el) for el in adam_weights])
+        # TensorFlow: zero out all variables
+        if isinstance(self.lib, TensorFlowLibrary):
+            zeros = [self.lib.zeros_like(el) for el in self.get_weights()]
+            self.set_weights(zeros)
+            return
+
+        # PyTorch: zero the step counter & clear moments
+        self._torch_state = {'step': 0, 'm': None, 'v': None}
 
 
 
@@ -254,28 +300,17 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = self.lib.clip(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    def _grad_step_torch(
-            self, s: TensorType, Q: VariableType, opt: Any
-    ):
-        # --- PyTorch branch ---------------------------
-        # ensure Q collects gradients
-        Q.requires_grad_(True)
+    def _grad_step_torch(self, s, Q, opt):
+        Q = Q.clone().detach().requires_grad_(True)
         traj_cost, _ = self.predict_and_cost(s, Q)
-        # sum over rollouts to get a scalar
         loss = traj_cost.sum()
-        opt.zero_grad()
         loss.backward()
-        # raw gradient
-        dc_dQ = Q.grad
-        # clip by norm
-        dc_dQ_prc = self.lib.clip_by_norm(dc_dQ, self.gradmax_clip, [1, 2])
-        # manually inject the clipped grad before stepping
-        Q.grad = dc_dQ_prc
-        opt.step()
-        # clip outputs, detach for next iteration
-        Qn = self.lib.clip(Q.detach(), self.action_low, self.action_high)
-        # set up new leaf with grad enabled
-        return Qn.clone().detach().requires_grad_(True), traj_cost.detach()
+        grad = Q.grad
+        dc_dQ_prc = self.lib.clip_by_norm(grad, self.gradmax_clip, [1, 2])
+        Qn = opt.apply_gradients([(dc_dQ_prc, Q)])
+        Qn = self.lib.clip(Qn, self.action_low, self.action_high)
+        Qn = Qn.clone().detach().requires_grad_(True)
+        return Qn, traj_cost.detach()
 
     def _get_action(self, s: TensorType, Q: VariableType):
         # Rollout trajectories and retrieve cost
@@ -343,7 +378,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # prev_cost = self.lib.to_tensor(np.inf, self.lib.float32)
         for _ in range(0, iters):
             Qn, traj_cost = self.grad_step(s, self.Q_tf, self.opt)
-            self.Q_tf.assign(Qn)
+            self.lib.assign(self.Q_tf, Qn)
 
             # check for convergence of optimization
             # if bool(
@@ -447,7 +482,7 @@ class optimizer_rpgd_tf(template_optimizer):
                 )
                 self.opt.set_weights([adam_weights[0], w1, w2])
         self.trajectory_ages += 1
-        self.Q_tf.assign(Qn)
+        self.lib.assign(self.Q_tf, Qn)
         self.count += 1
 
         if self.calculate_optimal_trajectory:
@@ -474,7 +509,7 @@ class optimizer_rpgd_tf(template_optimizer):
         # sample new initial guesses for trajectories
         Qn = self.sample_actions(self.rng, self.num_rollouts)
         if hasattr(self, "Q_tf"):
-            self.Q_tf.assign(Qn)
+            self.lib.assign(self.Q_tf, Qn)
         else:
             self.Q_tf = self.lib.to_variable(Qn, self.lib.float32)
         self.count = 0
