@@ -110,8 +110,16 @@ class ADAM:
         import torch
         step, m_arr, v_arr = weights
         self._torch_state['step'] = step
-        self._torch_state['m'] = torch.tensor(m_arr, dtype=torch.float32) if m_arr is not None else None
-        self._torch_state['v'] = torch.tensor(v_arr, dtype=torch.float32) if v_arr is not None else None
+        if m_arr is not None:
+            # detach from any existing graph and clone so we own the data.
+            self._torch_state['m'] = m_arr.detach().clone()
+        else:
+            self._torch_state['m'] = None
+
+        if v_arr is not None:
+            self._torch_state['v'] = v_arr.detach().clone()
+        else:
+            self._torch_state['v'] = None
 
     def reset(self):
         # TensorFlow: zero out all variables
@@ -416,6 +424,11 @@ class optimizer_rpgd_tf(template_optimizer):
         # adam_weights_variables = self.opt.variables()
         # adam_weights = [v.numpy() for v in adam_weights_variables]
         adam_weights = self.opt.get_weights()
+
+        step, m_arr, v_arr = adam_weights
+        m_t = self.lib.to_tensor(m_arr, self.lib.float32) if m_arr is not None else None
+        v_t = self.lib.to_tensor(v_arr, self.lib.float32) if v_arr is not None else None
+        adam_weights = [step, m_t, v_t]
         if self.count % self.resamp_per == 0:
             # if it is time to resample, new random input sequences are drawn for the worst bunch of trajectories
             Qres = self.sample_actions(
