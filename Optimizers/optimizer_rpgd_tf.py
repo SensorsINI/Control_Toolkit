@@ -107,19 +107,27 @@ class ADAM:
             return
 
         # PyTorch: load into our manual state
+        # import torch
+        # step, m_arr, v_arr = weights
+        # self._torch_state['step'] = step
+        # if m_arr is not None:
+        #     # detach from any existing graph and clone so we own the data.
+        #     self._torch_state['m'] = m_arr.detach().clone()
+        # else:
+        #     self._torch_state['m'] = None
+        #
+        # if v_arr is not None:
+        #     self._torch_state['v'] = v_arr.detach().clone()
+        # else:
+        #     self._torch_state['v'] = None
+
         import torch
         step, m_arr, v_arr = weights
-        self._torch_state['step'] = step
-        if m_arr is not None:
-            # detach from any existing graph and clone so we own the data.
-            self._torch_state['m'] = m_arr.detach().clone()
-        else:
-            self._torch_state['m'] = None
-
-        if v_arr is not None:
-            self._torch_state['v'] = v_arr.detach().clone()
-        else:
-            self._torch_state['v'] = None
+        self._torch_state['step'] = int(step)
+        self._torch_state['m'] = (torch.as_tensor(m_arr)
+                                  if m_arr is not None else None)
+        self._torch_state['v'] = (torch.as_tensor(v_arr)
+                                  if v_arr is not None else None)
 
     def reset(self):
         # TensorFlow: zero out all variables
@@ -224,8 +232,16 @@ class optimizer_rpgd_tf(template_optimizer):
         self.optimal_control_sequence = None
 
         self.get_action = CompileAdaptive(self._get_action)
-        self.grad_step = CompileAdaptive(self._grad_step)
+        # self.get_action = self._get_action
         self.predict_optimal_trajectory = CompileAdaptive(self._predict_optimal_trajectory)
+        # self.predict_optimal_trajectory = self._predict_optimal_trajectory
+
+        if isinstance(self.lib, TensorFlowLibrary):
+            self.grad_step = CompileAdaptive(self._grad_step_tf)
+        elif isinstance(self.lib, PyTorchLibrary):
+            self.grad_step_torch_core = CompileAdaptive(self._grad_step_torch_core)
+            # self.grad_step_torch_core = self._grad_step_torch_core
+            self.grad_step = self._grad_step_torch
 
     def configure(self,
                   num_states: int,
@@ -285,13 +301,6 @@ class optimizer_rpgd_tf(template_optimizer):
         )
         return traj_cost, rollout_trajectory
 
-    def _grad_step(self, s: TensorType, Q: VariableType, opt: Any):
-        # dispatch to the TF or Torch implementation *and* return its outputs
-        if isinstance(self.lib, TensorFlowLibrary):
-            return self._grad_step_tf(s, Q, opt)
-        else:
-            return self._grad_step_torch(s, Q, opt)
-
     def _grad_step_tf(
         self, s: TensorType, Q: VariableType, opt: Any
     ):
@@ -308,10 +317,16 @@ class optimizer_rpgd_tf(template_optimizer):
         Qn = self.lib.clip(Q, self.action_low, self.action_high)
         return Qn, traj_cost
 
-    def _grad_step_torch(self, s, Q, opt):
-        Q = Q.clone().detach().requires_grad_(True)
+    # 🚀 Compilable core: no gradient operations
+    def _grad_step_torch_core(self, s, Q):
         traj_cost, _ = self.predict_and_cost(s, Q)
         loss = traj_cost.sum()
+        return loss, traj_cost
+
+    # 🧠 Wrapper: prepares inputs and handles requires_grad
+    def _grad_step_torch(self, s, Q, opt):
+        Q = Q.clone().detach().requires_grad_(True)
+        loss, traj_cost = self.grad_step_torch_core(s, Q)
         loss.backward()
         grad = Q.grad
         dc_dQ_prc = self.lib.clip_by_norm(grad, self.gradmax_clip, [1, 2])
