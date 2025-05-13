@@ -490,7 +490,7 @@ class optimizer_rpgd_tf(template_optimizer):
             self.optimal_trajectory = self.lib.to_numpy(optimal_trajectory)
             self.summed_stage_cost = self.lib.to_numpy(summed_stage_cost)
 
-        self.u = self.u_nom[0, 0, :].numpy()
+        self.u = self.lib.to_numpy(self.u_nom[0, 0, :])
         return self.u
 
 
