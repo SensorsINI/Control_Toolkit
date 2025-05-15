@@ -141,7 +141,7 @@ class ADAM:
 
 
 
-class optimizer_rpgd_tf(template_optimizer):
+class optimizer_rpgd(template_optimizer):
     supported_computation_libraries = (TensorFlowLibrary, PyTorchLibrary)
     
     def __init__(

@@ -1,5 +1,5 @@
-from Control_Toolkit.Optimizers.optimizer_rpgd_tf import optimizer_rpgd_tf
+from Control_Toolkit.Optimizers.optimizer_rpgd import optimizer_rpgd
 
 
 # Export for backwards compatibility
-optimizer_dist_adam_resamp2_tf = optimizer_rpgd_tf
+optimizer_dist_adam_resamp2_tf = optimizer_rpgd
