@@ -65,8 +65,23 @@ class torch_gen_like_TF:
         self.torch = torch
         self.rng = torch.Generator().manual_seed(seed)
 
-    def normal(self, shape, dtype):
-        return self.torch.normal(mean=0.0, std=1.0, size=shape, generator=self.rng, dtype=dtype)
+    def normal(self, shape, dtype, mean=0.0, stddev=1.0):
+        return self.torch.normal(mean=mean, std=stddev, size=shape, generator=self.rng, dtype=dtype)
+
+    def uniform(self, shape, dtype, minval=0.0, maxval=1.0):
+        """
+        Generate a tensor of shape `shape` with values sampled uniformly from [minval, maxval).
+        This uses torch.rand with our Generator for reproducibility, avoiding the need
+        for an intermediate empty tensor.
+        """
+        # Sample from U[0,1) using the stored RNG
+        tensor = self.torch.rand(
+            *shape,
+            generator=self.rng,
+            dtype=dtype
+        )
+        # Scale to [minval, maxval)
+        return tensor * (maxval - minval) + minval
 
 
 def create_rng(id: str, seed: int, computation_library: ComputationLibrary = NumpyLibrary()):

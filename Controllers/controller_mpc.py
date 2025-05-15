@@ -12,8 +12,6 @@ from SI_Toolkit.computation_library import TensorType
 from SI_Toolkit.load_and_normalize import load_yaml
 from Control_Toolkit.others.globals_and_utils import get_logger, import_optimizer_by_name
 
-from torch import inference_mode
-
 
 config_optimizers = load_yaml(os.path.join("Control_Toolkit_ASF", "config_optimizers.yml"))
 config_cost_function = load_yaml(os.path.join("Control_Toolkit_ASF", "config_cost_function.yml"))
@@ -94,7 +92,7 @@ class controller_mpc(template_controller):
         self.controller_data_for_csv = self.cost_function.cost_function.logged_attributes
 
         if self.lib.lib == 'Pytorch':
-            self.step = self.lib.set_device(self.config_controller["device"])(inference_mode()(self.step))
+            self.step = self.lib.set_device(self.config_controller["device"])(self.step)
         else:
             self.step = self.lib.set_device(self.config_controller["device"])(self.step)
 
