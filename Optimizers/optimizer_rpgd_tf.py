@@ -263,6 +263,7 @@ class optimizer_rpgd_tf(template_optimizer):
         if dt is not None and predictor_specification is not None:
             self.predictor_single_trajectory.configure(
                 batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
+                computation_library=self.lib,
                 predictor_specification=predictor_specification,
             )
         else:
