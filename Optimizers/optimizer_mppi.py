@@ -133,6 +133,7 @@ class optimizer_mppi(template_optimizer):
         self.predictor_single_trajectory.configure(
             batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
+            computation_library=self.lib,
         )
 
         self.optimizer_reset()
