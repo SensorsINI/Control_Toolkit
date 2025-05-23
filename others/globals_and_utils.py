@@ -8,7 +8,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"  # all TF messages
 
 
 from numpy.random import SFC64, Generator
-from SI_Toolkit.Functions.TF.Compile import CompileTF, CompileAdaptive
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, TensorFlowLibrary, PyTorchLibrary
 
 LOGGING_LEVEL = logging.INFO
