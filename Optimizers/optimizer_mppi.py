@@ -5,9 +5,9 @@ import numpy as np
 
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileAdaptive
 from Control_Toolkit.others.Interpolator import Interpolator
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+from SI_Toolkit.Compile import CompileAdaptive
 
 
 class optimizer_mppi(template_optimizer):
@@ -133,6 +133,7 @@ class optimizer_mppi(template_optimizer):
         self.predictor_single_trajectory.configure(
             batch_size=1, horizon=self.mpc_horizon, dt=dt,  # TF requires constant batch size
             predictor_specification=predictor_specification,
+            computation_library=self.lib,
         )
 
         self.optimizer_reset()
@@ -151,7 +152,7 @@ class optimizer_mppi(template_optimizer):
 
     #mppi correction
     def mppi_correction_cost(self, u, delta_u):
-        return self.lib.sum(self.cc_weight * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), (1, 2))
+        return self.lib.sum(self.lib.to_tensor(self.cc_weight, self.lib.float32) * (0.5 * (1 - 1.0 / self.NU) * self.R * (delta_u ** 2) + self.R * u * delta_u + 0.5 * self.R * (u ** 2)), (1, 2))
 
     #total cost of the trajectory
     def get_mppi_trajectory_cost(self, state_horizon ,u, u_prev, delta_u):
