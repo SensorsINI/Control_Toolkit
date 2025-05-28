@@ -24,6 +24,8 @@ class controller_neural_imitator(template_controller):
             input_precision=self.config_controller["input_precision"],
             hls4ml=self.config_controller["hls4ml"])
 
+        self.clip_output = self.config_controller.get("clip_output", False)
+
         self._computation_library = self.net_evaluator.lib
 
         self.input_at_input = self.config_controller["input_at_input"]
@@ -61,7 +63,8 @@ class controller_neural_imitator(template_controller):
 
         Q = self.net_evaluator.step(net_input)
 
-        Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
+        if self.clip_output:
+            Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
 
         return Q
 
