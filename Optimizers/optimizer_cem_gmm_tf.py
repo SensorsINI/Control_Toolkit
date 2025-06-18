@@ -6,8 +6,8 @@ import tensorflow as tf
 import tensorflow_probability.python.distributions as tfpd
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
-from Control_Toolkit.others.globals_and_utils import CompileTF
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
+from SI_Toolkit.Compile import CompileTF
 
 
 # CEM with Gaussian Mixture Model Sampling Distribution
