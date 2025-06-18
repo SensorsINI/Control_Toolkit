@@ -31,7 +31,7 @@ class controller_neural_imitator(template_controller):
         # Prepare input mapping
         self.input_mapping = self._create_input_mapping()
 
-        if self.controller_logging and self.lib.lib == "TF":
+        if self.controller_logging and self.lib.lib == "TF" and not self.net_evaluator.hls4ml:
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_evaluator.net_info.net_full_name, self.net_evaluator.net_info.library))
@@ -60,6 +60,8 @@ class controller_neural_imitator(template_controller):
             net_input = self._compose_network_input(s)
 
         Q = self.net_evaluator.step(net_input)
+
+        Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
 
         return Q
 

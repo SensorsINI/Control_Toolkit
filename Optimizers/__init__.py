@@ -25,7 +25,7 @@ class template_optimizer:
 
         # Check if the computation_library passed is compatible with this optimizer
         if not isinstance(computation_library, self.supported_computation_libraries):
-            raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.__name__}")
+            raise ValueError(f"The optimizer {self.__class__.__name__} does not support {computation_library.lib}")
 
         self.lib = computation_library
 
