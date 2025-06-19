@@ -22,7 +22,7 @@ class controller_neural_imitator(template_controller):
             path_to_models=self.config_controller["PATH_TO_MODELS"],
             batch_size=1, # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
             input_precision=self.config_controller["input_precision"],
-            hls4ml=self.config_controller["hls4ml"])
+            nn_evaluator_mode=self.config_controller["nn_evaluator_mode"])
 
         self.clip_output = self.config_controller.get("clip_output", False)
 
@@ -33,7 +33,7 @@ class controller_neural_imitator(template_controller):
         # Prepare input mapping
         self.input_mapping = self._create_input_mapping()
 
-        if self.controller_logging and self.lib.lib == "TF" and not self.net_evaluator.hls4ml:
+        if self.controller_logging and self.lib.lib == "TF" and self.net_evaluator.nn_evaluator_mode == 'normal':
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_evaluator.net_info.net_full_name, self.net_evaluator.net_info.library))
