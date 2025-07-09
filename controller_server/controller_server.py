@@ -2,13 +2,14 @@
 """
 remote_nn_controller_server.py
 
-ZeroMQ REP server that uses gui_selection to pick controller and optimizer,
+ZeroMQ ROUTER server that uses gui_selection to pick controller and optimizer,
 then serves step requests.
 """
 
 import sys
 import numpy as np
 import zmq
+import json
 
 from Control_Toolkit.controller_server.gui import choose_controller_and_optimizer
 from Control_Toolkit.others.globals_and_utils import import_controller_by_name
@@ -45,24 +46,39 @@ def main():
     else:
         ctrl.configure()
 
-    # ZeroMQ REP socket
-    ctx = zmq.Context()
-    sock = ctx.socket(zmq.REP)
+    # ─── ZeroMQ ROUTER socket ────────────────────────────────────────
+    ctx  = zmq.Context()
+    sock = ctx.socket(zmq.ROUTER)
     sock.bind(ENDPOINT)
     print(f"[server] 🚀 listening on {ENDPOINT}")
 
     while True:
-        req = sock.recv_json()
+        # Receive either [identity, payload] or [identity, b"", payload]
+        parts = sock.recv_multipart()
+        if len(parts) == 2:
+            client_identity, payload = parts
+        elif len(parts) == 3 and parts[1] == b"":
+            client_identity, _empty, payload = parts
+        else:
+            # Unexpected framing; skip it
+            continue
+
         try:
+            req   = json.loads(payload.decode("utf-8"))
             s   = np.asarray(req["state"], dtype=np.float32)
             t   = req.get("time", None)
             upd = req.get("updated_attributes", {})
 
             Q = ctrl.step(s, t, upd)
-            sock.send_json({"Q": Q.tolist()})
+            reply = json.dumps({"Q": Q.tolist()}).encode("utf-8")
 
         except Exception as e:
-            sock.send_json({"error": str(e)})
+            reply = json.dumps({"error": str(e)}).encode("utf-8")
+
+        # ─── send back just two frames: [identity, reply] ───────────────
+        # dropping the empty-delimiter ensures the DEALER's recv_json()
+        # sees exactly one JSON frame.
+        sock.send_multipart([client_identity, reply])
 
 
 if __name__ == "__main__":
