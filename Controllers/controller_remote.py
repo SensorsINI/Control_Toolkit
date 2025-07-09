@@ -18,7 +18,7 @@ class controller_remote(template_controller):
 
         # A ZeroMQ REQ socket is perfectly fine for synchronous request-reply.
         self._ctx  = zmq.Context()
-        self._sock = self._ctx.socket(zmq.REQ)
+        self._sock = self._ctx.socket(zmq.DEALER)
         self._sock.connect(self.endpoint)
 
         # ─── impose a 50 ms receive deadline ──────────────────────────────
@@ -52,7 +52,7 @@ class controller_remote(template_controller):
         except zmq.error.Again:
             # no reply within 50 ms → default to zero output
             # np.zeros_like(s) preserves the expected shape; cast to float32
-            return np.zeros_like(s, dtype=np.float32)
+            return np.array(0.0, dtype=np.float32)
 
         if "error" in resp:
             # Re-raise server-side exceptions locally for easier debugging
