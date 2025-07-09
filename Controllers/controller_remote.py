@@ -2,7 +2,7 @@ from SI_Toolkit.computation_library import NumpyLibrary
 from Control_Toolkit.Controllers import template_controller
 import numpy as np
 import zmq
-
+import zmq.error
 
 class controller_remote(template_controller):
     _computation_library = NumpyLibrary()
@@ -17,11 +17,13 @@ class controller_remote(template_controller):
         )
 
         # A ZeroMQ REQ socket is perfectly fine for synchronous request-reply.
-        self._ctx = zmq.Context()
+        self._ctx  = zmq.Context()
         self._sock = self._ctx.socket(zmq.REQ)
         self._sock.connect(self.endpoint)
 
-        # No network parameters are loaded here – that's the server's job.
+        # ─── impose a 50 ms receive deadline ──────────────────────────────
+        self._sock.setsockopt(zmq.RCVTIMEO, 50)
+
         print(f"Neural-imitator proxy connected to {self.endpoint}")
 
     # ------------------------------------------------------------------ STEP
@@ -32,9 +34,10 @@ class controller_remote(template_controller):
         updated_attributes: "dict[str, np.ndarray]" = {},
     ):
         """
-        Serialises the data, ships it to the server, waits for Q, and returns it.
+        Serialises the data, ships it to the server, waits up to 50 ms for Q,
+        and returns it—or zeros if the server doesn’t reply in time.
         """
-        # ❶ -- send
+        # ❶ -- send (always non-blocking for REQ)
         self._sock.send_json(
             {
                 "state": s.tolist(),  # JSON-friendly
@@ -43,8 +46,13 @@ class controller_remote(template_controller):
             }
         )
 
-        # ❷ -- receive
-        resp = self._sock.recv_json()
+        # ❷ -- receive with timeout
+        try:
+            resp = self._sock.recv_json()  # may raise zmq.Again after 50 ms
+        except zmq.error.Again:
+            # no reply within 50 ms → default to zero output
+            # np.zeros_like(s) preserves the expected shape; cast to float32
+            return np.zeros_like(s, dtype=np.float32)
 
         if "error" in resp:
             # Re-raise server-side exceptions locally for easier debugging
