@@ -4,6 +4,8 @@ import numpy as np
 import zmq
 import zmq.error
 
+ENFORCE_TIMEOUT = True  # Set to False to disable the timeout feature
+
 class controller_remote(template_controller):
     _computation_library = NumpyLibrary()
     """
@@ -22,7 +24,8 @@ class controller_remote(template_controller):
         self._sock.connect(self.endpoint)
 
         # ─── impose a 50 ms receive deadline ──────────────────────────────
-        self._sock.setsockopt(zmq.RCVTIMEO, 50)
+        if ENFORCE_TIMEOUT:
+            self._sock.setsockopt(zmq.RCVTIMEO, 50)
 
         print(f"Neural-imitator proxy connected to {self.endpoint}")
 
