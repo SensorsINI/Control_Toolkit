@@ -65,6 +65,7 @@ def main():
 
         try:
             req   = json.loads(payload.decode("utf-8"))
+            rid = req["rid"]
             s   = np.asarray(req["state"], dtype=np.float32)
             t   = req.get("time")
             upd = req.get("updated_attributes", {})
@@ -76,7 +77,7 @@ def main():
                 # covers Python floats *and* tf.Tensor scalars via .numpy()
                 Q_payload = float(Q) if not isinstance(Q, (list, tuple)) else Q
 
-            reply = json.dumps({"Q": Q_payload}).encode("utf-8")
+            reply = json.dumps({"rid": rid, "Q": Q_payload}).encode("utf-8")
 
             sock.send_multipart([client_identity, reply])
 
