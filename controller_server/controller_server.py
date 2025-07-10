@@ -66,19 +66,23 @@ def main():
         try:
             req   = json.loads(payload.decode("utf-8"))
             s   = np.asarray(req["state"], dtype=np.float32)
-            t   = req.get("time", None)
+            t   = req.get("time")
             upd = req.get("updated_attributes", {})
 
             Q = ctrl.step(s, t, upd)
-            reply = json.dumps({"Q": Q.tolist()}).encode("utf-8")
+            if isinstance(Q, np.ndarray):
+                Q_payload = Q.tolist()
+            else:
+                # covers Python floats *and* tf.Tensor scalars via .numpy()
+                Q_payload = float(Q) if not isinstance(Q, (list, tuple)) else Q
+
+            reply = json.dumps({"Q": Q_payload}).encode("utf-8")
+
+            sock.send_multipart([client_identity, reply])
 
         except Exception as e:
-            reply = json.dumps({"error": str(e)}).encode("utf-8")
-
-        # ─── send back just two frames: [identity, reply] ───────────────
-        # dropping the empty-delimiter ensures the DEALER's recv_json()
-        # sees exactly one JSON frame.
-        sock.send_multipart([client_identity, reply])
+            print(f"[server] ⚠️  controller exception – no reply sent: {e}", file=sys.stderr)
+            continue          # do NOT send anything back
 
 
 if __name__ == "__main__":
