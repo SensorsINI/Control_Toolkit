@@ -5,7 +5,7 @@ import zmq.error
 
 from SI_Toolkit.computation_library import NumpyLibrary
 from Control_Toolkit.Controllers import template_controller
-
+from Control_Toolkit.others.globals_and_utils import import_controller_by_name
 
 ENFORCE_TIMEOUT = True  # Set to False to disable the timeout feature
 DEFAULT_RCVTIMEO = 50            # [ms]
@@ -18,26 +18,37 @@ class controller_remote(template_controller):
     • Sends each state to the server together with a monotonically
       increasing *request-id* (`rid`).
     • Drops or purges every reply whose rid ≠ last request’s rid.
-    • After a timeout the motor command falls back to 0.
+    • After a timeout the motor command falls back to 0 or to a local controller.
     """
 
     def configure(self):
-        # You still keep the same config dict keys as in your local controller
+        # ─── remote socket setup ────────────────────────────────────────
         self.endpoint = self.config_controller.get(
             "remote_endpoint", "tcp://localhost:5555"
         )
-
-        # A ZeroMQ DEALER socket is perfectly fine for synchronous request-reply.
         self._ctx  = zmq.Context()
         self._sock = self._ctx.socket(zmq.DEALER)
         self._sock.connect(self.endpoint)
-
-        # ─── impose a 50 ms receive deadline ──────────────────────────────
         if ENFORCE_TIMEOUT:
             self._sock.setsockopt(zmq.RCVTIMEO, DEFAULT_RCVTIMEO)
 
-        self._next_rid: int = 0      # starts at 0, increments each step
+        self._next_rid: int = 0
         print(f"Neural-imitator proxy connected to {self.endpoint}")
+
+        # ─── fallback to a local controller or 0 control ──────────────────────
+        # retrieve fallback-controller parameters from config
+        self.fallback_controller_name = self.config_controller["fallback_controller_name"]
+
+        if self.fallback_controller_name is not None:
+            # dynamically import and instantiate the local controller
+            # e.g. import_controller_by_name("controller-neural-imitator")
+            Controller = import_controller_by_name(
+                f"controller-{self.fallback_controller_name}".replace("-", "_")
+            )
+            self._fallback_controller = Controller(
+                self.environment_name, self.control_limits, self.initial_environment_attributes
+            )
+            self._fallback_controller.configure()
 
     # ------------------------------------------------------------------ STEP
     def step(
@@ -48,7 +59,7 @@ class controller_remote(template_controller):
     ):
         """
         Serialises the data, ships it to the server, waits up to 50 ms for Q,
-        and returns it—or zeros if the server doesn’t reply in time.
+        and returns it—or falls back on timeout to the fallback controller or zero control.
         """
         if updated_attributes is None:
             updated_attributes = {}
@@ -69,16 +80,24 @@ class controller_remote(template_controller):
         try:
             resp = self._sock.recv_json()  # may raise zmq.Again
         except zmq.error.Again:
-            self._purge_stale()             # empty the queue
+            self._purge_stale()            # clear the queue
+            if self.fallback_controller_name is not None:
+                # use local controller on timeout
+                return self._fallback_controller.step(
+                    s, time=time, updated_attributes=updated_attributes
+                )
             return np.array(0.0, dtype=np.float32)
 
         # —— discard stale packets ——————————
         while resp.get("rid") != rid:
             try:
-                # block (up to RCVTIMEO) for the *right* reply
-                resp = self._sock.recv_json()  # ← remove DONTWAIT
+                resp = self._sock.recv_json()
             except zmq.error.Again:
                 # genuine timeout – treat as lost reply
+                if self.fallback_controller_name is not None:
+                    return self._fallback_controller.step(
+                        s, time=time, updated_attributes=updated_attributes
+                    )
                 return np.array(0.0, dtype=np.float32)
 
         if "error" in resp:
