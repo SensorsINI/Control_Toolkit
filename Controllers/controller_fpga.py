@@ -1,6 +1,4 @@
 import os
-import sys
-import glob
 import serial
 import struct
 import time
@@ -10,6 +8,8 @@ from SI_Toolkit.computation_library import TensorType, NumpyLibrary
 import numpy as np
 
 from Control_Toolkit.Controllers import template_controller
+
+from Control_Toolkit.serial_interface_helper import get_serial_port, set_ftdi_latency_timer
 
 try:
     from SI_Toolkit_ASF.ToolkitCustomization.predictors_customization import STATE_INDICES
@@ -27,7 +27,7 @@ class controller_fpga(template_controller):
 
         SERIAL_PORT = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
         SERIAL_BAUD = self.config_controller["SERIAL_BAUD"]
-        set_ftdi_latency_timer(serial_port_number=self.config_controller["SERIAL_PORT"])
+        set_ftdi_latency_timer(SERIAL_PORT=self.config_controller["SERIAL_PORT"])
         self.InterfaceInstance = Interface()
         self.InterfaceInstance.open(SERIAL_PORT, SERIAL_BAUD)
 
@@ -93,25 +93,6 @@ class controller_fpga(template_controller):
         return net_output
 
 
-def get_serial_port(serial_port_number=''):
-    import platform
-    import subprocess
-    serial_port_number = str(serial_port_number)
-    SERIAL_PORT = None
-    try:
-        system = platform.system()
-        if system == 'Darwin':  # Mac
-            SERIAL_PORT = subprocess.check_output(f'ls -a /dev/tty.usbserial*{serial_port_number}', shell=True).decode("utf-8").strip()  # Probably '/dev/tty.usbserial-110'
-        elif system == 'Linux':
-            SERIAL_PORT = '/dev/ttyUSB' + serial_port_number  # You might need to change the USB number
-        elif system == 'Windows':
-            SERIAL_PORT = 'COM' + serial_port_number
-        else:
-            raise NotImplementedError('For system={} connection to serial port is not implemented.')
-    except Exception as err:
-        print(err)
-
-    return SERIAL_PORT
 
 
 
@@ -222,26 +203,3 @@ class Interface:
                 val >>= 1
 
         return crc8
-
-
-import subprocess
-def set_ftdi_latency_timer(serial_port_number):
-    print('\nSetting FTDI latency timer')
-    ftdi_timer_latency_requested_value = 1
-    command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > /sys/bus/usb-serial/devices/ttyUSB{serial_port_number}/latency_timer'"
-    command_ftdi_timer_latency_check = f'cat /sys/bus/usb-serial/devices/ttyUSB{serial_port_number}/latency_timer'
-    try:
-        subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        print(e.stderr)
-        if "Permission denied" in e.stderr:
-            print("Trying with sudo...")
-            command_ftdi_timer_latency_set = "sudo " + command_ftdi_timer_latency_set
-            try:
-                subprocess.run("echo Teresa | sudo -S :", shell=True)
-                subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                print(e.stderr)
-
-    ftdi_latency_timer_value = subprocess.run(command_ftdi_timer_latency_check, shell=True, capture_output=True, text=True).stdout.rstrip()
-    print(f'FTDI latency timer value (tested only for FTDI with Zybo and with Linux on PC side): {ftdi_latency_timer_value} ms  \n')
