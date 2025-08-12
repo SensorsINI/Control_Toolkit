@@ -48,6 +48,14 @@ class controller_fpga(template_controller):
         # Precedence: updated_attributes > state vector > variable_parameters > 0.0
         arr = np.empty(len(self.input_names), dtype=np.float32)
         for i, name in enumerate(self.input_names):
+            if name == "time":
+                if time is None:
+                    raise Exception("Controller input 'time' is required but not provided.")
+                else:
+                    val = float(time)   # use simulator's timestamp (seconds, monotonic in sim time)
+                arr[i] = val
+                continue
+
             if name in updated_attributes:                       # external override wins
                 val = float(updated_attributes[name])
             elif name in self._state_idx:                        # pick from s by name→index map
