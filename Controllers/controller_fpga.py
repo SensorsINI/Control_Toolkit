@@ -77,6 +77,14 @@ class controller_fpga(template_controller):
     def get_controller_output_from_fpga(self, controller_input):
         self.InterfaceInstance.send_controller_input(controller_input)
         controller_output = self.InterfaceInstance.receive_controller_output(self.n_outputs)
+
+        # if a cookie-triggered GET_SPEC happened, adopt it for NEXT step
+        if self.InterfaceInstance.pending_spec is not None:
+            self.spec_version, self.input_names, self.n_outputs = self.InterfaceInstance.pending_spec
+            self.InterfaceInstance.pending_spec = None
+            print(f"Refreshed SoC spec (v{self.spec_version}): "
+                  f"{len(self.input_names)} inputs, {self.n_outputs} outputs")
+
         return controller_output
 
 
@@ -99,6 +107,8 @@ class Interface:
         self.end = None
 
         self.encoderDirection = None
+
+        self.pending_spec = None
 
     def open(self, port, baud):
         self.port = port
@@ -171,10 +181,37 @@ class Interface:
         self.device.write(controller_input.tobytes())
 
     def receive_controller_output(self, controller_output_length):
-        nbytes = controller_output_length * 4
-        data = self.device.read(size=nbytes)
-        if len(data) != nbytes:
-            raise IOError(f"receive_controller_output: expected {nbytes} bytes, got {len(data)}")
+        """
+        Reads controller outputs. If a spec-change cookie arrives, we immediately
+        re-handshake (GET_SPEC) for the next cycle, then still read and return
+        THIS cycle's outputs (old spec) so the control loop doesn't stall.
+        """
+        # Peek first 4 bytes
+        head = self.device.read(size=4)
+        if len(head) != 4:
+            raise IOError(f"receive_controller_output: expected 4 bytes head, got {len(head)}")
+
+        # Check for spec-change cookie: [SOF, CMD_SPEC_COOKIE, gen, CRC]
+        if head[0] == SERIAL_SOF and head[1] == 0xC7 and head[3] == self._crc(head[:3]):
+            # Re-handshake now so *next* step uses the new spec
+            version, names, n_outputs = self.get_spec()
+            # Stash for the controller to pick up after this receive
+            self.pending_spec = (version, names, n_outputs)
+            # Now read THIS cycle's outputs (old spec) and return them
+            nbytes = controller_output_length * 4
+            data = self.device.read(size=nbytes)
+            if len(data) != nbytes:
+                raise IOError(f"receive_controller_output: expected {nbytes} bytes after cookie, got {len(data)}")
+            return struct.unpack(f'<{controller_output_length}f', data)
+
+        # No cookie: head belongs to outputs; read the rest
+        rest_bytes = controller_output_length * 4 - 4
+        if rest_bytes < 0:
+            raise ValueError("controller_output_length must be >= 1")
+        rest = self.device.read(size=rest_bytes) if rest_bytes else b""
+        if len(rest) != rest_bytes:
+            raise IOError(f"receive_controller_output: expected {rest_bytes} tail bytes, got {len(rest)}")
+        data = head + rest
         return struct.unpack(f'<{controller_output_length}f', data)
 
     def _receive_reply(self, cmdLen, timeout=None, crc=True):
