@@ -66,7 +66,6 @@ class controller_mpc(template_controller):
 
         self.predictor.configure(
             batch_size=self.optimizer.num_rollouts,
-            horizon=self.optimizer.mpc_horizon,
             dt=config_optimizer["mpc_timestep"],
             computation_library=self.computation_library,
             variable_parameters=self.variable_parameters,
