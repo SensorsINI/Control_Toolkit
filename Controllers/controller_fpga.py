@@ -23,11 +23,11 @@ class controller_fpga(template_controller):
     def configure(self):
 
 
-        SERIAL_PORT = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
+        SERIAL_PORT_NAME = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
         SERIAL_BAUD = self.config_controller["SERIAL_BAUD"]
-        set_ftdi_latency_timer(SERIAL_PORT=self.config_controller["SERIAL_PORT"])
+        set_ftdi_latency_timer(SERIAL_PORT_NAME)
         self.InterfaceInstance = Interface()
-        self.InterfaceInstance.open(SERIAL_PORT, SERIAL_BAUD)
+        self.InterfaceInstance.open(SERIAL_PORT_NAME, SERIAL_BAUD)
 
         # --- PC↔SoC handshake: SoC declares input names and output count ---
         self.spec_version, self.input_names, self.n_outputs = self.InterfaceInstance.get_spec()

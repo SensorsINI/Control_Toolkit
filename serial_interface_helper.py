@@ -14,11 +14,19 @@ def get_serial_port(chip_type="STM", serial_port_number=None):
     :returns:  the string name of the COM port
     """
 
+    import sys
     from serial.tools import list_ports
     ports = list(serial.tools.list_ports.comports())
+
+    # Linux-only refinement: hide legacy ttyS* placeholders and list only real USB CDC/serial endpoints.
+    if sys.platform.startswith("linux"):
+        visible_ports = [p for p in ports if (getattr(p, "device", "") or "").startswith(("/dev/ttyUSB", "/dev/ttyACM"))]
+    else:
+        visible_ports = ports
+
     serial_ports_names = []
     print('\nAvailable serial ports:')
-    for index, port in enumerate(ports):
+    for index, port in enumerate(visible_ports):
         serial_ports_names.append(port.device)
         print(f'{index}: port={port.device}; description={port.description}')
     print()
@@ -31,7 +39,7 @@ def get_serial_port(chip_type="STM", serial_port_number=None):
         raise ValueError(f'Unknown chip type: {chip_type}')
 
     possible_ports = []
-    for port in ports:
+    for port in visible_ports:
         if port.description in expected_descriptions:
             possible_ports.append(port.device)
 
@@ -43,7 +51,9 @@ def get_serial_port(chip_type="STM", serial_port_number=None):
         else:
             raise Exception(message)
     else:
-        if serial_port_number < len(possible_ports):
+        if serial_port_number is None:
+            SERIAL_PORT = possible_ports[0]
+        elif 0 <= serial_port_number < len(possible_ports):
             SERIAL_PORT = possible_ports[serial_port_number]
         else:
             print(
@@ -53,15 +63,15 @@ def get_serial_port(chip_type="STM", serial_port_number=None):
 
     if SERIAL_PORT is None and serial_port_number is not None:
         if len(serial_ports_names) == 0:
-            print(f'No serial ports')
-        else:
+            print('No serial ports')
+        elif 0 <= serial_port_number < len(serial_ports_names):
             print(f"Setting serial port with requested number ({serial_port_number})\n")
             SERIAL_PORT = serial_ports_names[serial_port_number]
 
     return SERIAL_PORT
 
 
-def set_ftdi_latency_timer(SERIAL_PORT):
+def set_ftdi_latency_timer(serial_port_name):
     print('\nSetting FTDI latency timer')
     requested_value = 1  # in ms
 
@@ -72,7 +82,7 @@ def set_ftdi_latency_timer(SERIAL_PORT):
         else:
             password = getpass.getpass('Enter sudo password: ')
 
-        serial_port = SERIAL_PORT.split('/')[-1]
+        serial_port = serial_port_name.split('/')[-1]
         ftdi_timer_latency_requested_value = 1
         command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > /sys/bus/usb-serial/devices/{serial_port}/latency_timer'"
         command_ftdi_timer_latency_check = f'cat /sys/bus/usb-serial/devices/{serial_port}/latency_timer'
