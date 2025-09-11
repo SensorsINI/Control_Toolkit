@@ -70,6 +70,7 @@ class controller_fpga(template_controller):
         controller_output = self.get_controller_output_from_fpga(arr)          # raw float32 bytes over UART
         controller_output = self.lib.to_tensor(controller_output, self.lib.float32)
         controller_output = controller_output[self.lib.newaxis, self.lib.newaxis, :]
+        controller_output = self.lib.nan_to_num(controller_output, nan=0.0)
 
         if self.lib.lib == 'Pytorch':
             controller_output = controller_output.detach().numpy()
