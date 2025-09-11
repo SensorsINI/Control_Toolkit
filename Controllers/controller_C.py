@@ -141,15 +141,12 @@ void prepare_message_to_PC_config_PID(unsigned char * txBuffer, float position_K
         """
         Create a simple C wrapper that exposes the controller functions.
         """
-        # Map common controller files to their ops names
-        ops_mapping = {
-            "lqr.c": "LQR_Ops",
-            "hardware_pid.c": "PID_Ops", 
-            "neural_controller_C.c": "NNC_Ops"
-        }
-        
-        controller_name = controller_file.replace('.c', '').upper()
-        ops_name = ops_mapping.get(controller_file, f"{controller_name}_Ops")
+        # Get the ops name from config, with fallback to auto-generated name
+        ops_name = self.config_controller.get("ops_name")
+        if not ops_name:
+            # Auto-generate from filename: "lqr.c" -> "LQR_Ops"
+            controller_name = controller_file.replace('.c', '').upper()
+            ops_name = f"{controller_name}_Ops"
         
         wrapper_c = f'''
 #include <stdio.h>
