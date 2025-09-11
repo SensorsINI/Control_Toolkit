@@ -278,37 +278,26 @@ class Interface:
 
     def receive_controller_output(self, controller_output_length):
         """
-        Reads controller outputs. If a spec-change cookie arrives, we immediately
-        re-handshake (GET_SPEC) for the next cycle, then still read and return
-        THIS cycle's outputs (old spec) so the control loop doesn't stall.
+        Reads controller outputs. With the new unified protocol, the FPGA automatically
+        sends controller outputs when it receives state data, so we just need to read
+        the raw float data directly.
         """
-        # Peek first 4 bytes
-        head = self.device.read(size=4)
-        if len(head) != 4:
-            raise IOError(f"receive_controller_output: expected 4 bytes head, got {len(head)}")
-
-        # Check for spec-change cookie: [SOF, MSG_TYPE_SPEC_COOKIE, 4, CRC]
-        if head[0] == SERIAL_SOF and head[1] == MSG_TYPE_SPEC_COOKIE and head[3] == self._crc(head[:3]):
-            # Re-handshake now so *next* step uses the new spec
-            version, names, n_outputs = self.get_spec()
-            # Stash for the controller to pick up after this receive
-            self.pending_spec = (version, names, n_outputs)
-            # Now read THIS cycle's outputs (old spec) and return them
-            nbytes = controller_output_length * 4
-            data = self.device.read(size=nbytes)
-            if len(data) != nbytes:
-                raise IOError(f"receive_controller_output: expected {nbytes} bytes after cookie, got {len(data)}")
-            return struct.unpack(f'<{controller_output_length}f', data)
-
-        # No cookie: head belongs to outputs; read the rest
-        rest_bytes = controller_output_length * 4 - 4
-        if rest_bytes < 0:
-            raise ValueError("controller_output_length must be >= 1")
-        rest = self.device.read(size=rest_bytes) if rest_bytes else b""
-        if len(rest) != rest_bytes:
-            raise IOError(f"receive_controller_output: expected {rest_bytes} tail bytes, got {len(rest)}")
-        data = head + rest
-        return struct.unpack(f'<{controller_output_length}f', data)
+        # Read the expected number of float32 bytes directly
+        nbytes = controller_output_length * 4
+        data = self.device.read(size=nbytes)
+        if len(data) != nbytes:
+            raise IOError(f"receive_controller_output: expected {nbytes} bytes, got {len(data)}")
+        
+        # Unpack the float32 data
+        try:
+            result = struct.unpack(f'<{controller_output_length}f', data)
+            return result
+        except struct.error as e:
+            print(f"ERROR: Failed to unpack controller output data: {e}")
+            print(f"Data length: {len(data)}, Expected: {nbytes}")
+            print(f"Data bytes: {[hex(b) for b in data[:16]]}...")  # Show first 16 bytes
+            # Return zeros as fallback
+            return (0.0,) * controller_output_length
 
     def _receive_reply(self, cmdLen, timeout=None, crc=True):
         self.device.timeout = timeout
