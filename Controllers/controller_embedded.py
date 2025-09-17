@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     raise Exception("SI_Toolkit_ASF not yet created")
 
 
-class controller_fpga(template_controller):
+class controller_embedded(template_controller):
     _computation_library = NumpyLibrary()
 
     def configure(self):
@@ -67,7 +67,7 @@ class controller_fpga(template_controller):
                 val = 0.0                                        # explicit default to prevent UB
             arr[i] = val
 
-        controller_output = self.get_controller_output_from_fpga(arr)          # raw float32 bytes over UART
+        controller_output = self.get_controller_output_from_chip(arr)          # raw float32 bytes over UART
         controller_output = self.lib.to_tensor(controller_output, self.lib.float32)
         controller_output = controller_output[self.lib.newaxis, self.lib.newaxis, :]
         controller_output = self.lib.nan_to_num(controller_output, nan=0.0)
@@ -84,7 +84,7 @@ class controller_fpga(template_controller):
         if not self.just_restarted:
             self.configure()
 
-    def get_controller_output_from_fpga(self, controller_input):
+    def get_controller_output_from_chip(self, controller_input):
         self.InterfaceInstance.send_controller_input(controller_input)
         controller_output = self.InterfaceInstance.receive_controller_output(self.n_outputs)
 
@@ -108,7 +108,7 @@ SERIAL_SOF              = 0xAA
 MSG_TYPE_STATE      = 0x01    # State data for controller
 MSG_TYPE_GET_SPEC   = 0x02    # Request controller specification
 MSG_TYPE_PING       = 0x03    # Ping/keepalive
-MSG_TYPE_SPEC_COOKIE = 0x04   # Announce spec change (FPGA->PC)
+MSG_TYPE_SPEC_COOKIE = 0x04   # Announce spec change (CHIP->PC)
 
 # Legacy constants for backward compatibility
 CMD_PING                = 0xC0
@@ -278,7 +278,7 @@ class Interface:
 
     def receive_controller_output(self, controller_output_length):
         """
-        Reads controller outputs. With the new unified protocol, the FPGA automatically
+        Reads controller outputs. With the new unified protocol, the chip automatically
         sends controller outputs when it receives state data, so we just need to read
         the raw float data directly.
         """
