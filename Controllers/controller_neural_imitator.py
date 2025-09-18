@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 
 class controller_neural_imitator(template_controller):
     _computation_library = NumpyLibrary()
+    _is_hls4ml_mode = False
 
     def configure(self):
 
@@ -35,6 +36,13 @@ class controller_neural_imitator(template_controller):
 
         if self.controller_logging and self.lib.lib == "TF" and self.net_evaluator.nn_evaluator_mode == 'normal':
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
+
+        # Mark that the network has been configured (important for hls4ml mode)
+        self._is_configured = True
+        
+        # Track if we're in hls4ml mode for efficient reset checking
+        self._is_hls4ml_mode = (hasattr(self.net_evaluator, 'nn_evaluator_mode') and 
+                               self.net_evaluator.nn_evaluator_mode == 'hls4ml')
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_evaluator.net_info.net_full_name, self.net_evaluator.net_info.library))
 
@@ -98,6 +106,10 @@ class controller_neural_imitator(template_controller):
         return net_input
 
     def controller_reset(self):
+        # For hls4ml mode, avoid reconfiguration since the network is already converted
+        # This prevents multiple expensive hls4ml conversions when switching controllers
+        if self._is_hls4ml_mode and self._is_configured:
+            return
         self.configure()
 
 
