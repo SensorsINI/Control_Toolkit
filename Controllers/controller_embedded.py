@@ -24,11 +24,9 @@ class controller_embedded(template_controller):
 
         SERIAL_PORT_NAME = get_serial_port(serial_port_number=self.config_controller["SERIAL_PORT"])
         SERIAL_BAUD = self.config_controller["SERIAL_BAUD"]
-        print(f"DEBUG: Connecting to serial port: {SERIAL_PORT_NAME} at {SERIAL_BAUD} baud")
         set_ftdi_latency_timer(SERIAL_PORT_NAME)
         self.InterfaceInstance = Interface()
         self.InterfaceInstance.open(SERIAL_PORT_NAME, SERIAL_BAUD)
-        print("DEBUG: Serial connection opened successfully")
 
         # --- PC↔SoC handshake: SoC declares input names and output count ---
         self.spec_version, self.input_names, self.n_outputs = self.InterfaceInstance.get_spec()
@@ -113,7 +111,7 @@ MSG_TYPE_SPEC_COOKIE = 0x04   # Announce spec change (CHIP->PC)
 # Legacy constants for backward compatibility
 CMD_PING                = 0xC0
 CMD_GET_SPEC     = 0xC6
-NAME_TOKEN_LEN    = 16     # fixed ASCII token length per name
+NAME_TOKEN_LEN    = 24     # fixed ASCII token length per name
 
 class Interface:
     def __init__(self):
@@ -251,10 +249,13 @@ class Interface:
                     chunk = raw[i*token_len:(i+1)*token_len]
                     # Cut at first NUL; ignore non-ASCII silently.
                     name = chunk.split(b'\x00', 1)[0].decode('ascii', errors='ignore')
-                    names.append(name)
-                    print(f"DEBUG: Input name {i}: '{name}'")
                     
-                print(f"DEBUG: Handshake successful - {len(names)} inputs, {n_outputs} outputs")
+                    # Assert that input name is not longer than our buffer
+                    if len(name) > NAME_TOKEN_LEN:
+                        raise ValueError(f"Input name '{name}' is {len(name)} characters long, but NAME_TOKEN_LEN is only {NAME_TOKEN_LEN}")
+                    
+                    names.append(name)
+                    
                 return version, names, n_outputs
             finally:
                 self.device.timeout = old_timeout  # restore streaming behavior
