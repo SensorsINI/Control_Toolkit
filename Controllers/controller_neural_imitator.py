@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 
 class controller_neural_imitator(template_controller):
     _computation_library = NumpyLibrary()
+    _is_hls4ml_mode = False
 
     def configure(self):
 
@@ -22,7 +23,9 @@ class controller_neural_imitator(template_controller):
             path_to_models=self.config_controller["PATH_TO_MODELS"],
             batch_size=1, # It makes sense only for testing (Brunton plot for Q) of not rnn networks to make bigger batch, this is not implemented
             input_precision=self.config_controller["input_precision"],
-            hls4ml=self.config_controller["hls4ml"])
+            nn_evaluator_mode=self.config_controller["nn_evaluator_mode"])
+
+        self.clip_output = self.config_controller.get("clip_output", False)
 
         self._computation_library = self.net_evaluator.lib
 
@@ -31,8 +34,15 @@ class controller_neural_imitator(template_controller):
         # Prepare input mapping
         self.input_mapping = self._create_input_mapping()
 
-        if self.controller_logging and self.lib.lib == "TF" and not self.net_evaluator.hls4ml:
+        if self.controller_logging and self.lib.lib == "TF" and self.net_evaluator.nn_evaluator_mode == 'normal':
             self.controller_data_for_csv = FunctionalDict(get_memory_states(self.net_evaluator.net))
+
+        # Mark that the network has been configured (important for hls4ml mode)
+        self._is_configured = True
+        
+        # Track if we're in hls4ml mode for efficient reset checking
+        self._is_hls4ml_mode = (hasattr(self.net_evaluator, 'nn_evaluator_mode') and 
+                               self.net_evaluator.nn_evaluator_mode == 'hls4ml')
 
         print('Configured neural imitator with {} network with {} library'.format(self.net_evaluator.net_info.net_full_name, self.net_evaluator.net_info.library))
 
@@ -61,7 +71,8 @@ class controller_neural_imitator(template_controller):
 
         Q = self.net_evaluator.step(net_input)
 
-        Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
+        if self.clip_output:
+            Q = np.clip(Q, -1.0, 1.0)  # Ensure Q is within the range [-1, 1]
 
         return Q
 
@@ -95,6 +106,10 @@ class controller_neural_imitator(template_controller):
         return net_input
 
     def controller_reset(self):
+        # For hls4ml mode, avoid reconfiguration since the network is already converted
+        # This prevents multiple expensive hls4ml conversions when switching controllers
+        if self._is_hls4ml_mode and self._is_configured:
+            return
         self.configure()
 
 
