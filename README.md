@@ -1,82 +1,233 @@
-# Control_Toolkit
+# Control Toolkit
 
-This folder contains general controller classes conforming to an interface loosely based on the [OpenAI Gym Interface](https://arxiv.org/pdf/1606.01540).
+> **Note**: AI-generated on 14.11.2024, not human verified.
 
-The `Control_Toolkit_ASF/models_for_nn_as_mpc` folder contains exemplary neural networks for those controllers which need one, which they can import directly.
+A modular Python toolkit for implementing advanced control algorithms with a focus on **Model Predictive Control (MPC)**. Supports multiple computation backends (TensorFlow, PyTorch, NumPy) with a unified interface based on the [OpenAI Gym Interface](https://arxiv.org/pdf/1606.01540).
 
-To use the toolkit, add this and the [SI_Toolkit](https://github.com/SensorsINI/SI_Toolkit) as Git submodules at the top level of your repository:
+## Features
 
-```
+- 🎯 **Multiple Control Strategies**: MPC, neural network imitators, remote/embedded controllers
+- 🔧 **Pluggable Optimizers**: CEM, RPGD, MPPI, gradient-based methods, and more
+- 📊 **Flexible Cost Functions**: Define custom objectives with consistent interface
+- 🖥️ **Multi-Backend Support**: TensorFlow, PyTorch, NumPy
+- 📡 **Remote Control**: ZeroMQ-based controller server
+- 📈 **Built-in Logging**: Comprehensive trajectory and optimization metrics
+- 🔌 **Hardware Integration**: Serial interface helpers for embedded systems
+
+## Installation
+
+Add as submodules to your repository:
+
+```bash
 git submodule add https://github.com/SensorsINI/SI_Toolkit
-git submodule update –init
+git submodule add <control-toolkit-repo-url> Control_Toolkit
+git submodule update --init --recursive
+pip install -r Control_Toolkit/requirements.txt
 ```
 
+## Quick Start
 
-## Repositories using the Toolkit
+```python
+from Control_Toolkit.others.globals_and_utils import import_controller_by_name
+import numpy as np
 
-- <a href="https://github.com/SensorsINI/CartPoleSimulation/tree/reproduction_of_results_sep22" target="_blank">CartPole Simulator</a>
-- <a href="https://github.com/frehe/ControlGym/tree/reproduction_of_results_sep22" target="_blank">ControlGym</a>
-- <a href="https://github.com/neuromorphs/physical-cartpole/tree/reproduction_of_results_sep2022_physical_cartpole" target="_blank">Physical CartPole</a>
-- <a href="https://github.com/F1Tenth-INI/f1tenth_development_gym" target="_blank">F1TENTH INI</a>
+# Instantiate MPC controller
+ControllerClass = import_controller_by_name("mpc")
+controller = ControllerClass(
+    environment_name="YourEnvironment",
+    control_limits=(-1.0, 1.0),
+    initial_environment_attributes={"target_position": 0.0}
+)
 
+# Configure with optimizer
+controller.configure(optimizer_name="rpgd-tf")
 
-## Software Design and Motivation
+# Run control loop
+state = np.array([0.1, 0.2, 0.3, 0.4])
+control_input = controller.step(state, time=0.0)
+```
 
-### Folders
+## Architecture
 
-The motivation behind this toolkit is universality: A systems control algorithm should be implemented as much agnostic to the environment it is deployed on as possible. However, not all controllers can be formulated in such a general manner. For this reason, one may also add a folder `Control_Toolkit_ASF` for application-specific control as follows:
+### Design Philosophy
+
+The toolkit separates **general-purpose controllers** (environment-agnostic) from **application-specific controllers** (domain-tailored), promoting code reuse while maintaining flexibility.
+
+### Folder Structure
 
 ```
-main_control_repository
-L Control_Toolkit (submodule)
-L Control_Toolkit_ASF (regular folder)
+your_project/
+├── Control_Toolkit/              # This repository (submodule)
+│   ├── Controllers/              # General-purpose controllers
+│   ├── Optimizers/               # Optimization algorithms
+│   ├── Cost_Functions/           # Cost function base classes
+│   ├── controller_server/        # Remote controller server
+│   └── others/                   # Utilities and helpers
+├── Control_Toolkit_ASF/          # Your application-specific files
+│   ├── Controllers/              # Custom controllers
+│   ├── Cost_Functions/           # Custom cost functions
+│   ├── config_controllers.yml    # Controller configurations
+│   ├── config_optimizers.yml     # Optimizer configurations
+│   └── config_cost_function.yml  # Cost function configurations
+└── SI_Toolkit/                   # Predictors (submodule)
 ```
 
-Find a template for the ASF folder within the toolkit. The template contains sample configuration files, whose structure should be kept consistent.
+**Naming Convention**: Files and classes use `controller_<name>.py` or `optimizer_<name>.py` format and must inherit from their respective template classes.
 
-### Controller Design
+## Available Controllers
 
-Each controller is defined in a separate module. File name and class name should match and have the "controller_" prefix.
+| Controller | Description | File |
+|------------|-------------|------|
+| **MPC** | Model Predictive Control with pluggable optimizers | `controller_mpc.py` |
+| **Neural Imitator** | Neural network-based controller | `controller_neural_imitator.py` |
+| **Remote** | Client for remote controller server | `controller_remote.py` |
+| **Embedded** | Interface for embedded hardware | `controller_embedded.py` |
+| **C Controller** | Wrapper for C-based controllers | `controller_C.py` |
 
-A controller can possess any of the following optional subcomponents:
+Define custom controllers in `Control_Toolkit_ASF/Controllers/`. Template available in `Control_Toolkit_ASF_Template/`.
 
-- `Cost_Functions`: This folder contains a general base class and wrapper class for defining cost functions. You can define cost functions for your application in the `Control_Toolkit_ASF`.
-- `Optimizers`: Interchangeable optimizers which return the cost-minimizing input given dynamics imposed by state predictions.
-- `Predictors`: Defined in the `SI_Toolkit`.
+## Available Optimizers
 
-This toolkit focuses on model-predictive control. Currently, only a `controller_mpc` is provided. You can however define other controllers in the application-specific files.
+### Sampling-Based
 
+| Optimizer | Description | Backend |
+|-----------|-------------|---------|
+| **cem-tf** | Cross-Entropy Method: samples random sequences, selects elites, refits distribution | TensorFlow |
+| **cem-naive-grad-tf** | CEM + gradient refinement of elite samples [[Bharadhwaj et al., 2020]](https://arxiv.org/abs/2003.10768) | TensorFlow |
+| **cem-gmm-tf** | CEM with Gaussian Mixture Model | TensorFlow |
 
-## List of available MPC optimizers with description
-    
-- `cem-tf`:
-    A standard implementation of the cem algorithm. Samples a number of random input sequences from a normal distribution,
-    then simulates them and selectes the 'elite' set of random inputs with lowest costs. The sampling distribution
-    is fitted to the elite set and the procedure repeated a fixed number of times. 
-    In the end the mean of the elite set is used as input.
+### Gradient-Based
 
-- `cem-naive-grad-tf`:
-    Same as cem, but between selecting the elite set and fitting the distribution, all input sequences in the elite
-    set are refined with vanilla gradient descent. Re-Implementation of Bharadhwaj, Xie, Shkurti 2020.
+| Optimizer | Description | Backend |
+|-----------|-------------|---------|
+| **rpgd** | Resampling Parallel Gradient Descent: maintains population of trajectories, optimizes with Adam, periodic resampling [[Heetmeyer et al., 2023]](https://ieeexplore.ieee.org/document/10161233) | TensorFlow |
+| **gradient-tf** | Pure gradient descent optimization | TensorFlow |
 
-- `rpgd-tf` (`formerly dist-adam-resamp2-tf`):
-    Initially samples a set of control sequences, then optimizes them with the adam optimizer projecting control inputs,
-    clipping inputs which violate the constraints. For the next time step, the optimizations are warm started with
-    the solution from the last one. In regular intervals the only a subset of cheap control sequences are 
-    warm started, while the other ones are resampled.
+### Hybrid
 
-- `mppi-optimze-tf`:
-    First find an initial guess of control sequence with the standard mppi approach. Then optimze it using the adam
-    optimizer.
+| Optimizer | Description | Backend |
+|-----------|-------------|---------|
+| **mppi** | Model Predictive Path Integral + Adam refinement | TensorFlow |
 
+### Other
+
+| Optimizer | Description | Backend |
+|-----------|-------------|---------|
+| **random-action-tf** | Random action baseline | TensorFlow |
+| **nlp-forces** | Nonlinear programming via FORCES Pro | NumPy |
+
+## Controller Server
+
+Run controllers as a service via ZeroMQ:
+
+```bash
+python -m Control_Toolkit.controller_server.controller_server
+```
+
+**Protocol** (endpoint: `tcp://*:5555`):
+
+Request:
+```json
+{"rid": "request_id", "state": [0.1, 0.2], "time": 0.5, "updated_attributes": {}}
+```
+
+Response:
+```json
+{"rid": "request_id", "Q": 0.25}
+```
+
+Client example:
+```python
+import zmq, json
+context = zmq.Context()
+socket = context.socket(zmq.REQ)
+socket.connect("tcp://localhost:5555")
+socket.send_json({"rid": "1", "state": [0.1, 0.2], "time": 0.0})
+control = socket.recv_json()["Q"]
+```
 
 ## Logging
 
-The toolkit provides a uniform interface to log values in the controller. These values could for example be rollout trajectories or intermediate optimization results.
+Enable logging in controller config: `controller_logging: true`
 
-The `controller_mpc.step` method takes the `optimizer.logging_values` dictionary and copies it to its `controller_mpc.logs` dictionary in each step. The `template_controller` has two related attributes: `controller_logging` and `save_vars`. If the former is `true`, then the controller populates the fields of `save_vars` in the `template_controller.logs` dictionary with values if your controller calls `update_logs` within the `step` method.
+**Logged variables**: `Q_logged`, `J_logged`, `s_logged`, `u_logged`, `realized_cost_logged`, `trajectory_ages_logged`, `rollout_trajectories_logged`
 
+**Access logs**:
+```python
+outputs = controller.get_outputs()
+control_history = outputs['Q_logged']
+```
 
-## Examples of Application-Specific Controllers
+## Configuration
 
-We refer to the [Control_Toolkit_ASF of our CartPoleSimulation Project](https://github.com/SensorsINI/CartPoleSimulation/tree/master/Control_Toolkit_ASF/Controllers).
+Configuration files in `Control_Toolkit_ASF/`:
+
+**config_controllers.yml**:
+```yaml
+mpc:
+  optimizer: rpgd-tf
+  computation_library: tensorflow
+  device: cpu
+  predictor_specification: "my_predictor"
+  cost_function_specification: "tracking"
+  controller_logging: true
+```
+
+**config_optimizers.yml**:
+```yaml
+rpgd-tf:
+  num_rollouts: 100
+  mpc_horizon: 20
+  mpc_timestep: 0.05
+  learning_rate: 0.01
+  seed: 42
+```
+
+## Hardware Integration
+
+**Serial Interface Helper** (for STM, ZYNQ boards):
+
+```python
+from Control_Toolkit.serial_interface_helper import get_serial_port, set_ftdi_latency_timer
+
+port = get_serial_port(chip_type="STM")  # or "ZYNQ"
+set_ftdi_latency_timer(port)  # Low-latency configuration
+```
+
+## Projects Using This Toolkit
+
+- [CartPole Simulator](https://github.com/SensorsINI/CartPoleSimulation/tree/reproduction_of_results_sep22)
+- [ControlGym](https://github.com/frehe/ControlGym/tree/reproduction_of_results_sep22)
+- [Physical CartPole](https://github.com/neuromorphs/physical-cartpole/tree/reproduction_of_results_sep2022_physical_cartpole)
+- [F1TENTH INI](https://github.com/F1Tenth-INI/f1tenth_development_gym)
+
+See [CartPoleSimulation Control_Toolkit_ASF](https://github.com/SensorsINI/CartPoleSimulation/tree/master/Control_Toolkit_ASF/Controllers) for examples of application-specific controllers (do-mpc, LQR, etc.).
+
+## Requirements
+
+```
+tensorflow, tensorflow_probability, numpy, torch, torchvision, gymnasium, watchdog
+```
+
+**Note**: Install only what you need (e.g., NumPy-only setups don't require TensorFlow/PyTorch).
+
+## Citation
+
+If using RPGD optimizer, please cite:
+
+```bibtex
+@inproceedings{heetmeyer2023rpgd,
+  title={RPGD: A Small-Batch Parallel Gradient Descent Optimizer with Explorative 
+         Resampling for Nonlinear Model Predictive Control},
+  author={Heetmeyer, Frederik and Paluch, Marcin and Bolliger, Diego},
+  booktitle={2023 IEEE International Conference on Robotics and Automation (ICRA)},
+  pages={3218--3224},
+  year={2023},
+  organization={IEEE},
+  doi={10.1109/icra48891.2023.10161233}
+}
+```
+
+---
+
+**Template**: Use `Control_Toolkit_ASF_Template/` to create your application-specific folder structure.
