@@ -16,6 +16,12 @@ from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyT
 from SI_Toolkit.load_and_normalize import load_yaml
 
 
+# The physical controller calls RPGD once per control tick. With libgomp's
+# default passive wait policy, OpenMP workers sleep between ticks and wake-up
+# latency dominates the next rpgd_step call.
+os.environ.setdefault("OMP_WAIT_POLICY", "ACTIVE")
+
+
 class RpgdConfig(ctypes.Structure):
     _fields_ = [
         ("mpc_horizon", ctypes.c_int),
