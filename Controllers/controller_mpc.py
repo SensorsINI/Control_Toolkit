@@ -29,9 +29,12 @@ class controller_mpc(template_controller):
             predictor_specification: Optional[str] = self.config_controller.get("predictor_specification", None)
             logger.info(f"Using predictor {predictor_specification} specified in controller config file")
         
-        config_optimizer = config_optimizers[optimizer_name]
+        optimizer_config_name = optimizer_name
+        if optimizer_config_name not in config_optimizers:
+            optimizer_config_name = optimizer_name.replace("-", "_")
+        config_optimizer = config_optimizers[optimizer_config_name]
 
-        logger.info(f'\nConfig optimizer {optimizer_name}:')
+        logger.info(f'\nConfig optimizer {optimizer_config_name}:')
         for key, value in config_optimizer.items():
             logger.info('{}: {}'.format(key, value))
         
