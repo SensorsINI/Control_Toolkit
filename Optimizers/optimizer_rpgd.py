@@ -1,6 +1,7 @@
 from typing import Tuple, Any
 from SI_Toolkit.computation_library import ComputationLibrary, TensorFlowLibrary, PyTorchLibrary, TensorType, VariableType
 
+import os
 import numpy as np
 from Control_Toolkit.Cost_Functions.cost_function_wrapper import CostFunctionWrapper
 from Control_Toolkit.Optimizers import template_optimizer
@@ -10,6 +11,35 @@ from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 from SI_Toolkit.Compile import CompileAdaptive
 
 logger = get_logger(__name__)
+
+# Warn (once per process) if this single-threaded optimizer runs without CPU pinning.
+# rpgd's step timing is only predictable when the process is pinned to one core
+# before TensorFlow starts (done in Driver/control.py via globals.CONTROL_CPU_AFFINITY).
+# This is a soft hint only; unpinned execution (e.g. simulation/training) still works.
+_AFFINITY_WARNED = False
+
+
+def _warn_if_not_pinned():
+    global _AFFINITY_WARNED
+    if _AFFINITY_WARNED:
+        return
+    _AFFINITY_WARNED = True
+    if not hasattr(os, "sched_getaffinity"):
+        return
+    try:
+        affinity = os.sched_getaffinity(0)
+    except OSError:
+        return
+    total = os.cpu_count() or len(affinity)
+    if len(affinity) >= total:
+        logger.warning(
+            "optimizer_rpgd is running WITHOUT CPU pinning (process may use all %d cores: %s). "
+            "For predictable single-step timing, pin the control process to one core BEFORE "
+            "TensorFlow is imported (set CONTROL_CPU_AFFINITY in globals.py and launch via "
+            "control.py, or set CARTPOLE_CONTROL_CPU_AFFINITY).",
+            total,
+            sorted(affinity),
+        )
 
 
 class ADAM:
@@ -187,6 +217,10 @@ class optimizer_rpgd(template_optimizer):
             mpc_horizon=mpc_horizon,
             computation_library=computation_library,
         )
+
+        # Single-threaded TF path benefits from CPU pinning; warn if it is missing.
+        if isinstance(self.lib, TensorFlowLibrary):
+            _warn_if_not_pinned()
 
         # Create second predictor for computing optimal trajectories
         self.predictor_single_trajectory = self.predictor.copy()
