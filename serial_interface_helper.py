@@ -1,10 +1,31 @@
 import getpass
+import os
 import platform
 import subprocess
+from pathlib import Path
 
 import serial
 
-SUDO_PASSWORD = None  # Required to set FTDI latency timer on Linux systems, can be set to a hardcoded password for convenience or left as None to prompt the user via terminal.
+SUDO_PASSWORD_ENV_VAR = "CARTPOLE_SUDO_PASSWORD"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SUDO_PASSWORD_FILE = REPO_ROOT / ".cartpole_sudo_password"
+
+
+def get_sudo_password():
+    """Read sudo password from a local source outside git, or prompt as fallback."""
+    password = os.environ.get(SUDO_PASSWORD_ENV_VAR)
+    if password:
+        return password
+
+    try:
+        password = SUDO_PASSWORD_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(f"Could not read sudo password file {SUDO_PASSWORD_FILE}: {exc}")
+        return None
+
+    return password or None
 
 def get_serial_port(chip_type="STM", serial_port_number=None):
     """
@@ -76,21 +97,25 @@ def set_ftdi_latency_timer(serial_port_name):
     requested_value = 1  # in ms
 
     if platform.system() == 'Linux':
-        # check for hardcoded sudo password or prompt the user
-        if SUDO_PASSWORD:
-            password = SUDO_PASSWORD
-        else:
-            password = getpass.getpass('Enter sudo password: ')
-
         serial_port = serial_port_name.split('/')[-1]
         ftdi_timer_latency_requested_value = 1
-        command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > /sys/bus/usb-serial/devices/{serial_port}/latency_timer'"
-        command_ftdi_timer_latency_check = f'cat /sys/bus/usb-serial/devices/{serial_port}/latency_timer'
+        latency_timer_path = Path("/sys/bus/usb-serial/devices") / serial_port / "latency_timer"
+
+        if not latency_timer_path.exists():
+            print(f'FTDI latency timer not available for {serial_port}; skipping.')
+            return
+
+        command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > {latency_timer_path}'"
+        command_ftdi_timer_latency_check = f'cat {latency_timer_path}'
         try:
             subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(e.stderr)
             if "Permission denied" in e.stderr:
+                password = get_sudo_password()
+                if password is None:
+                    password = getpass.getpass('Enter sudo password: ')
+
                 print("Trying with sudo...")
                 command_ftdi_timer_latency_set = f"echo {password} | sudo -S {command_ftdi_timer_latency_set}"
                 try:
