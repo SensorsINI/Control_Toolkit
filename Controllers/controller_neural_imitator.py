@@ -25,7 +25,10 @@ class controller_neural_imitator(template_controller):
             input_precision=self.config_controller["input_precision"],
             nn_evaluator_mode=self.config_controller["nn_evaluator_mode"])
 
-        self.clip_output = self.config_controller.get("clip_output", False)
+        # Neural-imitator commands are normalized motor inputs. The June 2025
+        # controller always clipped them before motor correction; keep that
+        # behavior unless a configuration explicitly opts out.
+        self.clip_output = self.config_controller.get("clip_output", True)
 
         self._computation_library = self.net_evaluator.lib
 
