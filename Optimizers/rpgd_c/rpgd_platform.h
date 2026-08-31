@@ -33,6 +33,18 @@
 #define RPGD_MAX_STATE_BUF ((RPGD_MAX_TOTAL_STEPS + 1) * 6)
 #define RPGD_MAX_Q_BUF (RPGD_MAX_NUM_ROLLOUTS * RPGD_MAX_HORIZON)
 
+#if defined(__GNUC__)
+#  define RPGD_ALIGN64 __attribute__((aligned(64)))
+#else
+#  define RPGD_ALIGN64
+#endif
+
+#if defined(RPGD_DUAL_CORE) && defined(RPGD_PLATFORM_BAREMETAL) && !defined(RPGD_WORKER_ONLY)
+#  define RPGD_SHARED __attribute__((section(".amp_shared"), aligned(64)))
+#else
+#  define RPGD_SHARED RPGD_ALIGN64
+#endif
+
 #ifdef RPGD_PLATFORM_BAREMETAL
 #  ifndef RPGD_FORCE_SINGLE_THREAD
 #    define RPGD_FORCE_SINGLE_THREAD 1

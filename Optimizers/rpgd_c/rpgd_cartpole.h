@@ -73,7 +73,8 @@ enum {
     RPGD_STATUS_BUSY = -3,
     RPGD_STATUS_WORKSPACE_FAILURE = -4,
     RPGD_STATUS_THREAD_FAILURE = -5,
-    RPGD_STATUS_NUMERICAL_FAILURE = -6
+    RPGD_STATUS_NUMERICAL_FAILURE = -6,
+    RPGD_STATUS_WORKER_FAILURE = -7
 };
 
 int rpgd_validate_config(const RpgdConfig* cfg);
@@ -132,9 +133,13 @@ int rpgd_get_horizon(const RpgdSolver* solver);
 size_t rpgd_get_workspace_bytes(const RpgdSolver* solver);
 size_t rpgd_get_static_workspace_bytes(void);
 int rpgd_get_last_status(const RpgdSolver* solver);
+int rpgd_is_busy(const RpgdSolver* solver);
+int rpgd_get_resample_phase(const RpgdSolver* solver);
 int rpgd_is_baremetal(void);
 unsigned int rpgd_get_abi_version(void);
 size_t rpgd_get_config_size(void);
+size_t rpgd_get_solver_size(void);
+size_t rpgd_get_worker_scratch_bytes(void);
 
 #ifdef __cplusplus
 }

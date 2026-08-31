@@ -343,6 +343,7 @@ class optimizer_rpgd_c(template_optimizer):
             c_dir / "cartpole_model.h",
             c_dir / "cartpole_cost.h",
             c_dir / "rpgd_platform.h",
+            c_dir / "rpgd_worker.h",
         ]
         newest_source = max(path.stat().st_mtime for path in sources + headers)
         if (not lib_path.exists()) or lib_path.stat().st_mtime < newest_source:

@@ -1,4 +1,5 @@
 #include "rpgd_cartpole.h"
+#include "rpgd_worker.h"
 #include "cartpole_cost.h"
 #include "cartpole_model.h"
 #include "rpgd_platform.h"
@@ -59,6 +60,7 @@ struct RpgdSolver {
     int first_step;
     uint64_t adam_step;
     int last_status;
+    int busy;
     int owns_storage;
     size_t workspace_bytes;
     float one_minus_beta1;
@@ -91,29 +93,29 @@ typedef struct {
 #endif
 
 #ifdef RPGD_PLATFORM_BAREMETAL
-static RpgdSolver g_solver;
-static float g_q[RPGD_MAX_Q_BUF];
-static float g_adam_m[RPGD_MAX_Q_BUF];
-static float g_adam_v[RPGD_MAX_Q_BUF];
-static float g_trajectory_ages[RPGD_MAX_NUM_ROLLOUTS];
-static float g_costs[RPGD_MAX_NUM_ROLLOUTS];
-static int g_indices[RPGD_MAX_NUM_ROLLOUTS];
-static float g_inducing[RPGD_MAX_HORIZON];
-static float g_warm_q[RPGD_MAX_Q_BUF];
-static float g_warm_m[RPGD_MAX_Q_BUF];
-static float g_warm_v[RPGD_MAX_Q_BUF];
-static float g_warm_ages[RPGD_MAX_NUM_ROLLOUTS];
-static float g_states[RPGD_MAX_STATE_BUF];
-static float g_grad[RPGD_MAX_HORIZON];
-static float g_fd_q[RPGD_MAX_HORIZON];
-static float g_ga[RPGD_MAX_HORIZON];
-static float g_gf[RPGD_MAX_HORIZON];
-static float g_bias_correction_1[RPGD_MAX_OUTER_ITS];
-static float g_bias_correction_2[RPGD_MAX_OUTER_ITS];
+#ifndef RPGD_WORKER_ONLY
+static RpgdSolver g_solver RPGD_SHARED;
+static float g_q[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_adam_m[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_adam_v[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_trajectory_ages[RPGD_MAX_NUM_ROLLOUTS] RPGD_SHARED;
+static float g_costs[RPGD_MAX_NUM_ROLLOUTS] RPGD_SHARED;
+static int g_indices[RPGD_MAX_NUM_ROLLOUTS] RPGD_SHARED;
+static float g_inducing[RPGD_MAX_HORIZON] RPGD_SHARED;
+static float g_warm_q[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_warm_m[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_warm_v[RPGD_MAX_Q_BUF] RPGD_SHARED;
+static float g_warm_ages[RPGD_MAX_NUM_ROLLOUTS] RPGD_SHARED;
+static float g_bias_correction_1[RPGD_MAX_OUTER_ITS] RPGD_SHARED;
+static float g_bias_correction_2[RPGD_MAX_OUTER_ITS] RPGD_SHARED;
 static int g_solver_in_use;
+#endif
+static RpgdWorkerScratch g_local_scratch RPGD_ALIGN64;
+static float g_fd_q[RPGD_MAX_HORIZON] RPGD_ALIGN64;
+static float g_ga[RPGD_MAX_HORIZON] RPGD_ALIGN64;
+static float g_gf[RPGD_MAX_HORIZON] RPGD_ALIGN64;
 #else
-static RPGD_THREAD_LOCAL float tls_states[RPGD_MAX_STATE_BUF];
-static RPGD_THREAD_LOCAL float tls_grad[RPGD_MAX_HORIZON];
+static RPGD_THREAD_LOCAL RpgdWorkerScratch tls_scratch;
 static RPGD_THREAD_LOCAL float tls_fd_q[RPGD_MAX_HORIZON];
 #endif
 
@@ -456,27 +458,33 @@ static void rollout_gradient_adjoint_ws(
     }
 }
 
+static RpgdWorkerScratch* default_scratch(void)
+{
+#ifdef RPGD_PLATFORM_BAREMETAL
+    return &g_local_scratch;
+#else
+    return &tls_scratch;
+#endif
+}
+
 static float* scratch_states(const RpgdConfig* c)
 {
 #ifdef RPGD_PLATFORM_BAREMETAL
     (void)c;
-    return g_states;
+    return g_local_scratch.states;
 #else
-    if (state_scratch_fits(c)) return tls_states;
+    if (state_scratch_fits(c)) return tls_scratch.states;
     return NULL;
 #endif
 }
 
+#ifndef RPGD_PLATFORM_BAREMETAL
 static float* scratch_grad(const RpgdConfig* c)
 {
-#ifdef RPGD_PLATFORM_BAREMETAL
-    (void)c;
-    return g_grad;
-#else
-    if (c->mpc_horizon <= RPGD_MAX_HORIZON) return tls_grad;
+    if (c->mpc_horizon <= RPGD_MAX_HORIZON) return tls_scratch.grad;
     return NULL;
-#endif
 }
+#endif
 
 static void rollout_gradient_adjoint(
     const RpgdConfig* c,
@@ -561,58 +569,68 @@ static int adam_update_rollout(
     return 1;
 }
 
+static int optimize_rollout_ws(
+    RpgdSolver* solver,
+    const RpgdRuntime* rt,
+    const float* state6,
+    int rollout,
+    float* states,
+    float* grad
+)
+{
+    float* q = &solver->q[(size_t)rollout * solver->cfg.mpc_horizon];
+    if (!states || !grad) {
+        solver->costs[rollout] = INFINITY;
+        return 0;
+    }
+    for (int it = 0; it < solver->active_iterations; ++it) {
+        rollout_gradient_adjoint_ws(&solver->cfg, rt, state6, q, states, grad);
+        if (!clip_gradient_norm(&solver->cfg, grad)
+            || !adam_update_rollout(solver, rollout, grad, it)) {
+            solver->costs[rollout] = INFINITY;
+            return 0;
+        }
+    }
+    solver->costs[rollout] = rollout_cost(&solver->cfg, rt, state6, q);
+    return isfinite(solver->costs[rollout]);
+}
+
+#ifndef RPGD_PLATFORM_BAREMETAL
 static int optimize_rollout(RpgdSolver* solver, const RpgdRuntime* rt, const float* state6, int rollout)
 {
     const int H = solver->cfg.mpc_horizon;
     float* grad = scratch_grad(&solver->cfg);
+    float* states = scratch_states(&solver->cfg);
 #ifndef RPGD_PLATFORM_BAREMETAL
     float* heap_grad = NULL;
+    float* heap_states = NULL;
     if (!grad) {
         heap_grad = (float*)malloc((size_t)H * sizeof(float));
         grad = heap_grad;
     }
-    if (!grad) {
-        solver->costs[rollout] = INFINITY;
-        return 0;
-    }
-#else
-    (void)H;
-#endif
-    float* q = &solver->q[(size_t)rollout * solver->cfg.mpc_horizon];
-    float* states = scratch_states(&solver->cfg);
-#ifndef RPGD_PLATFORM_BAREMETAL
-    float* heap_states = NULL;
     if (!states) {
         heap_states = (float*)calloc(
             (size_t)(solver->cfg.mpc_horizon * solver->cfg.intermediate_steps + 1) * STATE_DIM,
             sizeof(float));
         states = heap_states;
     }
-    if (!states) {
+    if (!grad || !states) {
         free(heap_grad);
+        free(heap_states);
         solver->costs[rollout] = INFINITY;
         return 0;
     }
+#else
+    (void)H;
 #endif
-    for (int it = 0; it < solver->active_iterations; ++it) {
-        rollout_gradient_adjoint_ws(&solver->cfg, rt, state6, q, states, grad);
-        if (!clip_gradient_norm(&solver->cfg, grad)
-            || !adam_update_rollout(solver, rollout, grad, it)) {
-            solver->costs[rollout] = INFINITY;
-#ifndef RPGD_PLATFORM_BAREMETAL
-            free(heap_grad);
-            free(heap_states);
-#endif
-            return 0;
-        }
-    }
-    solver->costs[rollout] = rollout_cost(&solver->cfg, rt, state6, q);
+    const int ok = optimize_rollout_ws(solver, rt, state6, rollout, states, grad);
 #ifndef RPGD_PLATFORM_BAREMETAL
     free(heap_grad);
     free(heap_states);
 #endif
-    return isfinite(solver->costs[rollout]);
+    return ok;
 }
+#endif /* !RPGD_PLATFORM_BAREMETAL */
 
 #if !defined(RPGD_PLATFORM_BAREMETAL) && !defined(_OPENMP)
 static void* optimize_rollout_range(void* arg)
@@ -723,11 +741,16 @@ static void apply_cfg_defaults(RpgdSolver* solver, const RpgdConfig* cfg)
     solver->one_minus_beta1 = 1.0f - solver->cfg.adam_beta_1;
     solver->one_minus_beta2 = 1.0f - solver->cfg.adam_beta_2;
     solver->last_status = RPGD_STATUS_OK;
+    solver->busy = 0;
     solver->active_iterations = solver->cfg.outer_its;
 }
 
 RpgdSolver* rpgd_create(const RpgdConfig* cfg)
 {
+#ifdef RPGD_WORKER_ONLY
+    (void)cfg;
+    return NULL;
+#else
     if (!cfg) return NULL;
     RpgdConfig normalized;
     normalize_config(&normalized, cfg);
@@ -751,11 +774,12 @@ RpgdSolver* rpgd_create(const RpgdConfig* cfg)
     solver->bias_correction_1 = g_bias_correction_1;
     solver->bias_correction_2 = g_bias_correction_2;
     solver->owns_storage = 0;
+    solver->busy = 0;
     solver->workspace_bytes =
         sizeof(g_solver) + sizeof(g_q) + sizeof(g_adam_m) + sizeof(g_adam_v)
         + sizeof(g_trajectory_ages) + sizeof(g_costs) + sizeof(g_indices)
         + sizeof(g_inducing) + sizeof(g_warm_q) + sizeof(g_warm_m) + sizeof(g_warm_v)
-        + sizeof(g_warm_ages) + sizeof(g_states) + sizeof(g_grad)
+        + sizeof(g_warm_ages) + sizeof(g_local_scratch)
         + sizeof(g_fd_q) + sizeof(g_ga) + sizeof(g_gf)
         + sizeof(g_bias_correction_1) + sizeof(g_bias_correction_2)
         + sizeof(g_solver_in_use);
@@ -806,14 +830,19 @@ RpgdSolver* rpgd_create(const RpgdConfig* cfg)
     }
     rpgd_reset(solver, normalized.seed);
     return solver;
-#endif
+#endif /* RPGD_PLATFORM_BAREMETAL */
+#endif /* RPGD_WORKER_ONLY */
 }
 
 void rpgd_destroy(RpgdSolver* solver)
 {
     if (!solver) return;
-#ifdef RPGD_PLATFORM_BAREMETAL
+#ifdef RPGD_WORKER_ONLY
+    (void)solver;
+    return;
+#elif defined(RPGD_PLATFORM_BAREMETAL)
     if (solver == &g_solver) g_solver_in_use = 0;
+    solver->busy = 0;
     return;
 #else
     if (solver->owns_storage) {
@@ -843,6 +872,7 @@ void rpgd_reset(RpgdSolver* solver, unsigned int seed)
     solver->first_step = 1;
     solver->adam_step = 0;
     solver->last_status = RPGD_STATUS_OK;
+    solver->busy = 0;
     const int N = solver->cfg.num_rollouts;
     const int H = solver->cfg.mpc_horizon;
     for (int i = 0; i < N; ++i) sample_action_sequence(solver, &solver->q[(size_t)i * H]);
@@ -851,10 +881,10 @@ void rpgd_reset(RpgdSolver* solver, unsigned int seed)
     memset(solver->trajectory_ages, 0, (size_t)N * sizeof(float));
 }
 
+#if !defined(RPGD_PLATFORM_BAREMETAL) && !defined(RPGD_FORCE_SINGLE_THREAD)
 static void optimize_all_rollouts(RpgdSolver* solver, const float* state6, const RpgdRuntime* runtime)
 {
     const int N = solver->cfg.num_rollouts;
-    for (int i = 0; i < N; ++i) solver->costs[i] = INFINITY;
 #if defined(RPGD_PLATFORM_BAREMETAL) || defined(RPGD_FORCE_SINGLE_THREAD)
     for (int i = 0; i < N; ++i) {
         optimize_rollout(solver, runtime, state6, i);
@@ -908,19 +938,52 @@ static void optimize_all_rollouts(RpgdSolver* solver, const float* state6, const
     }
 #endif
 }
+#endif /* host multi-thread optimize_all_rollouts */
 
 float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runtime)
 {
-    if (!solver) return 0.0f;
+    RpgdStepPlan plan;
+    const int rc = rpgd_step_prepare(solver, state6, runtime, &plan);
+    if (rc != RPGD_STATUS_OK) return 0.0f;
+#if defined(RPGD_PLATFORM_BAREMETAL) || defined(RPGD_FORCE_SINGLE_THREAD)
+    const int opt_rc = rpgd_step_optimize_range(
+        solver, &plan, 0, solver->cfg.num_rollouts, default_scratch());
+    if (opt_rc != RPGD_STATUS_OK) {
+        rpgd_step_abort(solver, opt_rc);
+        return 0.0f;
+    }
+#else
+    optimize_all_rollouts(solver, plan.state6, &plan.runtime);
+#endif
+    return rpgd_step_finalize(solver, &plan);
+}
+
+int rpgd_step_prepare(RpgdSolver* solver, const float state6[6],
+                      const RpgdRuntime* runtime, RpgdStepPlan* plan)
+{
+    if (!solver) return RPGD_STATUS_INVALID_ARGUMENT;
+    if (solver->busy) {
+        solver->last_status = RPGD_STATUS_BUSY;
+        return RPGD_STATUS_BUSY;
+    }
+    if (!plan) {
+        solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
+        return RPGD_STATUS_INVALID_ARGUMENT;
+    }
+    memset(plan, 0, sizeof(*plan));
     solver->last_status = RPGD_STATUS_OK;
     if (!finite_state6(state6) || !finite_runtime(runtime)) {
         solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
-        return 0.0f;
+        return RPGD_STATUS_INVALID_ARGUMENT;
     }
+    solver->busy = 1;
+    memcpy(plan->state6, state6, STATE_DIM * sizeof(float));
+    plan->runtime = *runtime;
     solver->active_iterations =
         solver->first_step && solver->cfg.warmup
         ? solver->cfg.warmup_iterations
         : solver->cfg.outer_its;
+    plan->active_iterations = solver->active_iterations;
     for (int it = 0; it < solver->active_iterations; ++it) {
         uint64_t step = solver->adam_step + (uint64_t)it + UINT64_C(1);
         const float step_f = step > UINT64_C(16777216) ? 16777216.0f : (float)step;
@@ -930,10 +993,78 @@ float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runt
             1.0f - powf(solver->cfg.adam_beta_2, step_f);
     }
     const int N = solver->cfg.num_rollouts;
-    optimize_all_rollouts(solver, state6, runtime);
+    for (int i = 0; i < N; ++i) solver->costs[i] = INFINITY;
+    plan->prepared = 1;
+    plan->range_error = RPGD_STATUS_OK;
+    return RPGD_STATUS_OK;
+}
+
+int rpgd_step_optimize_range(RpgdSolver* solver, const RpgdStepPlan* plan,
+                             int first, int last,
+                             RpgdWorkerScratch* scratch)
+{
+    RpgdStepPlan* mut = (RpgdStepPlan*)plan;
+    if (!solver || !plan || !plan->prepared || !solver->busy) {
+#ifndef RPGD_WORKER_ONLY
+        if (solver) solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
+#endif
+        if (mut) mut->range_error = RPGD_STATUS_INVALID_ARGUMENT;
+        return RPGD_STATUS_INVALID_ARGUMENT;
+    }
+    const int N = solver->cfg.num_rollouts;
+    if (first < 0 || last < first || last > N) {
+#ifndef RPGD_WORKER_ONLY
+        solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
+#endif
+        mut->range_error = RPGD_STATUS_INVALID_ARGUMENT;
+        return RPGD_STATUS_INVALID_ARGUMENT;
+    }
+    RpgdWorkerScratch* ws = scratch ? scratch : default_scratch();
+#ifndef RPGD_PLATFORM_BAREMETAL
+    if (!state_scratch_fits(&solver->cfg) || solver->cfg.mpc_horizon > RPGD_MAX_HORIZON) {
+        for (int i = first; i < last; ++i) {
+            optimize_rollout(solver, &plan->runtime, plan->state6, i);
+        }
+        return RPGD_STATUS_OK;
+    }
+#endif
+    for (int i = first; i < last; ++i) {
+        optimize_rollout_ws(solver, &plan->runtime, plan->state6, i, ws->states, ws->grad);
+    }
+    return RPGD_STATUS_OK;
+}
+
+void rpgd_step_abort(RpgdSolver* solver, int status)
+{
+    if (!solver) return;
+    if (status != RPGD_STATUS_OK) solver->last_status = status;
+    solver->busy = 0;
+}
+
+float rpgd_step_finalize(RpgdSolver* solver, RpgdStepPlan* plan)
+{
+    if (!solver) return 0.0f;
+    if (!plan || !plan->prepared || !solver->busy) {
+        solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
+        solver->busy = 0;
+        return 0.0f;
+    }
+    if (plan->range_error != RPGD_STATUS_OK) {
+        rpgd_step_abort(solver, plan->range_error);
+        plan->prepared = 0;
+        return 0.0f;
+    }
+    if (solver->last_status == RPGD_STATUS_WORKER_FAILURE) {
+        rpgd_step_abort(solver, RPGD_STATUS_WORKER_FAILURE);
+        plan->prepared = 0;
+        return 0.0f;
+    }
+    const int N = solver->cfg.num_rollouts;
     sort_indices_by_cost(solver->costs, solver->indices, N);
     if (!isfinite(solver->costs[solver->indices[0]])) {
         solver->last_status = RPGD_STATUS_NUMERICAL_FAILURE;
+        solver->busy = 0;
+        plan->prepared = 0;
         return 0.0f;
     }
     if (solver->adam_step <= UINT64_MAX - (uint64_t)solver->active_iterations) {
@@ -946,6 +1077,11 @@ float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runt
     solver->first_step = 0;
     solver->resample_phase += 1;
     if (solver->resample_phase >= solver->cfg.resamp_per) solver->resample_phase = 0;
+    solver->busy = 0;
+    plan->prepared = 0;
+    if (solver->last_status != RPGD_STATUS_THREAD_FAILURE) {
+        solver->last_status = RPGD_STATUS_OK;
+    }
     return clampf_local(u, solver->cfg.action_low, solver->cfg.action_high);
 }
 
@@ -1122,8 +1258,8 @@ size_t rpgd_get_static_workspace_bytes(void)
         + (size_t)(3 * RPGD_MAX_NUM_ROLLOUTS) * sizeof(float)
         + (size_t)RPGD_MAX_NUM_ROLLOUTS * sizeof(int)
         + (size_t)RPGD_MAX_HORIZON * sizeof(float)
-        + (size_t)RPGD_MAX_STATE_BUF * sizeof(float)
-        + (size_t)(4 * RPGD_MAX_HORIZON) * sizeof(float)
+        + sizeof(RpgdWorkerScratch)
+        + (size_t)(3 * RPGD_MAX_HORIZON) * sizeof(float)
         + (size_t)(2 * RPGD_MAX_OUTER_ITS) * sizeof(float)
         + sizeof(int);
 }
@@ -1131,6 +1267,16 @@ size_t rpgd_get_static_workspace_bytes(void)
 int rpgd_get_last_status(const RpgdSolver* solver)
 {
     return solver ? solver->last_status : RPGD_STATUS_INVALID_ARGUMENT;
+}
+
+int rpgd_is_busy(const RpgdSolver* solver)
+{
+    return solver ? solver->busy : 0;
+}
+
+int rpgd_get_resample_phase(const RpgdSolver* solver)
+{
+    return solver ? solver->resample_phase : 0;
 }
 
 int rpgd_is_baremetal(void)
@@ -1150,4 +1296,43 @@ unsigned int rpgd_get_abi_version(void)
 size_t rpgd_get_config_size(void)
 {
     return sizeof(RpgdConfig);
+}
+
+size_t rpgd_get_solver_size(void)
+{
+    return sizeof(RpgdSolver);
+}
+
+size_t rpgd_get_worker_scratch_bytes(void)
+{
+    return sizeof(RpgdWorkerScratch);
+}
+
+void rpgd_cache_visit_solver(RpgdSolver* solver, void (*fn)(const void*, size_t))
+{
+    if (!solver || !fn) return;
+    fn(solver, sizeof(*solver));
+    if (solver->bias_correction_1 && solver->active_iterations > 0) {
+        fn(solver->bias_correction_1, (size_t)solver->active_iterations * sizeof(float));
+        fn(solver->bias_correction_2, (size_t)solver->active_iterations * sizeof(float));
+    }
+    if (solver->costs) {
+        fn(solver->costs, (size_t)solver->cfg.num_rollouts * sizeof(float));
+    }
+}
+
+void rpgd_cache_visit_rollout_slice(RpgdSolver* solver, int first, int last,
+                                    void (*fn)(const void*, size_t))
+{
+    if (!solver || !fn) return;
+    const int N = solver->cfg.num_rollouts;
+    const int H = solver->cfg.mpc_horizon;
+    if (first < 0) first = 0;
+    if (last > N) last = N;
+    if (last <= first || H <= 0) return;
+    const size_t q_bytes = (size_t)(last - first) * (size_t)H * sizeof(float);
+    fn(&solver->q[(size_t)first * (size_t)H], q_bytes);
+    fn(&solver->adam_m[(size_t)first * (size_t)H], q_bytes);
+    fn(&solver->adam_v[(size_t)first * (size_t)H], q_bytes);
+    fn(&solver->costs[first], (size_t)(last - first) * sizeof(float));
 }
