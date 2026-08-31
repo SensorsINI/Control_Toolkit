@@ -1,4 +1,9 @@
 #include "cartpole_model.h"
+#include "rpgd_platform.h"
+
+#if defined(RPGD_PLATFORM_BAREMETAL) && defined(__GNUC__)
+#pragma GCC optimize("O3")
+#endif
 
 #include <math.h>
 #include <string.h>
@@ -12,7 +17,14 @@ enum {
     POSITIOND_IDX = 5
 };
 
-static void cartpole_substep(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q, float* sn)
+void cartpole_model_substep_dt(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* s,
+    float q,
+    float dt,
+    float* sn
+)
 {
     const float L = rt->L > 0.0f ? rt->L : c->L;
     const float m_pole = rt->m_pole > 0.0f ? rt->m_pole : c->m_pole;
@@ -37,10 +49,10 @@ static void cartpole_substep(const RpgdConfig* c, const RpgdRuntime* rt, const f
         c->g * sa + positionDD * ca + T_fric / (m_pole * Lh)
     ) / (kp1 * Lh);
 
-    const float w_next = angleD + angleDD * c->mpc_timestep / (float)c->intermediate_steps;
-    const float v_next = positionD + positionDD * c->mpc_timestep / (float)c->intermediate_steps;
-    const float a_next = angle + w_next * c->mpc_timestep / (float)c->intermediate_steps;
-    const float x_next = s[POSITION_IDX] + v_next * c->mpc_timestep / (float)c->intermediate_steps;
+    const float w_next = angleD + angleDD * dt;
+    const float v_next = positionD + positionDD * dt;
+    const float a_next = angle + w_next * dt;
+    const float x_next = s[POSITION_IDX] + v_next * dt;
     const float cos_next = cosf(a_next);
     const float sin_next = sinf(a_next);
 
@@ -52,34 +64,18 @@ static void cartpole_substep(const RpgdConfig* c, const RpgdRuntime* rt, const f
     sn[POSITIOND_IDX] = v_next;
 }
 
-void cartpole_model_substep_dt(
-    const RpgdConfig* cfg,
-    const RpgdRuntime* runtime,
-    const float* state6,
-    float q,
-    float dt,
-    float* next_state6
-)
-{
-    RpgdConfig tmp = *cfg;
-    tmp.mpc_timestep = dt;
-    tmp.intermediate_steps = 1;
-    cartpole_substep(&tmp, runtime, state6, q, next_state6);
-}
-
-void cartpole_model_substep_jacobian(
+void cartpole_model_substep_jacobian_with_trig(
     const RpgdConfig* c,
     const RpgdRuntime* rt,
     const float* s,
     float q,
     float dt,
+    float cos_next,
+    float sin_next,
     float Jx[6][6],
     float Ju[6]
 )
 {
-    memset(Jx, 0, 6 * 6 * sizeof(float));
-    memset(Ju, 0, 6 * sizeof(float));
-
     const float L = rt->L > 0.0f ? rt->L : c->L;
     const float m_pole = rt->m_pole > 0.0f ? rt->m_pole : c->m_pole;
     const float Lh = 0.5f * L;
@@ -147,13 +143,6 @@ void cartpole_model_substep_jacobian(
     da[ANGLE_IDX] += 1.0f;
     dx[POSITION_IDX] += 1.0f;
 
-    const float w_next = s[ANGLED_IDX] + dt * (
-        c->g * sa + positionDD * ca + T_fric / (m_pole * Lh)
-    ) * inv_angle_den;
-    const float angle_next = s[ANGLE_IDX] + dt * w_next;
-    const float cos_next = cosf(angle_next);
-    const float sin_next = sinf(angle_next);
-
     for (int j = 0; j < 6; ++j) {
         Jx[ANGLE_IDX][j] = da[j];
         Jx[ANGLED_IDX][j] = dw[j];
@@ -170,6 +159,44 @@ void cartpole_model_substep_jacobian(
     Ju[POSITIOND_IDX] = dv_q;
 }
 
+void cartpole_model_substep_jacobian(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* s,
+    float q,
+    float dt,
+    float Jx[6][6],
+    float Ju[6]
+)
+{
+    const float L = rt->L > 0.0f ? rt->L : c->L;
+    const float m_pole = rt->m_pole > 0.0f ? rt->m_pole : c->m_pole;
+    const float Lh = 0.5f * L;
+    const float ca = s[ANGLE_COS_IDX];
+    const float sa = s[ANGLE_SIN_IDX];
+    const float angleD = s[ANGLED_IDX];
+    const float positionD = s[POSITIOND_IDX];
+    const float u = c->u_max * q;
+    const float kp1 = c->k + 1.0f;
+
+    const float F_fric = -c->M_fric * positionD;
+    const float T_fric = -c->J_fric * angleD;
+    const float denom = kp1 * (c->m_cart + m_pole) - m_pole * ca * ca;
+    const float inv_denom = 1.0f / denom;
+    const float num =
+        m_pole * c->g * sa * ca
+        + (T_fric * ca) / Lh
+        + kp1 * (-m_pole * Lh * angleD * angleD * sa + F_fric + u);
+    const float positionDD = num * inv_denom;
+    const float inv_angle_den = 1.0f / (kp1 * Lh);
+    const float w_next = s[ANGLED_IDX] + dt * (
+        c->g * sa + positionDD * ca + T_fric / (m_pole * Lh)
+    ) * inv_angle_den;
+    const float angle_next = s[ANGLE_IDX] + dt * w_next;
+    cartpole_model_substep_jacobian_with_trig(
+        c, rt, s, q, dt, cosf(angle_next), sinf(angle_next), Jx, Ju);
+}
+
 void cartpole_model_rollout_final_state(
     const RpgdConfig* cfg,
     const RpgdRuntime* runtime,
@@ -180,11 +207,11 @@ void cartpole_model_rollout_final_state(
 {
     float s[6];
     float sn[6];
+    const float dt = cfg->mpc_timestep / (float)cfg->intermediate_steps;
     memcpy(s, state6, 6 * sizeof(float));
     for (int h = 0; h < cfg->mpc_horizon; ++h) {
         for (int k = 0; k < cfg->intermediate_steps; ++k) {
-            cartpole_model_substep_dt(cfg, runtime, s, q[h],
-                                      cfg->mpc_timestep / (float)cfg->intermediate_steps, sn);
+            cartpole_model_substep_dt(cfg, runtime, s, q[h], dt, sn);
             memcpy(s, sn, 6 * sizeof(float));
         }
     }

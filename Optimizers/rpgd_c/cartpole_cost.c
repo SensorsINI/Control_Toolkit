@@ -1,4 +1,9 @@
 #include "cartpole_cost.h"
+#include "rpgd_platform.h"
+
+#if defined(RPGD_PLATFORM_BAREMETAL) && defined(__GNUC__)
+#pragma GCC optimize("O3")
+#endif
 
 #include <math.h>
 
@@ -42,14 +47,12 @@ float cartpole_cost_stage(
     return dd + db + ep + ekp + cc;
 }
 
-void cartpole_cost_stage_grad(
+void cartpole_cost_stage_grad_state(
     const RpgdConfig* c,
     const RpgdRuntime* rt,
     const float* s,
-    float q,
     float scale,
-    float* gs,
-    float* gq
+    float* gs
 )
 {
     const float target_eq = rt->target_equilibrium == 0.0f ? 1.0f : rt->target_equilibrium;
@@ -79,5 +82,27 @@ void cartpole_cost_stage_grad(
     gs[ANGLED_IDX] += scale * c->ekp_weight_up * up_only * kinetic_sign * 2.0f * angleD;
     gs[ANGLE_IDX] += scale * c->ekp_weight_up * up_only * kinetic_sign * (-kinetic_ref_factor * sinf(angle));
 
-    *gq += scale * 2.0f * c->cc_weight_up * c->R * q;
+}
+
+float cartpole_cost_stage_grad_q(
+    const RpgdConfig* c,
+    float q,
+    float scale
+)
+{
+    return scale * 2.0f * c->cc_weight_up * c->R * q;
+}
+
+void cartpole_cost_stage_grad(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* s,
+    float q,
+    float scale,
+    float* gs,
+    float* gq
+)
+{
+    cartpole_cost_stage_grad_state(c, rt, s, scale, gs);
+    *gq += cartpole_cost_stage_grad_q(c, q, scale);
 }

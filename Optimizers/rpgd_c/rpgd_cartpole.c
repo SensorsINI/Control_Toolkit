@@ -1,24 +1,38 @@
 #include "rpgd_cartpole.h"
 #include "cartpole_cost.h"
 #include "cartpole_model.h"
+#include "rpgd_platform.h"
 
+#if defined(RPGD_PLATFORM_BAREMETAL) && defined(__GNUC__)
+#pragma GCC optimize("O3")
+#endif
+
+#include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
+#ifndef RPGD_PLATFORM_BAREMETAL
+#include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
 #endif
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
+#ifndef NAN
+#define NAN (0.0f / 0.0f)
+#endif
+
 #define STATE_DIM 6
+#define RPGD_ABI_VERSION 1u
 
 enum {
     ANGLE_IDX = 0,
@@ -40,9 +54,15 @@ struct RpgdSolver {
     int opt_keep_k;
     int inducing_points;
     int thread_count;
-    int count;
-    int adam_step;
-    float dt_sub;
+    int resample_phase;
+    int active_iterations;
+    int first_step;
+    uint64_t adam_step;
+    int last_status;
+    int owns_storage;
+    size_t workspace_bytes;
+    float one_minus_beta1;
+    float one_minus_beta2;
 
     float* q;
     float* adam_m;
@@ -50,10 +70,17 @@ struct RpgdSolver {
     float* trajectory_ages;
     float* costs;
     int* indices;
+    float* inducing;
+    float* warm_q;
+    float* warm_m;
+    float* warm_v;
+    float* warm_ages;
+    float* bias_correction_1;
+    float* bias_correction_2;
     RngState rng;
 };
 
-#ifndef _OPENMP
+#if !defined(RPGD_PLATFORM_BAREMETAL) && !defined(_OPENMP)
 typedef struct {
     RpgdSolver* solver;
     const RpgdRuntime* runtime;
@@ -63,11 +90,143 @@ typedef struct {
 } RpgdThreadArgs;
 #endif
 
+#ifdef RPGD_PLATFORM_BAREMETAL
+static RpgdSolver g_solver;
+static float g_q[RPGD_MAX_Q_BUF];
+static float g_adam_m[RPGD_MAX_Q_BUF];
+static float g_adam_v[RPGD_MAX_Q_BUF];
+static float g_trajectory_ages[RPGD_MAX_NUM_ROLLOUTS];
+static float g_costs[RPGD_MAX_NUM_ROLLOUTS];
+static int g_indices[RPGD_MAX_NUM_ROLLOUTS];
+static float g_inducing[RPGD_MAX_HORIZON];
+static float g_warm_q[RPGD_MAX_Q_BUF];
+static float g_warm_m[RPGD_MAX_Q_BUF];
+static float g_warm_v[RPGD_MAX_Q_BUF];
+static float g_warm_ages[RPGD_MAX_NUM_ROLLOUTS];
+static float g_states[RPGD_MAX_STATE_BUF];
+static float g_grad[RPGD_MAX_HORIZON];
+static float g_fd_q[RPGD_MAX_HORIZON];
+static float g_ga[RPGD_MAX_HORIZON];
+static float g_gf[RPGD_MAX_HORIZON];
+static float g_bias_correction_1[RPGD_MAX_OUTER_ITS];
+static float g_bias_correction_2[RPGD_MAX_OUTER_ITS];
+static int g_solver_in_use;
+#else
+static RPGD_THREAD_LOCAL float tls_states[RPGD_MAX_STATE_BUF];
+static RPGD_THREAD_LOCAL float tls_grad[RPGD_MAX_HORIZON];
+static RPGD_THREAD_LOCAL float tls_fd_q[RPGD_MAX_HORIZON];
+#endif
+
 static float clampf_local(float x, float lo, float hi)
 {
+    if (!isfinite(x)) return 0.0f;
     if (x < lo) return lo;
     if (x > hi) return hi;
     return x;
+}
+
+static int finite_state6(const float* state6)
+{
+    if (!state6) return 0;
+    for (int i = 0; i < STATE_DIM; ++i) {
+        if (!isfinite(state6[i])) return 0;
+    }
+    return 1;
+}
+
+static int finite_runtime(const RpgdRuntime* rt)
+{
+    return rt
+        && isfinite(rt->target_position)
+        && isfinite(rt->target_equilibrium)
+        && isfinite(rt->L)
+        && isfinite(rt->m_pole)
+        && rt->L >= 0.0f
+        && rt->m_pole >= 0.0f;
+}
+
+static void normalize_config(RpgdConfig* dst, const RpgdConfig* src)
+{
+    *dst = *src;
+    if (dst->period_interpolation_inducing_points <= 0) dst->period_interpolation_inducing_points = 1;
+    if (dst->intermediate_steps <= 0) dst->intermediate_steps = 10;
+    if (dst->resamp_per <= 0) dst->resamp_per = 1;
+    if (dst->shift_previous <= 0) dst->shift_previous = 1;
+    if (dst->reserve_threads < 0) dst->reserve_threads = 0;
+}
+
+static int validate_normalized_config(const RpgdConfig* c)
+{
+    if (c->mpc_horizon <= 0 || c->num_rollouts <= 0 || c->outer_its <= 0
+        || c->intermediate_steps <= 0 || c->resamp_per <= 0
+        || c->period_interpolation_inducing_points <= 0
+        || c->shift_previous <= 0 || c->shift_previous > c->mpc_horizon
+        || c->sampling_distribution < 0 || c->sampling_distribution > 1
+        || c->sample_whole_control_space < 0 || c->sample_whole_control_space > 1
+        || c->warmup < 0 || c->warmup > 1
+        || (c->warmup && c->warmup_iterations <= 0)
+        || c->num_threads < 0 || c->reserve_threads < 0) {
+        return RPGD_STATUS_INVALID_CONFIG;
+    }
+    if (c->mpc_horizon > INT_MAX / c->intermediate_steps
+        || (size_t)c->num_rollouts > SIZE_MAX / (size_t)c->mpc_horizon / sizeof(float)) {
+        return RPGD_STATUS_INVALID_CONFIG;
+    }
+#define RPGD_FINITE_FIELD(field) if (!isfinite(c->field)) return RPGD_STATUS_INVALID_CONFIG
+    RPGD_FINITE_FIELD(mpc_timestep);
+    RPGD_FINITE_FIELD(learning_rate);
+    RPGD_FINITE_FIELD(adam_beta_1);
+    RPGD_FINITE_FIELD(adam_beta_2);
+    RPGD_FINITE_FIELD(adam_epsilon);
+    RPGD_FINITE_FIELD(gradmax_clip);
+    RPGD_FINITE_FIELD(opt_keep_k_ratio);
+    RPGD_FINITE_FIELD(sample_stdev);
+    RPGD_FINITE_FIELD(sample_mean);
+    RPGD_FINITE_FIELD(uniform_dist_min);
+    RPGD_FINITE_FIELD(uniform_dist_max);
+    RPGD_FINITE_FIELD(action_low);
+    RPGD_FINITE_FIELD(action_high);
+    RPGD_FINITE_FIELD(k);
+    RPGD_FINITE_FIELD(m_cart);
+    RPGD_FINITE_FIELD(m_pole);
+    RPGD_FINITE_FIELD(g);
+    RPGD_FINITE_FIELD(J_fric);
+    RPGD_FINITE_FIELD(M_fric);
+    RPGD_FINITE_FIELD(L);
+    RPGD_FINITE_FIELD(u_max);
+    RPGD_FINITE_FIELD(track_half_length);
+    RPGD_FINITE_FIELD(dd_quadratic_weight_up);
+    RPGD_FINITE_FIELD(db_weight_up);
+    RPGD_FINITE_FIELD(ep_weight_up);
+    RPGD_FINITE_FIELD(ekp_weight_up);
+    RPGD_FINITE_FIELD(cc_weight_up);
+    RPGD_FINITE_FIELD(vel_penalty_reg);
+    RPGD_FINITE_FIELD(R);
+    RPGD_FINITE_FIELD(permissible_track_fraction);
+#undef RPGD_FINITE_FIELD
+    if (c->mpc_timestep <= 0.0f || c->learning_rate < 0.0f
+        || c->adam_beta_1 < 0.0f || c->adam_beta_1 >= 1.0f
+        || c->adam_beta_2 < 0.0f || c->adam_beta_2 >= 1.0f
+        || c->adam_epsilon <= 0.0f || c->gradmax_clip < 0.0f
+        || c->opt_keep_k_ratio <= 0.0f || c->opt_keep_k_ratio > 1.0f
+        || c->sample_stdev < 0.0f || c->uniform_dist_min > c->uniform_dist_max
+        || c->action_low >= c->action_high || c->k <= -1.0f
+        || c->m_cart <= 0.0f || c->m_pole <= 0.0f || c->g <= 0.0f
+        || c->J_fric < 0.0f || c->M_fric < 0.0f || c->L <= 0.0f
+        || c->u_max <= 0.0f || c->track_half_length <= 0.0f
+        || c->permissible_track_fraction <= 0.0f
+        || c->permissible_track_fraction >= 1.0f) {
+        return RPGD_STATUS_INVALID_CONFIG;
+    }
+    return RPGD_STATUS_OK;
+}
+
+int rpgd_validate_config(const RpgdConfig* cfg)
+{
+    if (!cfg) return RPGD_STATUS_INVALID_ARGUMENT;
+    RpgdConfig normalized;
+    normalize_config(&normalized, cfg);
+    return validate_normalized_config(&normalized);
 }
 
 static uint64_t splitmix64(uint64_t* x)
@@ -122,14 +281,32 @@ static int calc_inducing_points(int horizon, int period)
     return (int)ceilf(((float)horizon - 1.0f) / (float)period) + 1;
 }
 
+#ifdef RPGD_PLATFORM_BAREMETAL
+static int cfg_fits_static(const RpgdConfig* c)
+{
+    return c->num_rollouts <= RPGD_MAX_NUM_ROLLOUTS
+        && c->mpc_horizon <= RPGD_MAX_HORIZON
+        && c->intermediate_steps <= RPGD_MAX_INTERMEDIATE_STEPS
+        && c->outer_its <= RPGD_MAX_OUTER_ITS
+        && (!c->warmup || c->warmup_iterations <= RPGD_MAX_OUTER_ITS);
+}
+#endif
+
+#ifndef RPGD_PLATFORM_BAREMETAL
+static int state_scratch_fits(const RpgdConfig* c)
+{
+    return c->mpc_horizon <= RPGD_MAX_HORIZON
+        && c->intermediate_steps <= RPGD_MAX_INTERMEDIATE_STEPS;
+}
+#endif
+
 static void sample_action_sequence(RpgdSolver* solver, float* out_q)
 {
     const RpgdConfig* c = &solver->cfg;
     const int h = c->mpc_horizon;
     const int p = c->period_interpolation_inducing_points;
     const int n = solver->inducing_points;
-    float* points = (float*)malloc((size_t)n * sizeof(float));
-    if (!points) return;
+    float* points = solver->inducing;
 
     for (int i = 0; i < n; ++i) {
         float v;
@@ -154,7 +331,6 @@ static void sample_action_sequence(RpgdSolver* solver, float* out_q)
             out_q[t] = (1.0f - frac) * points[left] + frac * points[right];
         }
     }
-    free(points);
 }
 
 static void sort_indices_by_cost(const float* costs, int* idx, int n)
@@ -172,282 +348,102 @@ static void sort_indices_by_cost(const float* costs, int* idx, int n)
     }
 }
 
-static void cartpole_substep(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q, float* sn)
-{
-    const float L = rt->L > 0.0f ? rt->L : c->L;
-    const float m_pole = rt->m_pole > 0.0f ? rt->m_pole : c->m_pole;
-    const float Lh = 0.5f * L;
-    const float ca = s[ANGLE_COS_IDX];
-    const float sa = s[ANGLE_SIN_IDX];
-    const float angle = s[ANGLE_IDX];
-    const float angleD = s[ANGLED_IDX];
-    const float position = s[POSITION_IDX];
-    const float positionD = s[POSITIOND_IDX];
-    const float u = c->u_max * q;
-
-    const float F_fric = -c->M_fric * positionD;
-    const float T_fric = -c->J_fric * angleD;
-    const float kp1 = c->k + 1.0f;
-    const float denom = kp1 * (c->m_cart + m_pole) - m_pole * ca * ca;
-    const float positionDD = (
-        m_pole * c->g * sa * ca
-        + (T_fric * ca) / Lh
-        + kp1 * (-m_pole * Lh * angleD * angleD * sa + F_fric + u)
-    ) / denom;
-    const float angleDD = (
-        c->g * sa + positionDD * ca + T_fric / (m_pole * Lh)
-    ) / (kp1 * Lh);
-
-    const float w_next = angleD + angleDD * c->mpc_timestep / (float)c->intermediate_steps;
-    const float v_next = positionD + positionDD * c->mpc_timestep / (float)c->intermediate_steps;
-    const float a_next = angle + w_next * c->mpc_timestep / (float)c->intermediate_steps;
-    const float x_next = position + v_next * c->mpc_timestep / (float)c->intermediate_steps;
-    const float cos_next = cosf(a_next);
-    const float sin_next = sinf(a_next);
-
-    sn[ANGLE_IDX] = atan2f(sin_next, cos_next);
-    sn[ANGLED_IDX] = w_next;
-    sn[ANGLE_COS_IDX] = cos_next;
-    sn[ANGLE_SIN_IDX] = sin_next;
-    sn[POSITION_IDX] = x_next;
-    sn[POSITIOND_IDX] = v_next;
-}
-
-static void cartpole_substep_dt(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q, float dt, float* sn)
-{
-    RpgdConfig tmp = *c;
-    tmp.mpc_timestep = dt;
-    tmp.intermediate_steps = 1;
-    cartpole_substep(&tmp, rt, s, q, sn);
-}
-
-static float stage_cost(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q)
-{
-    const float target_eq = rt->target_equilibrium == 0.0f ? 1.0f : rt->target_equilibrium;
-    const float L = rt->L > 0.0f ? rt->L : c->L;
-    const float position = s[POSITION_IDX];
-    const float angle = s[ANGLE_IDX];
-    const float angleD = s[ANGLED_IDX];
-    const float abs_pos = fabsf(position);
-    const float T = c->track_half_length;
-
-    const float dd = c->dd_quadratic_weight_up * powf((position - rt->target_position) / (2.0f * T), 2.0f);
-
-    float db = 0.0f;
-    const float boundary = c->permissible_track_fraction * T;
-    if (abs_pos > boundary) {
-        db = c->db_weight_up * powf((abs_pos - boundary) / ((1.0f - c->permissible_track_fraction) * T), 2.0f);
-    }
-
-    const float ep = c->ep_weight_up * powf(1.0f - target_eq * cosf(angle), 2.0f);
-    const float up_only = (target_eq + 1.0f) * 0.5f;
-    const float kinetic_ref = c->vel_penalty_reg * (3.0f * c->g / L) * (1.0f - cosf(angle));
-    const float ekp = c->ekp_weight_up * up_only * fabsf(angleD * angleD - kinetic_ref);
-    const float cc = c->cc_weight_up * c->R * q * q;
-    return dd + db + ep + ekp + cc;
-}
-
-static void stage_cost_grad(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q, float scale, float* gs, float* gq)
-{
-    const float target_eq = rt->target_equilibrium == 0.0f ? 1.0f : rt->target_equilibrium;
-    const float L = rt->L > 0.0f ? rt->L : c->L;
-    const float T = c->track_half_length;
-    const float position = s[POSITION_IDX];
-    const float angle = s[ANGLE_IDX];
-    const float angleD = s[ANGLED_IDX];
-
-    gs[POSITION_IDX] += scale * c->dd_quadratic_weight_up * (position - rt->target_position) / (2.0f * T * T);
-
-    const float abs_pos = fabsf(position);
-    const float boundary = c->permissible_track_fraction * T;
-    if (abs_pos > boundary) {
-        const float denom = (1.0f - c->permissible_track_fraction) * T;
-        const float sign = position >= 0.0f ? 1.0f : -1.0f;
-        gs[POSITION_IDX] += scale * c->db_weight_up * 2.0f * (abs_pos - boundary) * sign / (denom * denom);
-    }
-
-    const float ep_inner = 1.0f - target_eq * cosf(angle);
-    gs[ANGLE_IDX] += scale * c->ep_weight_up * 2.0f * ep_inner * target_eq * sinf(angle);
-
-    const float up_only = (target_eq + 1.0f) * 0.5f;
-    const float kinetic_ref_factor = c->vel_penalty_reg * (3.0f * c->g / L);
-    const float kinetic_inner = angleD * angleD - kinetic_ref_factor * (1.0f - cosf(angle));
-    const float kinetic_sign = kinetic_inner >= 0.0f ? 1.0f : -1.0f;
-    gs[ANGLED_IDX] += scale * c->ekp_weight_up * up_only * kinetic_sign * 2.0f * angleD;
-    gs[ANGLE_IDX] += scale * c->ekp_weight_up * up_only * kinetic_sign * (-kinetic_ref_factor * sinf(angle));
-
-    *gq += scale * 2.0f * c->cc_weight_up * c->R * q;
-}
-
 static float rollout_cost(const RpgdConfig* c, const RpgdRuntime* rt, const float* state6, const float* q)
 {
     float s[STATE_DIM];
     float sn[STATE_DIM];
+    const float dt = c->mpc_timestep / (float)c->intermediate_steps;
     memcpy(s, state6, STATE_DIM * sizeof(float));
 
     float total = 0.0f;
     for (int h = 0; h < c->mpc_horizon; ++h) {
         total += cartpole_cost_stage(c, rt, s, q[h]);
         for (int k = 0; k < c->intermediate_steps; ++k) {
-            cartpole_model_substep_dt(c, rt, s, q[h], c->mpc_timestep / (float)c->intermediate_steps, sn);
+            cartpole_model_substep_dt(c, rt, s, q[h], dt, sn);
             memcpy(s, sn, STATE_DIM * sizeof(float));
         }
     }
-    return total / (float)(c->mpc_horizon + 1);
+    total /= (float)(c->mpc_horizon + 1);
+    return isfinite(total) ? total : INFINITY;
 }
 
-static void rollout_gradient_fd_eps(const RpgdConfig* c, const RpgdRuntime* rt, const float* state6, const float* q, float eps, float* grad)
+static void rollout_gradient_fd_eps(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* state6,
+    const float* q,
+    float eps,
+    float* qp,
+    float* grad
+)
 {
-    float* qp = (float*)malloc((size_t)c->mpc_horizon * sizeof(float));
-    if (!qp) return;
     memcpy(qp, q, (size_t)c->mpc_horizon * sizeof(float));
     for (int h = 0; h < c->mpc_horizon; ++h) {
         const float old = qp[h];
-        qp[h] = clampf_local(old + eps, c->action_low, c->action_high);
+        const float plus = clampf_local(old + eps, c->action_low, c->action_high);
+        const float minus = clampf_local(old - eps, c->action_low, c->action_high);
+        qp[h] = plus;
         const float cp = rollout_cost(c, rt, state6, qp);
-        qp[h] = clampf_local(old - eps, c->action_low, c->action_high);
+        qp[h] = minus;
         const float cm = rollout_cost(c, rt, state6, qp);
         qp[h] = old;
-        grad[h] = (cp - cm) / (2.0f * eps);
+        const float effective_span = plus - minus;
+        grad[h] = effective_span > 0.0f ? (cp - cm) / effective_span : 0.0f;
     }
-    free(qp);
 }
 
-static void rollout_gradient_fd(const RpgdConfig* c, const RpgdRuntime* rt, const float* state6, const float* q, float* grad)
+static void rollout_gradient_adjoint_ws(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* restrict state6,
+    const float* restrict q,
+    float* restrict states,
+    float* restrict grad
+) RPGD_HOT;
+
+static void rollout_gradient_adjoint_ws(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* restrict state6,
+    const float* restrict q,
+    float* restrict states,
+    float* restrict grad
+)
 {
-    rollout_gradient_fd_eps(c, rt, state6, q, 1.0e-2f, grad);
-}
+    const int H = c->mpc_horizon;
+    const int K = c->intermediate_steps;
+    const int total_steps = H * K;
+    const float dt = c->mpc_timestep / (float)c->intermediate_steps;
+    const float scale = 1.0f / (float)(H + 1);
 
-static void local_jacobian_analytic(const RpgdConfig* c, const RpgdRuntime* rt, const float* s, float q, float dt, float Jx[STATE_DIM][STATE_DIM], float Ju[STATE_DIM])
-{
-    memset(Jx, 0, STATE_DIM * STATE_DIM * sizeof(float));
-    memset(Ju, 0, STATE_DIM * sizeof(float));
-
-    const float L = rt->L > 0.0f ? rt->L : c->L;
-    const float m_pole = rt->m_pole > 0.0f ? rt->m_pole : c->m_pole;
-    const float Lh = 0.5f * L;
-    const float ca = s[ANGLE_COS_IDX];
-    const float sa = s[ANGLE_SIN_IDX];
-    const float angleD = s[ANGLED_IDX];
-    const float positionD = s[POSITIOND_IDX];
-    const float u = c->u_max * q;
-    const float kp1 = c->k + 1.0f;
-
-    const float F_fric = -c->M_fric * positionD;
-    const float T_fric = -c->J_fric * angleD;
-    const float denom = kp1 * (c->m_cart + m_pole) - m_pole * ca * ca;
-    const float inv_denom = 1.0f / denom;
-    const float num =
-        m_pole * c->g * sa * ca
-        + (T_fric * ca) / Lh
-        + kp1 * (-m_pole * Lh * angleD * angleD * sa + F_fric + u);
-
-    const float dden_dca = -2.0f * m_pole * ca;
-    const float dnum_dca = m_pole * c->g * sa + T_fric / Lh;
-    const float dnum_dsa = m_pole * c->g * ca + kp1 * (-m_pole * Lh * angleD * angleD);
-    const float dnum_dw = (-c->J_fric * ca) / Lh + kp1 * (-2.0f * m_pole * Lh * angleD * sa);
-    const float dnum_dv = -kp1 * c->M_fric;
-    const float dnum_dq = kp1 * c->u_max;
-
-    const float positionDD = num * inv_denom;
-    const float dpos_dca = (dnum_dca * denom - num * dden_dca) * inv_denom * inv_denom;
-    const float dpos_dsa = dnum_dsa * inv_denom;
-    const float dpos_dw = dnum_dw * inv_denom;
-    const float dpos_dv = dnum_dv * inv_denom;
-    const float dpos_dq = dnum_dq * inv_denom;
-
-    const float angle_den = kp1 * Lh;
-    const float inv_angle_den = 1.0f / angle_den;
-    const float dangle_dca = (dpos_dca * ca + positionDD) * inv_angle_den;
-    const float dangle_dsa = (c->g + dpos_dsa * ca) * inv_angle_den;
-    const float dangle_dw = (dpos_dw * ca - c->J_fric / (m_pole * Lh)) * inv_angle_den;
-    const float dangle_dv = (dpos_dv * ca) * inv_angle_den;
-    const float dangle_dq = (dpos_dq * ca) * inv_angle_den;
-
-    float dw[STATE_DIM] = {0};
-    float dv[STATE_DIM] = {0};
-    dw[ANGLED_IDX] = 1.0f + dt * dangle_dw;
-    dw[ANGLE_COS_IDX] = dt * dangle_dca;
-    dw[ANGLE_SIN_IDX] = dt * dangle_dsa;
-    dw[POSITIOND_IDX] = dt * dangle_dv;
-
-    dv[ANGLED_IDX] = dt * dpos_dw;
-    dv[ANGLE_COS_IDX] = dt * dpos_dca;
-    dv[ANGLE_SIN_IDX] = dt * dpos_dsa;
-    dv[POSITIOND_IDX] = 1.0f + dt * dpos_dv;
-
-    const float dw_q = dt * dangle_dq;
-    const float dv_q = dt * dpos_dq;
-    const float da_q = dt * dw_q;
-    const float dx_q = dt * dv_q;
-
-    float da[STATE_DIM] = {0};
-    float dx[STATE_DIM] = {0};
-    for (int j = 0; j < STATE_DIM; ++j) {
-        da[j] = dt * dw[j];
-        dx[j] = dt * dv[j];
-    }
-    da[ANGLE_IDX] += 1.0f;
-    dx[POSITION_IDX] += 1.0f;
-
-    const float w_next = s[ANGLED_IDX] + dt * (
-        c->g * sa + positionDD * ca + T_fric / (m_pole * Lh)
-    ) * inv_angle_den;
-    const float angle_next = s[ANGLE_IDX] + dt * w_next;
-    const float cos_next = cosf(angle_next);
-    const float sin_next = sinf(angle_next);
-
-    for (int j = 0; j < STATE_DIM; ++j) {
-        Jx[ANGLE_IDX][j] = da[j];
-        Jx[ANGLED_IDX][j] = dw[j];
-        Jx[ANGLE_COS_IDX][j] = -sin_next * da[j];
-        Jx[ANGLE_SIN_IDX][j] = cos_next * da[j];
-        Jx[POSITION_IDX][j] = dx[j];
-        Jx[POSITIOND_IDX][j] = dv[j];
-    }
-    Ju[ANGLE_IDX] = da_q;
-    Ju[ANGLED_IDX] = dw_q;
-    Ju[ANGLE_COS_IDX] = -sin_next * da_q;
-    Ju[ANGLE_SIN_IDX] = cos_next * da_q;
-    Ju[POSITION_IDX] = dx_q;
-    Ju[POSITIOND_IDX] = dv_q;
-}
-
-static void rollout_gradient_adjoint(const RpgdConfig* c, const RpgdRuntime* rt, const float* state6, const float* q, float* grad)
-{
-    const int total_steps = c->mpc_horizon * c->intermediate_steps;
-    float* states = (float*)calloc((size_t)(total_steps + 1) * STATE_DIM, sizeof(float));
-    float* adj = (float*)calloc((size_t)(total_steps + 1) * STATE_DIM, sizeof(float));
-    if (!states || !adj) {
-        free(states);
-        free(adj);
-        rollout_gradient_fd(c, rt, state6, q, grad);
-        return;
-    }
-    memset(grad, 0, (size_t)c->mpc_horizon * sizeof(float));
+    memset(grad, 0, (size_t)H * sizeof(float));
     memcpy(states, state6, STATE_DIM * sizeof(float));
     for (int n = 0; n < total_steps; ++n) {
-        int h = n / c->intermediate_steps;
-        cartpole_model_substep_dt(c, rt, &states[(size_t)n * STATE_DIM], q[h],
-                                  c->mpc_timestep / (float)c->intermediate_steps,
+        const int h = n / K;
+        cartpole_model_substep_dt(c, rt, &states[(size_t)n * STATE_DIM], q[h], dt,
                                   &states[(size_t)(n + 1) * STATE_DIM]);
     }
 
-    const float scale = 1.0f / (float)(c->mpc_horizon + 1);
-    for (int h = 0; h < c->mpc_horizon; ++h) {
-        const int n = h * c->intermediate_steps;
-        cartpole_cost_stage_grad(c, rt, &states[(size_t)n * STATE_DIM], q[h], scale,
-                                 &adj[(size_t)n * STATE_DIM], &grad[h]);
+    for (int h = 0; h < H; ++h) {
+        grad[h] = cartpole_cost_stage_grad_q(c, q[h], scale);
     }
 
+    float a_next[STATE_DIM];
+    memset(a_next, 0, sizeof(a_next));
     for (int n = total_steps - 1; n >= 0; --n) {
-        const int h = n / c->intermediate_steps;
+        const int h = n / K;
+        float a_cur[STATE_DIM];
+        memset(a_cur, 0, sizeof(a_cur));
+        if ((n % K) == 0) {
+            cartpole_cost_stage_grad_state(
+                c, rt, &states[(size_t)n * STATE_DIM], scale, a_cur);
+        }
         float Jx[STATE_DIM][STATE_DIM];
         float Ju[STATE_DIM];
-        cartpole_model_substep_jacobian(c, rt, &states[(size_t)n * STATE_DIM], q[h],
-                                        c->mpc_timestep / (float)c->intermediate_steps, Jx, Ju);
-        float* a_next = &adj[(size_t)(n + 1) * STATE_DIM];
-        float* a_cur = &adj[(size_t)n * STATE_DIM];
+        const float* s_next = &states[(size_t)(n + 1) * STATE_DIM];
+        cartpole_model_substep_jacobian_with_trig(
+            c, rt, &states[(size_t)n * STATE_DIM], q[h], dt,
+            s_next[ANGLE_COS_IDX], s_next[ANGLE_SIN_IDX], Jx, Ju);
         for (int j = 0; j < STATE_DIM; ++j) {
             float acc = 0.0f;
             for (int i = 0; i < STATE_DIM; ++i) acc += a_next[i] * Jx[i][j];
@@ -456,58 +452,169 @@ static void rollout_gradient_adjoint(const RpgdConfig* c, const RpgdRuntime* rt,
         float gu = 0.0f;
         for (int i = 0; i < STATE_DIM; ++i) gu += a_next[i] * Ju[i];
         grad[h] += gu;
+        memcpy(a_next, a_cur, sizeof(a_next));
     }
-
-    free(states);
-    free(adj);
 }
 
-static void clip_gradient_norm(const RpgdConfig* c, float* grad)
+static float* scratch_states(const RpgdConfig* c)
+{
+#ifdef RPGD_PLATFORM_BAREMETAL
+    (void)c;
+    return g_states;
+#else
+    if (state_scratch_fits(c)) return tls_states;
+    return NULL;
+#endif
+}
+
+static float* scratch_grad(const RpgdConfig* c)
+{
+#ifdef RPGD_PLATFORM_BAREMETAL
+    (void)c;
+    return g_grad;
+#else
+    if (c->mpc_horizon <= RPGD_MAX_HORIZON) return tls_grad;
+    return NULL;
+#endif
+}
+
+static void rollout_gradient_adjoint(
+    const RpgdConfig* c,
+    const RpgdRuntime* rt,
+    const float* state6,
+    const float* q,
+    float* grad
+)
+{
+    float* states = scratch_states(c);
+#ifndef RPGD_PLATFORM_BAREMETAL
+    float* heap_states = NULL;
+    if (!states) {
+        heap_states = (float*)calloc((size_t)(c->mpc_horizon * c->intermediate_steps + 1) * STATE_DIM, sizeof(float));
+        states = heap_states;
+    }
+    if (!states) return;
+#endif
+    rollout_gradient_adjoint_ws(c, rt, state6, q, states, grad);
+#ifndef RPGD_PLATFORM_BAREMETAL
+    free(heap_states);
+#endif
+}
+
+static void rollout_gradient_fd(const RpgdConfig* c, const RpgdRuntime* rt, const float* state6, const float* q, float* grad)
+{
+#ifdef RPGD_PLATFORM_BAREMETAL
+    rollout_gradient_fd_eps(c, rt, state6, q, 1.0e-2f, g_fd_q, grad);
+#else
+    float* qp = (c->mpc_horizon <= RPGD_MAX_HORIZON)
+        ? tls_fd_q
+        : (float*)malloc((size_t)c->mpc_horizon * sizeof(float));
+    if (!qp) return;
+    rollout_gradient_fd_eps(c, rt, state6, q, 1.0e-2f, qp, grad);
+    if (qp != tls_fd_q) free(qp);
+#endif
+}
+
+static int clip_gradient_norm(const RpgdConfig* c, float* grad)
 {
     float sum = 0.0f;
-    for (int h = 0; h < c->mpc_horizon; ++h) sum += grad[h] * grad[h];
+    for (int h = 0; h < c->mpc_horizon; ++h) {
+        if (!isfinite(grad[h])) return 0;
+        sum += grad[h] * grad[h];
+    }
     const float norm = sqrtf(sum);
+    if (!isfinite(norm)) return 0;
     if (norm > c->gradmax_clip && norm > 0.0f) {
         const float scale = c->gradmax_clip / norm;
         for (int h = 0; h < c->mpc_horizon; ++h) grad[h] *= scale;
     }
+    return 1;
 }
 
-static void adam_update_rollout(RpgdSolver* solver, int rollout, const float* grad, int adam_step)
+static int adam_update_rollout(
+    RpgdSolver* solver,
+    int rollout,
+    const float* grad,
+    int iteration
+)
 {
     RpgdConfig* c = &solver->cfg;
     const int H = c->mpc_horizon;
-    float* q = &solver->q[(size_t)rollout * H];
-    float* m = &solver->adam_m[(size_t)rollout * H];
-    float* v = &solver->adam_v[(size_t)rollout * H];
-    const float bc1 = 1.0f - powf(c->adam_beta_1, (float)adam_step);
-    const float bc2 = 1.0f - powf(c->adam_beta_2, (float)adam_step);
+    float* restrict q = &solver->q[(size_t)rollout * H];
+    float* restrict m = &solver->adam_m[(size_t)rollout * H];
+    float* restrict v = &solver->adam_v[(size_t)rollout * H];
+    const float bc1 = solver->bias_correction_1[iteration];
+    const float bc2 = solver->bias_correction_2[iteration];
+    const float om1 = solver->one_minus_beta1;
+    const float om2 = solver->one_minus_beta2;
     for (int h = 0; h < H; ++h) {
-        m[h] = c->adam_beta_1 * m[h] + (1.0f - c->adam_beta_1) * grad[h];
-        v[h] = c->adam_beta_2 * v[h] + (1.0f - c->adam_beta_2) * grad[h] * grad[h];
+        m[h] = c->adam_beta_1 * m[h] + om1 * grad[h];
+        v[h] = c->adam_beta_2 * v[h] + om2 * grad[h] * grad[h];
         const float m_hat = m[h] / bc1;
         const float v_hat = v[h] / bc2;
-        q[h] = clampf_local(q[h] - c->learning_rate * m_hat / (sqrtf(v_hat) + c->adam_epsilon),
-                            c->action_low, c->action_high);
+        const float updated =
+            q[h] - c->learning_rate * m_hat / (sqrtf(v_hat) + c->adam_epsilon);
+        if (!isfinite(updated)) return 0;
+        q[h] = clampf_local(updated, c->action_low, c->action_high);
+        if (!isfinite(q[h]) || !isfinite(m[h]) || !isfinite(v[h])) return 0;
     }
+    return 1;
 }
 
-static void optimize_rollout(RpgdSolver* solver, const RpgdRuntime* rt, const float* state6, int rollout)
+static int optimize_rollout(RpgdSolver* solver, const RpgdRuntime* rt, const float* state6, int rollout)
 {
     const int H = solver->cfg.mpc_horizon;
-    float* grad = (float*)malloc((size_t)H * sizeof(float));
-    if (!grad) return;
-    float* q = &solver->q[(size_t)rollout * H];
-    for (int it = 0; it < solver->cfg.outer_its; ++it) {
-        rollout_gradient_adjoint(&solver->cfg, rt, state6, q, grad);
-        clip_gradient_norm(&solver->cfg, grad);
-        adam_update_rollout(solver, rollout, grad, solver->adam_step + it + 1);
+    float* grad = scratch_grad(&solver->cfg);
+#ifndef RPGD_PLATFORM_BAREMETAL
+    float* heap_grad = NULL;
+    if (!grad) {
+        heap_grad = (float*)malloc((size_t)H * sizeof(float));
+        grad = heap_grad;
+    }
+    if (!grad) {
+        solver->costs[rollout] = INFINITY;
+        return 0;
+    }
+#else
+    (void)H;
+#endif
+    float* q = &solver->q[(size_t)rollout * solver->cfg.mpc_horizon];
+    float* states = scratch_states(&solver->cfg);
+#ifndef RPGD_PLATFORM_BAREMETAL
+    float* heap_states = NULL;
+    if (!states) {
+        heap_states = (float*)calloc(
+            (size_t)(solver->cfg.mpc_horizon * solver->cfg.intermediate_steps + 1) * STATE_DIM,
+            sizeof(float));
+        states = heap_states;
+    }
+    if (!states) {
+        free(heap_grad);
+        solver->costs[rollout] = INFINITY;
+        return 0;
+    }
+#endif
+    for (int it = 0; it < solver->active_iterations; ++it) {
+        rollout_gradient_adjoint_ws(&solver->cfg, rt, state6, q, states, grad);
+        if (!clip_gradient_norm(&solver->cfg, grad)
+            || !adam_update_rollout(solver, rollout, grad, it)) {
+            solver->costs[rollout] = INFINITY;
+#ifndef RPGD_PLATFORM_BAREMETAL
+            free(heap_grad);
+            free(heap_states);
+#endif
+            return 0;
+        }
     }
     solver->costs[rollout] = rollout_cost(&solver->cfg, rt, state6, q);
-    free(grad);
+#ifndef RPGD_PLATFORM_BAREMETAL
+    free(heap_grad);
+    free(heap_states);
+#endif
+    return isfinite(solver->costs[rollout]);
 }
 
-#ifndef _OPENMP
+#if !defined(RPGD_PLATFORM_BAREMETAL) && !defined(_OPENMP)
 static void* optimize_rollout_range(void* arg)
 {
     RpgdThreadArgs* a = (RpgdThreadArgs*)arg;
@@ -518,73 +625,75 @@ static void* optimize_rollout_range(void* arg)
 }
 #endif
 
+static void shift_keep(
+    RpgdSolver* solver,
+    int dst,
+    int src
+)
+{
+    const RpgdConfig* c = &solver->cfg;
+    const int H = c->mpc_horizon;
+    float* dq = &solver->warm_q[(size_t)dst * H];
+    float* dm = &solver->warm_m[(size_t)dst * H];
+    float* dv = &solver->warm_v[(size_t)dst * H];
+    const float* sq = &solver->q[(size_t)src * H];
+    const float* sm = &solver->adam_m[(size_t)src * H];
+    const float* sv = &solver->adam_v[(size_t)src * H];
+    for (int h = 0; h < H; ++h) {
+        int sh = h + c->shift_previous;
+        if (sh >= H) sh = H - 1;
+        dq[h] = sq[sh];
+        dm[h] = (h + c->shift_previous < H) ? sm[h + c->shift_previous] : 0.0f;
+        dv[h] = (h + c->shift_previous < H) ? sv[h + c->shift_previous] : 0.0f;
+    }
+}
+
 static void warmstart_after_action(RpgdSolver* solver)
 {
     RpgdConfig* c = &solver->cfg;
     const int N = c->num_rollouts;
     const int H = c->mpc_horizon;
-    const int K = solver->opt_keep_k;
-    const int do_resample = (solver->count % c->resamp_per) == 0;
-    float* qn = (float*)malloc((size_t)N * H * sizeof(float));
-    float* mn = (float*)calloc((size_t)N * H, sizeof(float));
-    float* vn = (float*)calloc((size_t)N * H, sizeof(float));
-    float* ages = (float*)calloc((size_t)N, sizeof(float));
-    if (!qn || !mn || !vn || !ages) {
-        free(qn); free(mn); free(vn); free(ages);
-        return;
-    }
+    const int keep = solver->opt_keep_k;
+    const int do_resample = solver->resample_phase == 0;
+    float* qn = solver->warm_q;
+    float* mn = solver->warm_m;
+    float* vn = solver->warm_v;
+    float* ages = solver->warm_ages;
+    const size_t q_bytes = (size_t)N * (size_t)H * sizeof(float);
 
     int dst = 0;
     if (do_resample) {
-        for (; dst < N - K; ++dst) {
+        const int sampled = N - keep;
+        memset(mn, 0, (size_t)sampled * (size_t)H * sizeof(float));
+        memset(vn, 0, (size_t)sampled * (size_t)H * sizeof(float));
+        for (; dst < sampled; ++dst) {
             sample_action_sequence(solver, &qn[(size_t)dst * H]);
             ages[dst] = 0.0f;
         }
-        for (int k = 0; k < K; ++k, ++dst) {
+        for (int k = 0; k < keep; ++k, ++dst) {
             const int src = solver->indices[k];
-            float* dq = &qn[(size_t)dst * H];
-            float* dm = &mn[(size_t)dst * H];
-            float* dv = &vn[(size_t)dst * H];
-            const float* sq = &solver->q[(size_t)src * H];
-            const float* sm = &solver->adam_m[(size_t)src * H];
-            const float* sv = &solver->adam_v[(size_t)src * H];
-            for (int h = 0; h < H; ++h) {
-                int sh = h + c->shift_previous;
-                if (sh >= H) sh = H - 1;
-                dq[h] = sq[sh];
-                dm[h] = (h + c->shift_previous < H) ? sm[h + c->shift_previous] : 0.0f;
-                dv[h] = (h + c->shift_previous < H) ? sv[h + c->shift_previous] : 0.0f;
-            }
+            shift_keep(solver, dst, src);
             ages[dst] = solver->trajectory_ages[src];
         }
     } else {
         for (int src = 0; src < N; ++src) {
-            float* dq = &qn[(size_t)src * H];
-            float* dm = &mn[(size_t)src * H];
-            float* dv = &vn[(size_t)src * H];
-            const float* sq = &solver->q[(size_t)src * H];
-            const float* sm = &solver->adam_m[(size_t)src * H];
-            const float* sv = &solver->adam_v[(size_t)src * H];
-            for (int h = 0; h < H; ++h) {
-                int sh = h + c->shift_previous;
-                if (sh >= H) sh = H - 1;
-                dq[h] = sq[sh];
-                dm[h] = (h + c->shift_previous < H) ? sm[h + c->shift_previous] : 0.0f;
-                dv[h] = (h + c->shift_previous < H) ? sv[h + c->shift_previous] : 0.0f;
-            }
+            shift_keep(solver, src, src);
             ages[src] = solver->trajectory_ages[src];
         }
     }
     for (int i = 0; i < N; ++i) ages[i] += 1.0f;
-    memcpy(solver->q, qn, (size_t)N * H * sizeof(float));
-    memcpy(solver->adam_m, mn, (size_t)N * H * sizeof(float));
-    memcpy(solver->adam_v, vn, (size_t)N * H * sizeof(float));
+    memcpy(solver->q, qn, q_bytes);
+    memcpy(solver->adam_m, mn, q_bytes);
+    memcpy(solver->adam_v, vn, q_bytes);
     memcpy(solver->trajectory_ages, ages, (size_t)N * sizeof(float));
-    free(qn); free(mn); free(vn); free(ages);
 }
 
 static int choose_thread_count(const RpgdConfig* cfg)
 {
+#ifdef RPGD_FORCE_SINGLE_THREAD
+    (void)cfg;
+    return 1;
+#else
     int available = 1;
 #ifdef _OPENMP
     available = omp_get_num_procs();
@@ -600,57 +709,140 @@ static int choose_thread_count(const RpgdConfig* cfg)
     if (threads > cfg->num_rollouts) threads = cfg->num_rollouts;
     if (threads < 1) threads = 1;
     return threads;
+#endif
 }
 
-RpgdSolver* rpgd_create(const RpgdConfig* cfg)
+static void apply_cfg_defaults(RpgdSolver* solver, const RpgdConfig* cfg)
 {
-    if (!cfg || cfg->mpc_horizon <= 0 || cfg->num_rollouts <= 0) return NULL;
-    RpgdSolver* solver = (RpgdSolver*)calloc(1, sizeof(RpgdSolver));
-    if (!solver) return NULL;
     solver->cfg = *cfg;
-    if (solver->cfg.period_interpolation_inducing_points <= 0) solver->cfg.period_interpolation_inducing_points = 1;
-    if (solver->cfg.intermediate_steps <= 0) solver->cfg.intermediate_steps = 10;
-    if (solver->cfg.resamp_per <= 0) solver->cfg.resamp_per = 1;
-    if (solver->cfg.shift_previous <= 0) solver->cfg.shift_previous = 1;
-    if (solver->cfg.reserve_threads < 0) solver->cfg.reserve_threads = 0;
     solver->opt_keep_k = (int)(cfg->num_rollouts * cfg->opt_keep_k_ratio);
     if (solver->opt_keep_k < 1) solver->opt_keep_k = 1;
     if (solver->opt_keep_k > cfg->num_rollouts) solver->opt_keep_k = cfg->num_rollouts;
     solver->inducing_points = calc_inducing_points(cfg->mpc_horizon, solver->cfg.period_interpolation_inducing_points);
     solver->thread_count = choose_thread_count(&solver->cfg);
-    const size_t q_size = (size_t)cfg->num_rollouts * cfg->mpc_horizon;
+    solver->one_minus_beta1 = 1.0f - solver->cfg.adam_beta_1;
+    solver->one_minus_beta2 = 1.0f - solver->cfg.adam_beta_2;
+    solver->last_status = RPGD_STATUS_OK;
+    solver->active_iterations = solver->cfg.outer_its;
+}
+
+RpgdSolver* rpgd_create(const RpgdConfig* cfg)
+{
+    if (!cfg) return NULL;
+    RpgdConfig normalized;
+    normalize_config(&normalized, cfg);
+    if (validate_normalized_config(&normalized) != RPGD_STATUS_OK) return NULL;
+#ifdef RPGD_PLATFORM_BAREMETAL
+    if (!cfg_fits_static(&normalized) || g_solver_in_use) return NULL;
+    memset(&g_solver, 0, sizeof(g_solver));
+    RpgdSolver* solver = &g_solver;
+    apply_cfg_defaults(solver, &normalized);
+    solver->q = g_q;
+    solver->adam_m = g_adam_m;
+    solver->adam_v = g_adam_v;
+    solver->trajectory_ages = g_trajectory_ages;
+    solver->costs = g_costs;
+    solver->indices = g_indices;
+    solver->inducing = g_inducing;
+    solver->warm_q = g_warm_q;
+    solver->warm_m = g_warm_m;
+    solver->warm_v = g_warm_v;
+    solver->warm_ages = g_warm_ages;
+    solver->bias_correction_1 = g_bias_correction_1;
+    solver->bias_correction_2 = g_bias_correction_2;
+    solver->owns_storage = 0;
+    solver->workspace_bytes =
+        sizeof(g_solver) + sizeof(g_q) + sizeof(g_adam_m) + sizeof(g_adam_v)
+        + sizeof(g_trajectory_ages) + sizeof(g_costs) + sizeof(g_indices)
+        + sizeof(g_inducing) + sizeof(g_warm_q) + sizeof(g_warm_m) + sizeof(g_warm_v)
+        + sizeof(g_warm_ages) + sizeof(g_states) + sizeof(g_grad)
+        + sizeof(g_fd_q) + sizeof(g_ga) + sizeof(g_gf)
+        + sizeof(g_bias_correction_1) + sizeof(g_bias_correction_2)
+        + sizeof(g_solver_in_use);
+    memset(g_q, 0, sizeof(g_q));
+    memset(g_adam_m, 0, sizeof(g_adam_m));
+    memset(g_adam_v, 0, sizeof(g_adam_v));
+    memset(g_trajectory_ages, 0, sizeof(g_trajectory_ages));
+    memset(g_costs, 0, sizeof(g_costs));
+    memset(g_indices, 0, sizeof(g_indices));
+    g_solver_in_use = 1;
+    rpgd_reset(solver, normalized.seed);
+    return solver;
+#else
+    RpgdSolver* solver = (RpgdSolver*)calloc(1, sizeof(RpgdSolver));
+    if (!solver) return NULL;
+    apply_cfg_defaults(solver, &normalized);
+    const size_t q_size = (size_t)normalized.num_rollouts * (size_t)normalized.mpc_horizon;
     solver->q = (float*)calloc(q_size, sizeof(float));
     solver->adam_m = (float*)calloc(q_size, sizeof(float));
     solver->adam_v = (float*)calloc(q_size, sizeof(float));
-    solver->trajectory_ages = (float*)calloc((size_t)cfg->num_rollouts, sizeof(float));
-    solver->costs = (float*)calloc((size_t)cfg->num_rollouts, sizeof(float));
-    solver->indices = (int*)calloc((size_t)cfg->num_rollouts, sizeof(int));
-    if (!solver->q || !solver->adam_m || !solver->adam_v || !solver->trajectory_ages || !solver->costs || !solver->indices) {
+    solver->trajectory_ages = (float*)calloc((size_t)normalized.num_rollouts, sizeof(float));
+    solver->costs = (float*)calloc((size_t)normalized.num_rollouts, sizeof(float));
+    solver->indices = (int*)calloc((size_t)normalized.num_rollouts, sizeof(int));
+    solver->inducing = (float*)calloc((size_t)solver->inducing_points, sizeof(float));
+    solver->warm_q = (float*)calloc(q_size, sizeof(float));
+    solver->warm_m = (float*)calloc(q_size, sizeof(float));
+    solver->warm_v = (float*)calloc(q_size, sizeof(float));
+    solver->warm_ages = (float*)calloc((size_t)normalized.num_rollouts, sizeof(float));
+    const int max_iterations =
+        normalized.warmup && normalized.warmup_iterations > normalized.outer_its
+        ? normalized.warmup_iterations
+        : normalized.outer_its;
+    solver->bias_correction_1 = (float*)calloc((size_t)max_iterations, sizeof(float));
+    solver->bias_correction_2 = (float*)calloc((size_t)max_iterations, sizeof(float));
+    solver->owns_storage = 1;
+    solver->workspace_bytes =
+        sizeof(RpgdSolver)
+        + (3 * q_size + 2 * (size_t)normalized.num_rollouts + (size_t)solver->inducing_points
+           + 3 * q_size + (size_t)normalized.num_rollouts + 2 * (size_t)max_iterations)
+          * sizeof(float)
+        + (size_t)normalized.num_rollouts * sizeof(int);
+    if (!solver->q || !solver->adam_m || !solver->adam_v || !solver->trajectory_ages
+        || !solver->costs || !solver->indices || !solver->inducing
+        || !solver->warm_q || !solver->warm_m || !solver->warm_v || !solver->warm_ages
+        || !solver->bias_correction_1 || !solver->bias_correction_2) {
         rpgd_destroy(solver);
         return NULL;
     }
-    rpgd_reset(solver, cfg->seed);
+    rpgd_reset(solver, normalized.seed);
     return solver;
+#endif
 }
 
 void rpgd_destroy(RpgdSolver* solver)
 {
     if (!solver) return;
-    free(solver->q);
-    free(solver->adam_m);
-    free(solver->adam_v);
-    free(solver->trajectory_ages);
-    free(solver->costs);
-    free(solver->indices);
+#ifdef RPGD_PLATFORM_BAREMETAL
+    if (solver == &g_solver) g_solver_in_use = 0;
+    return;
+#else
+    if (solver->owns_storage) {
+        free(solver->q);
+        free(solver->adam_m);
+        free(solver->adam_v);
+        free(solver->trajectory_ages);
+        free(solver->costs);
+        free(solver->indices);
+        free(solver->inducing);
+        free(solver->warm_q);
+        free(solver->warm_m);
+        free(solver->warm_v);
+        free(solver->warm_ages);
+        free(solver->bias_correction_1);
+        free(solver->bias_correction_2);
+    }
     free(solver);
+#endif
 }
 
 void rpgd_reset(RpgdSolver* solver, unsigned int seed)
 {
     if (!solver) return;
     rng_seed(&solver->rng, seed ? seed : solver->cfg.seed);
-    solver->count = 0;
+    solver->resample_phase = 0;
+    solver->first_step = 1;
     solver->adam_step = 0;
+    solver->last_status = RPGD_STATUS_OK;
     const int N = solver->cfg.num_rollouts;
     const int H = solver->cfg.mpc_horizon;
     for (int i = 0; i < N; ++i) sample_action_sequence(solver, &solver->q[(size_t)i * H]);
@@ -659,13 +851,16 @@ void rpgd_reset(RpgdSolver* solver, unsigned int seed)
     memset(solver->trajectory_ages, 0, (size_t)N * sizeof(float));
 }
 
-float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runtime)
+static void optimize_all_rollouts(RpgdSolver* solver, const float* state6, const RpgdRuntime* runtime)
 {
-    if (!solver || !state6 || !runtime) return 0.0f;
     const int N = solver->cfg.num_rollouts;
-#ifdef _OPENMP
-    omp_set_num_threads(solver->thread_count);
-#pragma omp parallel for schedule(static)
+    for (int i = 0; i < N; ++i) solver->costs[i] = INFINITY;
+#if defined(RPGD_PLATFORM_BAREMETAL) || defined(RPGD_FORCE_SINGLE_THREAD)
+    for (int i = 0; i < N; ++i) {
+        optimize_rollout(solver, runtime, state6, i);
+    }
+#elif defined(_OPENMP)
+#pragma omp parallel for schedule(static) num_threads(solver->thread_count)
     for (int i = 0; i < N; ++i) {
         optimize_rollout(solver, runtime, state6, i);
     }
@@ -677,9 +872,11 @@ float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runt
     } else {
         pthread_t* threads = (pthread_t*)calloc((size_t)solver->thread_count, sizeof(pthread_t));
         RpgdThreadArgs* args = (RpgdThreadArgs*)calloc((size_t)solver->thread_count, sizeof(RpgdThreadArgs));
-        if (!threads || !args) {
+        unsigned char* started = (unsigned char*)calloc((size_t)solver->thread_count, sizeof(unsigned char));
+        if (!threads || !args || !started) {
             free(threads);
             free(args);
+            free(started);
             for (int i = 0; i < N; ++i) {
                 optimize_rollout(solver, runtime, state6, i);
             }
@@ -692,21 +889,63 @@ float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runt
                 args[t].state6 = state6;
                 args[t].start = start;
                 args[t].end = end;
-                pthread_create(&threads[t], NULL, optimize_rollout_range, &args[t]);
+                if (pthread_create(&threads[t], NULL, optimize_rollout_range, &args[t]) == 0) {
+                    started[t] = 1;
+                } else {
+                    for (int i = start; i < end; ++i) {
+                        optimize_rollout(solver, runtime, state6, i);
+                    }
+                    solver->last_status = RPGD_STATUS_THREAD_FAILURE;
+                }
             }
             for (int t = 0; t < solver->thread_count; ++t) {
-                pthread_join(threads[t], NULL);
+                if (started[t]) pthread_join(threads[t], NULL);
             }
             free(threads);
             free(args);
+            free(started);
         }
     }
 #endif
+}
+
+float rpgd_step(RpgdSolver* solver, const float* state6, const RpgdRuntime* runtime)
+{
+    if (!solver) return 0.0f;
+    solver->last_status = RPGD_STATUS_OK;
+    if (!finite_state6(state6) || !finite_runtime(runtime)) {
+        solver->last_status = RPGD_STATUS_INVALID_ARGUMENT;
+        return 0.0f;
+    }
+    solver->active_iterations =
+        solver->first_step && solver->cfg.warmup
+        ? solver->cfg.warmup_iterations
+        : solver->cfg.outer_its;
+    for (int it = 0; it < solver->active_iterations; ++it) {
+        uint64_t step = solver->adam_step + (uint64_t)it + UINT64_C(1);
+        const float step_f = step > UINT64_C(16777216) ? 16777216.0f : (float)step;
+        solver->bias_correction_1[it] =
+            1.0f - powf(solver->cfg.adam_beta_1, step_f);
+        solver->bias_correction_2[it] =
+            1.0f - powf(solver->cfg.adam_beta_2, step_f);
+    }
+    const int N = solver->cfg.num_rollouts;
+    optimize_all_rollouts(solver, state6, runtime);
     sort_indices_by_cost(solver->costs, solver->indices, N);
-    solver->adam_step += solver->cfg.outer_its;
+    if (!isfinite(solver->costs[solver->indices[0]])) {
+        solver->last_status = RPGD_STATUS_NUMERICAL_FAILURE;
+        return 0.0f;
+    }
+    if (solver->adam_step <= UINT64_MAX - (uint64_t)solver->active_iterations) {
+        solver->adam_step += (uint64_t)solver->active_iterations;
+    } else {
+        solver->adam_step = UINT64_MAX;
+    }
     const float u = solver->q[(size_t)solver->indices[0] * solver->cfg.mpc_horizon];
     warmstart_after_action(solver);
-    solver->count += 1;
+    solver->first_step = 0;
+    solver->resample_phase += 1;
+    if (solver->resample_phase >= solver->cfg.resamp_per) solver->resample_phase = 0;
     return clampf_local(u, solver->cfg.action_low, solver->cfg.action_high);
 }
 
@@ -721,14 +960,32 @@ int rpgd_gradient_check(
 )
 {
     if (!cfg || !runtime || !state6 || !q || !max_abs_error || !max_rel_error) return -1;
+#ifdef RPGD_PLATFORM_BAREMETAL
+    if (cfg->mpc_horizon > RPGD_MAX_HORIZON) return -2;
+    float* ga = g_ga;
+    float* gf = g_gf;
+#else
     float* ga = (float*)calloc((size_t)cfg->mpc_horizon, sizeof(float));
     float* gf = (float*)calloc((size_t)cfg->mpc_horizon, sizeof(float));
     if (!ga || !gf) {
         free(ga); free(gf);
         return -2;
     }
+#endif
     rollout_gradient_adjoint(cfg, runtime, state6, q, ga);
-    rollout_gradient_fd_eps(cfg, runtime, state6, q, eps > 0.0f ? eps : 1.0e-2f, gf);
+#ifdef RPGD_PLATFORM_BAREMETAL
+    rollout_gradient_fd_eps(cfg, runtime, state6, q, eps > 0.0f ? eps : 1.0e-2f, g_fd_q, gf);
+#else
+    float* qp = (cfg->mpc_horizon <= RPGD_MAX_HORIZON)
+        ? tls_fd_q
+        : (float*)malloc((size_t)cfg->mpc_horizon * sizeof(float));
+    if (!qp) {
+        free(ga); free(gf);
+        return -2;
+    }
+    rollout_gradient_fd_eps(cfg, runtime, state6, q, eps > 0.0f ? eps : 1.0e-2f, qp, gf);
+    if (qp != tls_fd_q) free(qp);
+#endif
     float ma = 0.0f;
     float mr = 0.0f;
     for (int h = 0; h < cfg->mpc_horizon; ++h) {
@@ -739,7 +996,9 @@ int rpgd_gradient_check(
     }
     *max_abs_error = ma;
     *max_rel_error = mr;
+#ifndef RPGD_PLATFORM_BAREMETAL
     free(ga); free(gf);
+#endif
     return 0;
 }
 
@@ -808,7 +1067,7 @@ void rpgd_debug_set_adam(RpgdSolver* solver, const float* m, const float* v, int
     const size_t n = (size_t)solver->cfg.num_rollouts * solver->cfg.mpc_horizon;
     memcpy(solver->adam_m, m, n * sizeof(float));
     memcpy(solver->adam_v, v, n * sizeof(float));
-    solver->adam_step = step;
+    solver->adam_step = step > 0 ? (uint64_t)step : UINT64_C(0);
 }
 
 void rpgd_debug_get_adam(const RpgdSolver* solver, float* m, float* v, int* step)
@@ -817,7 +1076,11 @@ void rpgd_debug_get_adam(const RpgdSolver* solver, float* m, float* v, int* step
     const size_t n = (size_t)solver->cfg.num_rollouts * solver->cfg.mpc_horizon;
     if (m) memcpy(m, solver->adam_m, n * sizeof(float));
     if (v) memcpy(v, solver->adam_v, n * sizeof(float));
-    if (step) *step = solver->adam_step;
+    if (step) {
+        *step = solver->adam_step > (uint64_t)INT_MAX
+            ? INT_MAX
+            : (int)solver->adam_step;
+    }
 }
 
 void rpgd_debug_get_costs(const RpgdSolver* solver, float* costs)
@@ -845,4 +1108,46 @@ int rpgd_get_num_rollouts(const RpgdSolver* solver)
 int rpgd_get_horizon(const RpgdSolver* solver)
 {
     return solver ? solver->cfg.mpc_horizon : 0;
+}
+
+size_t rpgd_get_workspace_bytes(const RpgdSolver* solver)
+{
+    return solver ? solver->workspace_bytes : 0;
+}
+
+size_t rpgd_get_static_workspace_bytes(void)
+{
+    return sizeof(RpgdSolver)
+        + (size_t)(6 * RPGD_MAX_Q_BUF) * sizeof(float)
+        + (size_t)(3 * RPGD_MAX_NUM_ROLLOUTS) * sizeof(float)
+        + (size_t)RPGD_MAX_NUM_ROLLOUTS * sizeof(int)
+        + (size_t)RPGD_MAX_HORIZON * sizeof(float)
+        + (size_t)RPGD_MAX_STATE_BUF * sizeof(float)
+        + (size_t)(4 * RPGD_MAX_HORIZON) * sizeof(float)
+        + (size_t)(2 * RPGD_MAX_OUTER_ITS) * sizeof(float)
+        + sizeof(int);
+}
+
+int rpgd_get_last_status(const RpgdSolver* solver)
+{
+    return solver ? solver->last_status : RPGD_STATUS_INVALID_ARGUMENT;
+}
+
+int rpgd_is_baremetal(void)
+{
+#ifdef RPGD_PLATFORM_BAREMETAL
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+unsigned int rpgd_get_abi_version(void)
+{
+    return RPGD_ABI_VERSION;
+}
+
+size_t rpgd_get_config_size(void)
+{
+    return sizeof(RpgdConfig);
 }

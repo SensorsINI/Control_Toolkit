@@ -1,6 +1,8 @@
 #ifndef RPGD_CARTPOLE_H
 #define RPGD_CARTPOLE_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,6 +66,17 @@ typedef struct {
 
 typedef struct RpgdSolver RpgdSolver;
 
+enum {
+    RPGD_STATUS_OK = 0,
+    RPGD_STATUS_INVALID_ARGUMENT = -1,
+    RPGD_STATUS_INVALID_CONFIG = -2,
+    RPGD_STATUS_BUSY = -3,
+    RPGD_STATUS_WORKSPACE_FAILURE = -4,
+    RPGD_STATUS_THREAD_FAILURE = -5,
+    RPGD_STATUS_NUMERICAL_FAILURE = -6
+};
+
+int rpgd_validate_config(const RpgdConfig* cfg);
 RpgdSolver* rpgd_create(const RpgdConfig* cfg);
 void rpgd_destroy(RpgdSolver* solver);
 void rpgd_reset(RpgdSolver* solver, unsigned int seed);
@@ -116,6 +129,12 @@ void rpgd_debug_get_indices(const RpgdSolver* solver, int* indices);
 int rpgd_get_num_threads(const RpgdSolver* solver);
 int rpgd_get_num_rollouts(const RpgdSolver* solver);
 int rpgd_get_horizon(const RpgdSolver* solver);
+size_t rpgd_get_workspace_bytes(const RpgdSolver* solver);
+size_t rpgd_get_static_workspace_bytes(void);
+int rpgd_get_last_status(const RpgdSolver* solver);
+int rpgd_is_baremetal(void);
+unsigned int rpgd_get_abi_version(void);
+size_t rpgd_get_config_size(void);
 
 #ifdef __cplusplus
 }

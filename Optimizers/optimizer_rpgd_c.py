@@ -3,8 +3,12 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Tuple
+
+# libgomp reads this while native dependencies are loading.
+os.environ.setdefault("OMP_WAIT_POLICY", "ACTIVE")
 
 import numpy as np
 
@@ -14,12 +18,6 @@ from Control_Toolkit.Optimizers import template_optimizer
 from SI_Toolkit.Predictors.predictor_wrapper import PredictorWrapper
 from SI_Toolkit.computation_library import ComputationLibrary, NumpyLibrary, PyTorchLibrary, TensorFlowLibrary
 from SI_Toolkit.load_and_normalize import load_yaml
-
-
-# The physical controller calls RPGD once per control tick. With libgomp's
-# default passive wait policy, OpenMP workers sleep between ticks and wake-up
-# latency dominates the next rpgd_step call.
-os.environ.setdefault("OMP_WAIT_POLICY", "ACTIVE")
 
 
 class RpgdConfig(ctypes.Structure):
@@ -138,6 +136,11 @@ class optimizer_rpgd_c(template_optimizer):
         self.resamp_per = resamp_per
         self.period_interpolation_inducing_points = period_interpolation_inducing_points
         self.intermediate_steps = int(intermediate_steps)
+        if SAMPLING_DISTRIBUTION not in ("normal", "uniform"):
+            raise ValueError(
+                "RPGD-C SAMPLING_DISTRIBUTION must be 'normal' or 'uniform', "
+                f"got {SAMPLING_DISTRIBUTION!r}"
+            )
         self.sampling_distribution = 1 if SAMPLING_DISTRIBUTION == "uniform" else 0
         self.shift_previous = shift_previous
         self.warmup = bool(warmup)
@@ -156,6 +159,7 @@ class optimizer_rpgd_c(template_optimizer):
         self._c_lib = None
         self._solver = None
         self._cfg = None
+        self._lock = threading.RLock()
         self._runtime = RpgdRuntime()
         self._state_arr = (ctypes.c_float * 6)()
         self._state_np = np.ctypeslib.as_array(self._state_arr)
@@ -165,62 +169,84 @@ class optimizer_rpgd_c(template_optimizer):
 
     def configure(self, num_states: int, num_control_inputs: int, **kwargs):
         super().configure(num_states=num_states, num_control_inputs=num_control_inputs, default_configure=False)
-        self._setup_c_backend()
-        self._cfg = self._make_config(kwargs.get("dt", None))
-        self._solver = self._c_lib.rpgd_create(ctypes.byref(self._cfg))
-        if not self._solver:
-            raise RuntimeError("Failed to create RPGD C solver")
-        self.thread_count = self._c_lib.rpgd_get_num_threads(self._solver)
+        with self._lock:
+            if self._c_lib is None:
+                self._setup_c_backend()
+            cfg = self._make_config(kwargs.get("dt", None))
+            validation_status = self._c_lib.rpgd_validate_config(ctypes.byref(cfg))
+            if validation_status != 0:
+                raise ValueError(f"Invalid RPGD-C configuration (status {validation_status})")
+            solver = self._c_lib.rpgd_create(ctypes.byref(cfg))
+            if not solver:
+                raise RuntimeError("Failed to create RPGD C solver")
+            old_solver = self._solver
+            self._cfg = cfg
+            self._solver = solver
+            self.thread_count = self._c_lib.rpgd_get_num_threads(solver)
+            if old_solver is not None:
+                self._c_lib.rpgd_destroy(old_solver)
 
     def step(self, s: np.ndarray, time=None):
-        if self.optimizer_logging:
-            self.logging_values = {"s_logged": s.copy()}
-        np.copyto(self._state_np, np.asarray(s, dtype=np.float32)[:6])
-        self._runtime.target_position = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "target_position", 0.0))
-        self._runtime.target_equilibrium = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "target_equilibrium", 1.0))
-        self._runtime.L = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "L", self._cfg.L))
-        self._runtime.m_pole = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "m_pole", self._cfg.m_pole))
-        u = self._c_lib.rpgd_step(self._solver, self._state_arr, ctypes.byref(self._runtime))
-        self.u = np.asarray([u], dtype=np.float32)
-        self.optimal_control_sequence = self.u.reshape(1, 1, 1)
-        return self.u
+        with self._lock:
+            if self._solver is None:
+                raise RuntimeError("RPGD-C optimizer is not configured")
+            if self.optimizer_logging:
+                self.logging_values = {"s_logged": s.copy()}
+            np.copyto(self._state_np, np.asarray(s, dtype=np.float32)[:6])
+            self._runtime.target_position = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "target_position", 0.0))
+            self._runtime.target_equilibrium = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "target_equilibrium", 1.0))
+            self._runtime.L = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "L", self._cfg.L))
+            self._runtime.m_pole = self._to_float(getattr(self.cost_function.cost_function.variable_parameters, "m_pole", self._cfg.m_pole))
+            u = self._c_lib.rpgd_step(self._solver, self._state_arr, ctypes.byref(self._runtime))
+            status = self._c_lib.rpgd_get_last_status(self._solver)
+            if status in (-1, -4, -6):
+                raise RuntimeError(f"RPGD-C step failed safely (status {status})")
+            self.u = np.asarray([u], dtype=np.float32)
+            self.optimal_control_sequence = self.u.reshape(1, 1, 1)
+            return self.u
 
     def optimizer_reset(self):
-        if self._solver is not None:
-            self._c_lib.rpgd_reset(self._solver, ctypes.c_uint(self.seed))
+        with self._lock:
+            if self._solver is not None:
+                self._c_lib.rpgd_reset(self._solver, ctypes.c_uint(self.seed))
 
     def debug_get_q(self):
-        out = np.empty((self.num_rollouts, self.mpc_horizon), dtype=np.float32)
-        self._c_lib.rpgd_debug_get_q(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
-        return out
+        with self._lock:
+            out = np.empty((self.num_rollouts, self.mpc_horizon), dtype=np.float32)
+            self._c_lib.rpgd_debug_get_q(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+            return out
 
     def debug_set_q(self, q):
-        q_arr = np.asarray(q, dtype=np.float32).reshape(self.num_rollouts, self.mpc_horizon)
-        self._c_lib.rpgd_debug_set_q(self._solver, q_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+        with self._lock:
+            q_arr = np.asarray(q, dtype=np.float32).reshape(self.num_rollouts, self.mpc_horizon)
+            self._c_lib.rpgd_debug_set_q(self._solver, q_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
 
     def debug_get_costs(self):
-        out = np.empty((self.num_rollouts,), dtype=np.float32)
-        self._c_lib.rpgd_debug_get_costs(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
-        return out
+        with self._lock:
+            out = np.empty((self.num_rollouts,), dtype=np.float32)
+            self._c_lib.rpgd_debug_get_costs(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+            return out
 
     def debug_get_indices(self):
-        out = np.empty((self.num_rollouts,), dtype=np.int32)
-        self._c_lib.rpgd_debug_get_indices(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
-        return out
+        with self._lock:
+            out = np.empty((self.num_rollouts,), dtype=np.int32)
+            self._c_lib.rpgd_debug_get_indices(self._solver, out.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+            return out
 
     def debug_gradient_adjoint(self, state, q, runtime=None):
-        state_arr = np.asarray(state, dtype=np.float32).reshape(6)
-        q_arr = np.asarray(q, dtype=np.float32).reshape(self.mpc_horizon)
-        grad = np.empty((self.mpc_horizon,), dtype=np.float32)
-        rt = runtime if runtime is not None else self._runtime_from_cost_parameters()
-        self._c_lib.rpgd_debug_gradient_adjoint(
-            ctypes.byref(self._cfg),
-            ctypes.byref(rt),
-            state_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-            q_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-            grad.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        )
-        return grad
+        with self._lock:
+            state_arr = np.asarray(state, dtype=np.float32).reshape(6)
+            q_arr = np.asarray(q, dtype=np.float32).reshape(self.mpc_horizon)
+            grad = np.empty((self.mpc_horizon,), dtype=np.float32)
+            rt = runtime if runtime is not None else self._runtime_from_cost_parameters()
+            self._c_lib.rpgd_debug_gradient_adjoint(
+                ctypes.byref(self._cfg),
+                ctypes.byref(rt),
+                state_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                q_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                grad.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            )
+            return grad
 
     def _runtime_from_cost_parameters(self):
         rt = RpgdRuntime()
@@ -231,9 +257,10 @@ class optimizer_rpgd_c(template_optimizer):
         return rt
 
     def close(self):
-        if self._solver is not None:
-            self._c_lib.rpgd_destroy(self._solver)
-            self._solver = None
+        with self._lock:
+            if self._solver is not None:
+                self._c_lib.rpgd_destroy(self._solver)
+                self._solver = None
 
     def __del__(self):
         try:
@@ -315,11 +342,22 @@ class optimizer_rpgd_c(template_optimizer):
             c_dir / "rpgd_cartpole.h",
             c_dir / "cartpole_model.h",
             c_dir / "cartpole_cost.h",
+            c_dir / "rpgd_platform.h",
         ]
         newest_source = max(path.stat().st_mtime for path in sources + headers)
         if (not lib_path.exists()) or lib_path.stat().st_mtime < newest_source:
             self._build_c_library(c_dir, lib_path.name)
         self._c_lib = ctypes.CDLL(str(lib_path))
+        self._c_lib.rpgd_get_abi_version.argtypes = []
+        self._c_lib.rpgd_get_abi_version.restype = ctypes.c_uint
+        self._c_lib.rpgd_get_config_size.argtypes = []
+        self._c_lib.rpgd_get_config_size.restype = ctypes.c_size_t
+        if self._c_lib.rpgd_get_abi_version() != 1:
+            raise RuntimeError("Unsupported RPGD-C library ABI")
+        if self._c_lib.rpgd_get_config_size() != ctypes.sizeof(RpgdConfig):
+            raise RuntimeError("RPGD-C/Python RpgdConfig layout mismatch")
+        self._c_lib.rpgd_validate_config.argtypes = [ctypes.POINTER(RpgdConfig)]
+        self._c_lib.rpgd_validate_config.restype = ctypes.c_int
         self._c_lib.rpgd_create.argtypes = [ctypes.POINTER(RpgdConfig)]
         self._c_lib.rpgd_create.restype = ctypes.c_void_p
         self._c_lib.rpgd_destroy.argtypes = [ctypes.c_void_p]
@@ -381,64 +419,50 @@ class optimizer_rpgd_c(template_optimizer):
         self._c_lib.rpgd_debug_get_costs.restype = None
         self._c_lib.rpgd_debug_get_indices.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
         self._c_lib.rpgd_debug_get_indices.restype = None
+        self._c_lib.rpgd_get_workspace_bytes.argtypes = [ctypes.c_void_p]
+        self._c_lib.rpgd_get_workspace_bytes.restype = ctypes.c_size_t
+        self._c_lib.rpgd_get_static_workspace_bytes.argtypes = []
+        self._c_lib.rpgd_get_static_workspace_bytes.restype = ctypes.c_size_t
+        self._c_lib.rpgd_get_last_status.argtypes = [ctypes.c_void_p]
+        self._c_lib.rpgd_get_last_status.restype = ctypes.c_int
+        self._c_lib.rpgd_is_baremetal.argtypes = []
+        self._c_lib.rpgd_is_baremetal.restype = ctypes.c_int
 
     @staticmethod
-    def _build_c_library(c_dir: Path, lib_name: str):
+    def _build_c_library(c_dir: Path, lib_name: str, extra_cflags=None, allow_openmp=True):
         compiler = os.environ.get("CC", "gcc")
         sources = [
             "rpgd_cartpole.c",
             "cartpole_model.c",
             "cartpole_cost.c",
         ]
-        base_cmd = [
-            compiler,
-            "-O3",
-            "-fPIC",
-            "-shared",
-            *sources,
-            "-lm",
-            "-pthread",
-            "-o",
-            lib_name,
-        ]
-        lto_cmd = [
-            compiler,
-            "-O3",
-            "-flto",
-            "-fPIC",
-            "-shared",
-            *sources,
-            "-lm",
-            "-pthread",
-            "-o",
-            lib_name,
-        ]
-        openmp_lto_cmd = [
-            compiler,
-            "-O3",
-            "-flto",
-            "-fPIC",
-            "-shared",
-            "-fopenmp",
-            *sources,
-            "-lm",
-            "-o",
-            lib_name,
-        ]
-        openmp_cmd = [
-            compiler,
-            "-O3",
-            "-fPIC",
-            "-shared",
-            "-fopenmp",
-            *sources,
-            "-lm",
-            "-o",
-            lib_name,
-        ]
-        commands = [openmp_lto_cmd, openmp_cmd, lto_cmd, base_cmd]
+        extra = list(extra_cflags or [])
+        output_name = f".{lib_name}.{os.getpid()}.{threading.get_ident()}.tmp"
+
+        def build_command(*flags, pthread=False):
+            return [
+                compiler,
+                "-std=c11",
+                "-O3",
+                "-fPIC",
+                "-shared",
+                *flags,
+                *extra,
+                *sources,
+                "-lm",
+                *(["-pthread"] if pthread else []),
+                "-o",
+                output_name,
+            ]
+
+        base_cmd = build_command(pthread=True)
+        lto_cmd = build_command("-flto", pthread=True)
+        openmp_lto_cmd = build_command("-flto", "-fopenmp")
+        openmp_cmd = build_command("-fopenmp")
+        baremetal_cmd = build_command()
+        commands = [openmp_lto_cmd, openmp_cmd, lto_cmd, base_cmd] if allow_openmp else [baremetal_cmd]
         last_error = None
-        for idx, cmd in enumerate(commands):
+        for cmd in commands:
             try:
                 result = subprocess.run(cmd, cwd=c_dir, capture_output=True, text=True)
                 if result.returncode != 0:
@@ -448,9 +472,14 @@ class optimizer_rpgd_c(template_optimizer):
                         output=result.stdout,
                         stderr=result.stderr,
                     )
-                if "-fopenmp" not in cmd:
+                if allow_openmp and "-fopenmp" not in cmd:
                     print("Built RPGD C backend without OpenMP; using pthread rollout workers.")
+                os.replace(c_dir / output_name, c_dir / lib_name)
                 return
             except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                 last_error = exc
+                try:
+                    (c_dir / output_name).unlink()
+                except FileNotFoundError:
+                    pass
         raise RuntimeError(f"Could not build RPGD C backend on {platform.platform()}: {last_error}")
