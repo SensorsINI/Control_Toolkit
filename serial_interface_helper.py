@@ -71,6 +71,26 @@ def get_serial_port(chip_type="STM", serial_port_number=None):
     return SERIAL_PORT
 
 
+def _read_ftdi_latency_timer(latency_path):
+    try:
+        return open(latency_path, encoding='utf-8').read().strip()
+    except OSError as e:
+        raise RuntimeError(f'Cannot read FTDI latency timer at {latency_path}: {e}') from e
+
+
+def _require_ftdi_latency_timer(latency_path, requested_value):
+    actual = _read_ftdi_latency_timer(latency_path)
+    print(
+        f'FTDI latency timer value (tested only for FTDI with Zybo and with Linux on PC side): {actual} ms  \n')
+    if actual != str(requested_value):
+        raise RuntimeError(
+            f'FTDI latency timer is {actual} ms, want {requested_value} ms. '
+            f'Refusing to start with a high UART latency. '
+            f'Set it with: echo {requested_value} | sudo tee {latency_path}'
+        )
+    return actual
+
+
 def set_ftdi_latency_timer(serial_port_name):
     print('\nSetting FTDI latency timer')
     requested_value = 1  # in ms
@@ -78,12 +98,7 @@ def set_ftdi_latency_timer(serial_port_name):
     if platform.system() == 'Linux':
         serial_port = serial_port_name.split('/')[-1]
         latency_path = f'/sys/bus/usb-serial/devices/{serial_port}/latency_timer'
-        command_ftdi_timer_latency_check = f'cat {latency_path}'
-        try:
-            current = open(latency_path, encoding='utf-8').read().strip()
-        except OSError as e:
-            print(f'Cannot read {latency_path}: {e}')
-            return
+        current = _read_ftdi_latency_timer(latency_path)
         # Already 1 ms: skip sudo. Reboot or unplug resets this to 16 ms.
         if current == str(requested_value):
             print(
@@ -101,12 +116,12 @@ def set_ftdi_latency_timer(serial_port_name):
                 else:
                     try:
                         password = getpass.getpass('Enter sudo password: ')
-                    except EOFError:
-                        print(
-                            f"FTDI latency is {current} ms (want {requested_value}). "
-                            f"Set it with: echo {requested_value} | sudo tee {latency_path}"
-                        )
-                        return
+                    except EOFError as err:
+                        raise RuntimeError(
+                            f'FTDI latency is {current} ms (want {requested_value} ms) and there is no TTY '
+                            f'for a sudo prompt. Refusing to start with a high UART latency. '
+                            f'Set it with: echo {requested_value} | sudo tee {latency_path}'
+                        ) from err
                 print("Trying with sudo...")
                 command_ftdi_timer_latency_set = f"echo {password} | sudo -S {command_ftdi_timer_latency_set}"
                 try:
@@ -115,7 +130,4 @@ def set_ftdi_latency_timer(serial_port_name):
                 except subprocess.CalledProcessError as e:
                     print(e.stderr)
 
-        ftdi_latency_timer_value = subprocess.run(command_ftdi_timer_latency_check, shell=True, capture_output=True,
-                                                  text=True).stdout.rstrip()
-        print(
-            f'FTDI latency timer value (tested only for FTDI with Zybo and with Linux on PC side): {ftdi_latency_timer_value} ms  \n')
+        _require_ftdi_latency_timer(latency_path, requested_value)
