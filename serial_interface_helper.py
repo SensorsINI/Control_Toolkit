@@ -76,21 +76,37 @@ def set_ftdi_latency_timer(serial_port_name):
     requested_value = 1  # in ms
 
     if platform.system() == 'Linux':
-        # check for hardcoded sudo password or prompt the user
-        if SUDO_PASSWORD:
-            password = SUDO_PASSWORD
-        else:
-            password = getpass.getpass('Enter sudo password: ')
-
         serial_port = serial_port_name.split('/')[-1]
-        ftdi_timer_latency_requested_value = 1
-        command_ftdi_timer_latency_set = f"sh -c 'echo {ftdi_timer_latency_requested_value} > /sys/bus/usb-serial/devices/{serial_port}/latency_timer'"
-        command_ftdi_timer_latency_check = f'cat /sys/bus/usb-serial/devices/{serial_port}/latency_timer'
+        latency_path = f'/sys/bus/usb-serial/devices/{serial_port}/latency_timer'
+        command_ftdi_timer_latency_check = f'cat {latency_path}'
+        try:
+            current = open(latency_path, encoding='utf-8').read().strip()
+        except OSError as e:
+            print(f'Cannot read {latency_path}: {e}')
+            return
+        # Already 1 ms: skip sudo. Reboot or unplug resets this to 16 ms.
+        if current == str(requested_value):
+            print(
+                f'FTDI latency timer value (tested only for FTDI with Zybo and with Linux on PC side): {current} ms  \n')
+            return
+
+        command_ftdi_timer_latency_set = f"sh -c 'echo {requested_value} > {latency_path}'"
         try:
             subprocess.run(command_ftdi_timer_latency_set, shell=True, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(e.stderr)
-            if "Permission denied" in e.stderr:
+            if "Permission denied" in (e.stderr or ""):
+                if SUDO_PASSWORD:
+                    password = SUDO_PASSWORD
+                else:
+                    try:
+                        password = getpass.getpass('Enter sudo password: ')
+                    except EOFError:
+                        print(
+                            f"FTDI latency is {current} ms (want {requested_value}). "
+                            f"Set it with: echo {requested_value} | sudo tee {latency_path}"
+                        )
+                        return
                 print("Trying with sudo...")
                 command_ftdi_timer_latency_set = f"echo {password} | sudo -S {command_ftdi_timer_latency_set}"
                 try:
