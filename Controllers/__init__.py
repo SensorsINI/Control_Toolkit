@@ -125,6 +125,9 @@ class template_controller(ABC):
         logger.info("No controller report implemented for this controller. Stopping without report.")
         pass
 
+    def get_controller_status(self):
+        return None
+
     # Optionally: reset the controller after an experiment
     # May be useful for stateful controllers, like these containing RNN,
     # To reload the hidden states e.g. if the controller went unstable in the previous run.
