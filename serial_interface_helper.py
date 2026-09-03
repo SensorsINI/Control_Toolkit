@@ -1,31 +1,10 @@
 import getpass
-import os
 import platform
 import subprocess
-from pathlib import Path
 
 import serial
 
-SUDO_PASSWORD_ENV_VAR = "CARTPOLE_SUDO_PASSWORD"
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SUDO_PASSWORD_FILE = REPO_ROOT / ".cartpole_sudo_password"
-
-
-def get_sudo_password():
-    """Read sudo password from a local source outside git, or prompt as fallback."""
-    password = os.environ.get(SUDO_PASSWORD_ENV_VAR)
-    if password:
-        return password
-
-    try:
-        password = SUDO_PASSWORD_FILE.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        print(f"Could not read sudo password file {SUDO_PASSWORD_FILE}: {exc}")
-        return None
-
-    return password or None
+SUDO_PASSWORD = None  # Required to set FTDI latency timer on Linux systems, can be set to a hardcoded password for convenience or left as None to prompt the user via terminal.
 
 def get_serial_port(chip_type="STM", serial_port_number=None):
     """
@@ -132,8 +111,9 @@ def set_ftdi_latency_timer(serial_port_name):
         except subprocess.CalledProcessError as e:
             print(e.stderr)
             if "Permission denied" in (e.stderr or ""):
-                password = get_sudo_password()
-                if password is None:
+                if SUDO_PASSWORD:
+                    password = SUDO_PASSWORD
+                else:
                     try:
                         password = getpass.getpass('Enter sudo password: ')
                     except EOFError as err:
